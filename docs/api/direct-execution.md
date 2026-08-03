@@ -92,12 +92,28 @@ Transfer native tokens (ETH, MATIC, etc.) or ERC-20 tokens directly.
 ```json
 {
   "chainId": 11155111,
-  "recipientAddress": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+  "recipientAddress": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
   "amount": "0.1",
   "tokenAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   "gasLimitMultiplier": "1.2"
 }
 ```
+
+### Recipient validation
+
+`recipientAddress` is validated with a strict **EIP-55 checksum** before the
+request is accepted. Pass either:
+
+- the exact checksummed form (mixed-case), or
+- an **all-lowercase** address (e.g. `0x742d35cc6634c0532925a3b844bc454e4438f44e`).
+
+A mixed-case address whose checksum does not match is rejected with
+`Invalid recipient address: <address>` — even if the lowercase hex is correct.
+Widely-copied example addresses often carry a mangled checksum or the wrong
+number of hex digits, so prefer copying from the address book or from a tool
+that computes EIP-55 rather than retyping. Add frequently-used recipients to the
+[address book](/wallet-management/address-book) first; address book entries are
+stored lowercase and displayed in checksummed form.
 
 **Parameters:**
 
@@ -140,7 +156,7 @@ Call any smart contract function. Automatically detects read vs write operations
   "contractAddress": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
   "chainId": 1,
   "functionName": "balanceOf",
-  "functionArgs": "[\"0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb\"]",
+  "functionArgs": "[\"0x742d35Cc6634C0532925a3b844Bc454e4438f44e\"]",
   "abi": "[{...}]",
   "value": "0.1",
   "gasLimitMultiplier": "1.2"
@@ -196,7 +212,7 @@ Read a contract value, evaluate a condition, and conditionally execute a write o
   "contractAddress": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
   "chainId": 1,
   "functionName": "balanceOf",
-  "functionArgs": "[\"0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb\"]",
+  "functionArgs": "[\"0x742d35Cc6634C0532925a3b844Bc454e4438f44e\"]",
   "abi": "[{...}]",
   "condition": {
     "operator": "gt",

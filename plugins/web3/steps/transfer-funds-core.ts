@@ -38,7 +38,10 @@ import {
 } from "@/lib/web3/decode-revert-error";
 import { resolveGasLimitOverrides } from "@/lib/web3/gas-defaults";
 import { resolveOrganizationContext } from "@/lib/web3/resolve-org-context";
-import { SOLANA_BASE_FEE_LAMPORTS } from "@/lib/web3/solana-fees";
+import {
+  computeSolanaLamportFee,
+  SOLANA_BASE_FEE_LAMPORTS,
+} from "@/lib/web3/solana-fees";
 import { resolveSponsoredSendError } from "@/lib/web3/sponsored-send-error";
 import { executeSponsoredTransaction } from "@/lib/web3/sponsored-transaction-manager";
 import { isGasSponsorshipEnabled } from "@/lib/web3/sponsorship-feature-flag";
@@ -491,7 +494,13 @@ async function transferFundsSolana(args: {
   let lamports: bigint;
   try {
     lamports = ethers.parseUnits(amount.trim(), 9); // 9 decimals = lamports
-    if (lamports < BigInt(0)) {
+    if (lamports <= BigInt(0)) {
+      if (lamports === BigInt(0)) {
+        return {
+          success: false,
+          error: "SOL amount must be greater than zero",
+        };
+      }
       throw new Error("Negative amount");
     }
   } catch {
@@ -573,14 +582,18 @@ async function transferFundsSolana(args: {
 
     const transactionLink = await adapter.getTransactionUrl(receipt.hash);
 
-    // 10. Map receipt to TransferFundsResult. 
-    // gasUsed = "0" as lamport fee is not computed in v1, but we return raw fields.
+    // Prefer the fee the chain reported; the compute-budget reconstruction is
+    // only a fallback for a receipt that carries no fee.
+    const lamportFee =
+      receipt.feeLamports ??
+      computeSolanaLamportFee(receipt.gasUsed, receipt.effectiveGasPrice);
+
     return {
       success: true,
       transactionHash: receipt.hash,
       chainId,
       transactionLink,
-      gasUsed: "0",
+      gasUsed: lamportFee.toString(),
       gasUsedUnits: receipt.gasUsed.toString(),
       effectiveGasPrice: receipt.effectiveGasPrice.toString(),
     };

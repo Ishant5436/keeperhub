@@ -110,6 +110,20 @@ The transaction reserves more gas but only consumes what it needs. Unused gas is
 
 No. The gas limit only sets the maximum gas units. Gas pricing (base fee, priority fee) is handled separately by KeeperHub's adaptive fee strategy and is not configurable through this field.
 
+## Solana Fees
+
+Solana transactions do not use EVM-style gas limits or multipliers. Instead, fees are paid in lamports from your SOL balance.
+
+Every confirmed transaction includes a **base signature fee** of 5,000 lamports. If the transaction sets a compute-unit price, KeeperHub also reports the priority component derived from consumed compute units and the effective micro-lamport price.
+
+In workflow outputs for Solana transfers:
+
+- `gasUsed` is the total lamport fee paid
+- `gasUsedUnits` is the compute units consumed
+- `effectiveGasPrice` is the micro-lamports-per-compute-unit price used for the priority component
+
+There is no gas limit multiplier on Solana write actions. Ensure the wallet holds enough SOL to cover both the transfer amount (for native SOL sends) and the transaction fee, plus any rent required when creating a recipient associated token account during SPL transfers.
+
 ## Wallet Funding
 
 Ensure your Turnkey wallet has sufficient ETH to cover:
