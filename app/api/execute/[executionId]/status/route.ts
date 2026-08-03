@@ -79,6 +79,7 @@ export async function GET(
     type: execution.type,
     transactionHash: execution.transactionHash,
     transactionLink: (output?.transactionLink as string) ?? null,
+    sponsored: Boolean(output?.sponsored),
     result: output ?? null,
     error: execution.error,
     gasUsedWei: execution.gasUsedWei,

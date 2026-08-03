@@ -127,6 +127,21 @@ const RULES: readonly Rule[] = [
     errorType: ExecutionErrorType.USER,
     code: null,
   },
+  // KEEP-966: the execution finalize gate positively confirmed a claimed
+  // transaction reverted on-chain (or, for Safe-routed writes, the outer tx
+  // succeeded but the wrapped inner call failed per Safe's ExecutionFailure
+  // event) -- a real transaction outcome, same bucket as the other
+  // Contract/Token/Transaction failed rules above. Must come BEFORE the
+  // not_found/timeout rule below: a message can in principle report a mix of
+  // failure kinds across multiple hashes, and a confirmed revert is the more
+  // actionable, user-facing signal to surface first.
+  {
+    pattern:
+      /^On-chain verification failed.*\((reverted on-chain|Safe inner call failed)/i,
+    errorCategory: ErrorCategory.TRANSACTION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  },
   {
     pattern: /^Invalid contract address/i,
     errorCategory: ErrorCategory.VALIDATION,
@@ -233,6 +248,17 @@ const RULES: readonly Rule[] = [
   },
   {
     pattern: /RPC failed on both endpoints/i,
+    errorCategory: ErrorCategory.NETWORK_RPC,
+    errorType: ExecutionErrorType.SYSTEM,
+    code: "N-0001",
+  },
+  // KEEP-966: the execution finalize gate could not get a definitive
+  // on-chain answer within its bounded budget (receipt not yet visible, or
+  // RPC verification timed out) -- an infra/availability fault, not a
+  // confirmed transaction outcome. Comes after the revert rule above.
+  {
+    pattern:
+      /^On-chain verification failed.*\((receipt not found|RPC verification timed out)/i,
     errorCategory: ErrorCategory.NETWORK_RPC,
     errorType: ExecutionErrorType.SYSTEM,
     code: "N-0001",

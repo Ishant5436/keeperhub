@@ -187,6 +187,7 @@ function isTransactionResult(output: unknown): output is {
   gasUsed: string;
   gasUsedUnits?: string;
   effectiveGasPrice?: string;
+  chainId?: number;
 } {
   if (!output || typeof output !== "object") {
     return false;
@@ -291,9 +292,31 @@ async function handleResult(
     completeParams.transactionHash = output.transactionHash;
     completeParams.gasUsedWei = output.gasUsed;
     completeParams.gasPriceWei = output.effectiveGasPrice;
+    completeParams.chainId = output.chainId;
   }
 
-  await completeExecution(executionId, completeParams);
+  // KEEP-966: completeExecution independently re-verifies transactionHash
+  // against the chain when present -- regardless of whether this step's
+  // return value carried a literal `success` key at all (the earlier default
+  // in this function treats an absent field as success). Its returned
+  // outcome, not that default, is authoritative for the response.
+  const outcome = await completeExecution(executionId, completeParams);
+
+  if (outcome.status === "failed") {
+    return recordIdempotentResponse(
+      idem,
+      NextResponse.json(
+        {
+          executionId,
+          status: "failed",
+          error: outcome.error ?? "On-chain verification failed",
+          ...(retryCount > 0 ? { retryCount } : {}),
+        },
+        { status: HttpStatus.UNPROCESSABLE_ENTITY }
+      ),
+      "failed"
+    );
+  }
 
   return recordIdempotentResponse(
     idem,

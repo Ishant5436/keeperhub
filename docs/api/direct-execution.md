@@ -69,6 +69,16 @@ curl -X POST https://app.keeperhub.com/api/execute/transfer \
 
 Workflow webhooks (`POST /api/workflows/{workflowId}/webhook`) accept the same header, scoped per workflow.
 
+## Sponsored Executions
+
+Writes may be gas-sponsored and broadcast through a relayer or smart-account
+(EIP-7702) path instead of your org's EOA wallet. A sponsored execution does
+not change your EOA's nonce or native balance, and it will not appear in a
+block explorer's `txlist` for that address — checks against the EOA will
+conclude nothing happened even though the transaction succeeded. Check the
+`sponsored` field on the status response and treat `transactionHash` /
+`transactionLink` as the authoritative proof, not EOA-level state.
+
 ## Transfer Funds
 
 ```http
@@ -107,11 +117,13 @@ Successful broadcast requests return HTTP `202 Accepted`:
 ```json
 {
   "executionId": "direct_123",
-  "status": "completed"
+  "status": "completed",
+  "transactionHash": "0x...",
+  "transactionLink": "https://etherscan.io/tx/0x..."
 }
 ```
 
-The execution runs synchronously. Status will be `completed` or `failed` when the request returns.
+The execution runs synchronously. Status will be `completed` or `failed` when the request returns. `transactionHash` and `transactionLink` are present only when `status` is `completed`.
 
 ## Call Smart Contract
 
@@ -349,6 +361,7 @@ Check the status of a direct execution.
   "type": "transfer",
   "transactionHash": "0x...",
   "transactionLink": "https://etherscan.io/tx/0x...",
+  "sponsored": false,
   "gasUsedWei": "21000000000000",
   "result": {...},
   "error": null,
@@ -363,6 +376,10 @@ Check the status of a direct execution.
 - `running`: Currently executing
 - `completed`: Successfully completed
 - `failed`: Execution failed
+
+`sponsored` is `true` when the write was gas-sponsored and broadcast through
+a relayer or smart-account path rather than your org's EOA wallet — see
+[Sponsored Executions](#sponsored-executions).
 
 When polling this endpoint, honour the `X-Poll-Interval-Hint` response header instead of polling on a fixed timer: it gives the recommended number of seconds to wait before the next poll. A value of `0` means the execution has reached a terminal state (`completed` or `failed`) and you can stop polling.
 

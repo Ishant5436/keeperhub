@@ -284,10 +284,18 @@ async function executeProtocolAction(
     writeContractCore(coreInput)
   );
 
+  // completeExecution independently re-verifies the claimed transaction
+  // against the chain (KEEP-966) -- its returned outcome, not result.success,
+  // is authoritative for the response and idempotency cache.
+  let outcome: { status: "completed" | "failed"; error?: string } = {
+    status: "failed",
+    error: result.success ? undefined : result.error,
+  };
   if (result.success) {
-    await completeExecution(executionId, {
+    outcome = await completeExecution(executionId, {
       transactionHash: result.transactionHash,
       transactionLink: result.transactionLink,
+      chainId: result.chainId,
       gasUsedWei: result.gasUsed,
       gasPriceWei: result.effectiveGasPrice,
       output: result as unknown as Record<string, unknown>,
@@ -296,12 +304,17 @@ async function executeProtocolAction(
     await failExecution(executionId, result.error);
   }
 
+  const responseBody =
+    outcome.status === "completed"
+      ? result
+      : { ...result, success: false, error: outcome.error };
+
   // The tx reached the broadcast path, so finalize as success or failed and
   // never release: a retry on the same key must not re-broadcast.
   return recordIdempotentResponse(
     idem,
-    NextResponse.json(result),
-    result.success ? "success" : "failed"
+    NextResponse.json(responseBody),
+    outcome.status === "completed" ? "success" : "failed"
   );
 }
 

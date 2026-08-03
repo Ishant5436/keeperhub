@@ -538,6 +538,25 @@ const AERO_VOTER_IFACE = new Interface([
 const AERO_DEPOSIT_TOPIC = id(
   "Deposit(address,uint256,uint8,uint256,uint256,uint256)"
 );
+const AERO_WEEK = BigInt(7 * 24 * 3600);
+const AERO_HOUR = BigInt(3600);
+
+// Mirrors VelodromeTimeLibrary.epochStart: epochs run Thu 00:00 UTC to Thu
+// 00:00 UTC. Voter.onlyNewEpoch reverts with DistributeWindow for
+// timestamp <= epochVoteStart (the first hour of a new epoch, Voter.sol:105)
+// and with NotWhitelistedNFT for timestamp > epochVoteEnd (the last hour of
+// the old one, Voter.sol:266), so a vote is only valid in the half-open
+// range (epochVoteStart, epochVoteEnd].
+function aeroEpochStart(timestamp: bigint): bigint {
+  return timestamp - (timestamp % AERO_WEEK);
+}
+
+function isInAeroVoteWindow(timestamp: bigint): boolean {
+  const start = aeroEpochStart(timestamp);
+  return (
+    timestamp > start + AERO_HOUR && timestamp <= start + AERO_WEEK - AERO_HOUR
+  );
+}
 
 async function emitAerodrome(provider: JsonRpcProvider): Promise<Log[]> {
   const logs: Log[] = [];
@@ -608,9 +627,31 @@ async function emitAerodrome(provider: JsonRpcProvider): Promise<Log[]> {
   );
   const id1 = tokenIdFrom(lock1.logs);
 
-  // voter-voted: past the epoch distribute window, vote for the WETH/USDC pool.
-  await provider.send("evm_increaseTime", [2 * 24 * 3600]);
+  // voter-voted: warp to a fixed offset into the *next* epoch rather than a
+  // fixed +2d delta from "now" - the old delta drifted in and out of the
+  // epoch's voting window depending on when CI ran. Target epochStart(now) +
+  // WEEK + 12h: always a fresh epoch, 11h clear of the opening
+  // DistributeWindow and far clear (~155h) of the closing epochVoteEnd cutoff.
+  const preVoteBlock = await provider.getBlock("latest");
+  if (!preVoteBlock) {
+    throw new Error("aerodrome fork: no latest block before vote warp");
+  }
+  const voteTarget =
+    aeroEpochStart(BigInt(preVoteBlock.timestamp)) +
+    AERO_WEEK +
+    AERO_HOUR * BigInt(12);
+  await provider.send("evm_increaseTime", [
+    Number(voteTarget - BigInt(preVoteBlock.timestamp)),
+  ]);
   await provider.send("evm_mine", []);
+  const votedBlock = await provider.getBlock("latest");
+  if (!votedBlock) {
+    throw new Error("aerodrome fork: no latest block after vote warp");
+  }
+  expect(
+    isInAeroVoteWindow(BigInt(votedBlock.timestamp)),
+    `aerodrome vote warp landed at ${votedBlock.timestamp}, outside the Aerodrome voting window`
+  ).toBe(true);
   await push(
     AERO_VOTER,
     AERO_VOTER_IFACE.encodeFunctionData("vote", [id1, [AERO_POOL], [ONE]])
@@ -630,14 +671,28 @@ async function emitAerodrome(provider: JsonRpcProvider): Promise<Log[]> {
   await push(AERO_ESCROW, AERO_VE_IFACE.encodeFunctionData("withdraw", [id2]));
 
   // distribute-reward: a fresh epoch, then distribute emissions to the voted
-  // gauge (permissionless; drives minter.updatePeriod).
+  // gauge (permissionless; drives minter.updatePeriod). Assert the epoch
+  // actually flips instead of assuming the fixed 7-day warp always crosses
+  // one (the same unchecked-assumption class of bug as the vote-window one).
   const gauge = (await new Contract(
     AERO_VOTER,
     AERO_VOTER_IFACE,
     provider
   ).gauges(AERO_POOL)) as string;
+  const preDistributeBlock = await provider.getBlock("latest");
+  if (!preDistributeBlock) {
+    throw new Error("aerodrome fork: no latest block before distribute warp");
+  }
   await provider.send("evm_increaseTime", [7 * 24 * 3600]);
   await provider.send("evm_mine", []);
+  const distributeBlock = await provider.getBlock("latest");
+  if (!distributeBlock) {
+    throw new Error("aerodrome fork: no latest block after distribute warp");
+  }
+  expect(
+    aeroEpochStart(BigInt(distributeBlock.timestamp)),
+    "distribute-reward warp did not cross an Aerodrome epoch boundary"
+  ).toBeGreaterThan(aeroEpochStart(BigInt(preDistributeBlock.timestamp)));
   await push(
     AERO_VOTER,
     AERO_VOTER_IFACE.encodeFunctionData("distribute", [[gauge]])
@@ -669,6 +724,15 @@ export function runEventSimulation(opts: {
 
   const provider = new JsonRpcProvider(opts.rpcUrl, undefined, {
     staticNetwork: true,
+    // ethers shares the result of identical requests made within
+    // cacheTimeout ms (default 250). This harness mutates chain state
+    // between reads - a getBlock("latest") before a warp and one after it
+    // are an identical request, so the second read silently returns the
+    // pre-warp block and any before/after comparison compares a block to
+    // itself. Local anvil makes that round trip fast enough to always hit
+    // the cache. Disable it: a harness that mutates chain state must never
+    // read cached chain state.
+    cacheTimeout: -1,
   });
 
   let collected: Log[] = [];

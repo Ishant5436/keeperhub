@@ -35,6 +35,10 @@ vi.mock("@/lib/db/schema", () => ({
 
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
+  // KEEP-966: lib/db/schema-extensions.ts's directExecutions.receipts column
+  // default (sql`'[]'::jsonb`) is evaluated at module-import time, so this
+  // transitively-loaded mock needs a stand-in tagged-template function.
+  sql: () => ({}),
 }));
 
 vi.mock("@/lib/explorer", () => ({

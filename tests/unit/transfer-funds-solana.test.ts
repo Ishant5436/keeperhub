@@ -78,6 +78,7 @@ describe("transferFundsCore - Solana early branch", () => {
     expect(result).toEqual({
       success: true,
       transactionHash: "mock-tx-hash",
+      chainId: 103,
       transactionLink: "https://solscan.io/tx/mock-hash",
       gasUsed: "0",
       gasUsedUnits: "5000",

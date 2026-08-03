@@ -108,6 +108,25 @@ vi.mock("@/lib/metrics/db-metrics", () => ({
   ANONYMOUS_ORG_SLUG: "_anonymous",
 }));
 
+// KEEP-966: logWorkflowCompleteDb / selfHealWorkflowAfterLateStepCommit now
+// independently reconcile every claimed hash against the chain before
+// writing "success". Default to "everything verifies" so the pre-existing
+// KEEP-470 tests below (which assert hash/nodeId/network shape, not the new
+// verification fields) don't need per-test setup; tests exercising the
+// KEEP-966 gate itself override this per-call.
+const { verifyExecutionReceiptsMock } = vi.hoisted(() => ({
+  verifyExecutionReceiptsMock: vi.fn(),
+}));
+vi.mock("@/lib/web3/verify-receipt", () => ({
+  verifyExecutionReceipts: verifyExecutionReceiptsMock,
+  describeVerificationFailure: (
+    results: Array<{ hash: string; status: string }>
+  ) =>
+    `On-chain verification failed for ${results.length} transaction(s): ${results
+      .map((r) => `${r.hash} (${r.status})`)
+      .join(", ")}`,
+}));
+
 // State the tests mutate between runs.
 type UpdateCall = {
   target: unknown;
@@ -262,6 +281,29 @@ function getExecUpdate(): UpdateCall | undefined {
 function getLogUpdate(): UpdateCall | undefined {
   return updateCalls.find((c) => c.target === workflowExecutionLogsMock);
 }
+
+// Runs before every inner describe's own beforeEach (outer-to-inner hook
+// order), so the default survives the inner vi.clearAllMocks() calls below
+// (clearAllMocks resets call history, not a configured mockImplementation).
+// Tests exercising the KEEP-966 gate itself override with
+// mockResolvedValueOnce / mockImplementationOnce.
+beforeEach(() => {
+  verifyExecutionReceiptsMock.mockImplementation(
+    (hashes: Array<{ hash: string; chainId: number }>) =>
+      Promise.resolve({
+        allVerified: true,
+        results: hashes.map((h) => ({
+          hash: h.hash,
+          chainId: h.chainId,
+          verified: true,
+          status: "success" as const,
+          blockNumber: 100,
+          gasUsed: "21000",
+          verifiedAt: "2026-01-01T00:00:00.000Z",
+        })),
+      })
+  );
+});
 
 describe("logWorkflowCompleteDb", () => {
   beforeEach(() => {
@@ -713,7 +755,7 @@ describe("logWorkflowCompleteDb transactionHashes (KEEP-470)", () => {
     vi.clearAllMocks();
   });
 
-  it("writes the in-memory tracker entries verbatim on success", async () => {
+  it("writes the in-memory tracker entries, enriched with the on-chain verification result, on success", async () => {
     const executionId = "exec_tracker_path";
     recordTransactionHashIfPresent(
       ctx({ executionId, nodeId: "approve-1", nodeName: "Approve" }),
@@ -730,6 +772,13 @@ describe("logWorkflowCompleteDb transactionHashes (KEEP-470)", () => {
       startTime: Date.now() - 1000,
     });
 
+    // KEEP-966: verifyExecutionReceipts is called with exactly the tracked
+    // hashes -- the on-chain gate ran, not a no-op.
+    expect(verifyExecutionReceiptsMock).toHaveBeenCalledWith([
+      { hash: "0xaaa", chainId: 1 },
+      { hash: "0xbbb", chainId: 1 },
+    ]);
+
     const update = getExecUpdate();
     expect(update?.set.status).toBe("success");
     expect(update?.set.transactionHashes).toEqual([
@@ -739,6 +788,11 @@ describe("logWorkflowCompleteDb transactionHashes (KEEP-470)", () => {
         nodeName: "Approve",
         chainId: 1,
         network: "mainnet",
+        verified: true,
+        receiptStatus: "success",
+        blockNumber: 100,
+        gasUsed: "21000",
+        verifiedAt: "2026-01-01T00:00:00.000Z",
       },
       {
         hash: "0xbbb",
@@ -746,8 +800,80 @@ describe("logWorkflowCompleteDb transactionHashes (KEEP-470)", () => {
         nodeName: "Swap",
         chainId: 1,
         network: "mainnet",
+        verified: true,
+        receiptStatus: "success",
+        blockNumber: 100,
+        gasUsed: "21000",
+        verifiedAt: "2026-01-01T00:00:00.000Z",
       },
     ]);
+
+    clearExecution(executionId);
+  });
+
+  it("demotes success to error and persists enriched (non-empty) receipts when a hash fails on-chain reconciliation", async () => {
+    const executionId = "exec_reconciliation_failure";
+    recordTransactionHashIfPresent(
+      ctx({ executionId, nodeId: "swap-1", nodeName: "Swap" }),
+      { transactionHash: "0xreverted", chainId: 1, network: "mainnet" }
+    );
+
+    verifyExecutionReceiptsMock.mockResolvedValueOnce({
+      allVerified: false,
+      results: [
+        {
+          hash: "0xreverted",
+          chainId: 1,
+          verified: false,
+          status: "reverted" as const,
+          blockNumber: 100,
+          gasUsed: "21000",
+          verifiedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await logWorkflowCompleteDb({
+      executionId,
+      status: "success",
+      startTime: Date.now() - 1000,
+    });
+
+    const update = getExecUpdate();
+    // Demoted from the caller's "success" -- the chain, not the self-report,
+    // is authoritative. This file's classifyExecutionError stub always
+    // returns errorType "system" regardless of message, which
+    // statusForErrorType maps to "system_error" -- the real classify.ts rule
+    // added for this ticket (lib/errors/classify.ts) routes a "reverted"
+    // message to TRANSACTION/user instead, but that real classifier isn't
+    // loaded in this unit-style test.
+    expect(update?.set.status).toBe("system_error");
+    expect(update?.set.error).toContain("0xreverted");
+    expect(update?.set.error).toContain("reverted");
+    // The receipt is still persisted (not []) so an operator can see which
+    // hash failed and why -- the "per-execution receipts" deliverable.
+    expect(update?.set.transactionHashes).toEqual([
+      expect.objectContaining({
+        hash: "0xreverted",
+        verified: false,
+        receiptStatus: "reverted",
+      }),
+    ]);
+
+    clearExecution(executionId);
+  });
+
+  it("does not call verifyExecutionReceipts when the run produced no hashes", async () => {
+    const executionId = "exec_no_hashes";
+
+    await logWorkflowCompleteDb({
+      executionId,
+      status: "success",
+      startTime: Date.now() - 1000,
+    });
+
+    expect(verifyExecutionReceiptsMock).not.toHaveBeenCalled();
+    expect(getExecUpdate()?.set.status).toBe("success");
 
     clearExecution(executionId);
   });
@@ -1100,6 +1226,11 @@ describe("selfHealWorkflowAfterLateStepCommit transactionHashes (KEEP-470)", () 
         nodeName: "Approve",
         chainId: 1,
         network: "mainnet",
+        verified: true,
+        receiptStatus: "success",
+        blockNumber: 100,
+        gasUsed: "21000",
+        verifiedAt: "2026-01-01T00:00:00.000Z",
       },
       {
         hash: "0xswap",
@@ -1107,8 +1238,66 @@ describe("selfHealWorkflowAfterLateStepCommit transactionHashes (KEEP-470)", () 
         nodeName: "Swap",
         chainId: 1,
         network: "mainnet",
+        verified: true,
+        receiptStatus: "success",
+        blockNumber: 100,
+        gasUsed: "21000",
+        verifiedAt: "2026-01-01T00:00:00.000Z",
       },
     ]);
     expect(healUpdate?.set.error).toBeNull();
+  });
+
+  it("does not flip to success when a hash fails on-chain reconciliation, leaving the row in its already-finalized error state", async () => {
+    const executionId = "exec_self_heal_reconciliation_failure";
+
+    mockExecution = {
+      status: "error",
+      error: "exceeded max retries",
+      completedAt: new Date(Date.now() - 5000),
+      startedAt: new Date(Date.now() - 30_000),
+    };
+    allLogs = [
+      {
+        id: "log_swap",
+        nodeId: "swap-1",
+        nodeName: "Swap",
+        status: "success",
+        iterationIndex: null,
+        outputRaw: {
+          transactionHash: "0xswap",
+          chainId: 1,
+          network: "mainnet",
+        },
+      },
+    ] as unknown as LogRow[];
+
+    verifyExecutionReceiptsMock.mockResolvedValueOnce({
+      allVerified: false,
+      results: [
+        {
+          hash: "0xswap",
+          chainId: 1,
+          verified: false,
+          status: "reverted" as const,
+          verifiedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await logStepCompleteDb({
+      logId: "log_swap",
+      startTime: Date.now() - 1000,
+      status: "success",
+      outputRaw: { transactionHash: "0xswap", chainId: 1, network: "mainnet" },
+      executionId,
+    });
+
+    // No UPDATE flips this row to success -- it stays whatever it already
+    // was finalized to.
+    const healUpdate = updateCalls.find(
+      (c) => c.target === workflowExecutionsMock && c.set.status === "success"
+    );
+    expect(healUpdate).toBeUndefined();
   });
 });

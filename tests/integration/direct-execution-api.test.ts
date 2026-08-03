@@ -189,7 +189,7 @@ function setupPassingGuards(): void {
     (input: Record<string, unknown>) => input
   );
   mocks.markRunning.mockResolvedValue(undefined);
-  mocks.completeExecution.mockResolvedValue(undefined);
+  mocks.completeExecution.mockResolvedValue({ status: "completed" });
   mocks.failExecution.mockResolvedValue(undefined);
 }
 
@@ -300,6 +300,8 @@ describe("Direct Execution API", () => {
       const data = await response.json();
       expect(data.executionId).toBe("exec_1");
       expect(data.status).toBe("completed");
+      expect(data.transactionHash).toBe("0xabc");
+      expect(data.transactionLink).toBe("https://etherscan.io/tx/0xabc");
       expect(mocks.completeExecution).toHaveBeenCalledOnce();
       expect(mocks.transferFundsCore).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -330,6 +332,8 @@ describe("Direct Execution API", () => {
       expect(response.status).toBe(202);
       const data = await response.json();
       expect(data.status).toBe("completed");
+      expect(data.transactionHash).toBe("0xdef");
+      expect(data.transactionLink).toBe("https://etherscan.io/tx/0xdef");
       expect(mocks.transferTokenCore).toHaveBeenCalledOnce();
       expect(mocks.transferFundsCore).not.toHaveBeenCalled();
     });
@@ -413,6 +417,8 @@ describe("Direct Execution API", () => {
       expect(response.status).toBe(202);
       const data = await response.json();
       expect(data.status).toBe("failed");
+      expect(data.transactionHash).toBeUndefined();
+      expect(data.transactionLink).toBeUndefined();
       expect(mocks.failExecution).toHaveBeenCalledWith(
         "exec_1",
         "Insufficient funds"
@@ -877,8 +883,45 @@ describe("Direct Execution API", () => {
       expect(data.type).toBe("transfer");
       expect(data.transactionHash).toBe("0xabc");
       expect(data.transactionLink).toBe("https://etherscan.io/tx/0xabc");
+      expect(data.sponsored).toBe(false);
       expect(data.createdAt).toBe(now.toISOString());
       expect(data.completedAt).toBe(now.toISOString());
+    });
+
+    it("returns sponsored: true for a gas-sponsored execution", async () => {
+      setupPassingGuards();
+      const now = new Date();
+      mocks.statusDbResult = [
+        {
+          id: "exec_2",
+          organizationId: "org_test",
+          apiKeyId: "key_test",
+          type: "transfer",
+          network: "ethereum",
+          status: "completed",
+          transactionHash: "0xabc",
+          gasUsedWei: "441000000000000",
+          gasPriceWei: "500000221",
+          estimatedCostUsd: null,
+          retryCount: 0,
+          input: {},
+          output: {
+            transactionLink: "https://etherscan.io/tx/0xabc",
+            sponsored: true,
+          },
+          error: null,
+          createdAt: now,
+          completedAt: now,
+        },
+      ];
+
+      const response = await statusGET(getRequest("/exec_2/status"), {
+        params: Promise.resolve({ executionId: "exec_2" }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.sponsored).toBe(true);
     });
 
     it("route exports GET only -- non-GET methods are intentionally 405 (Next.js auto-handler)", async () => {

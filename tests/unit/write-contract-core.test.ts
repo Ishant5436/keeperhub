@@ -41,6 +41,10 @@ vi.mock("@/lib/db/schema", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
   and: () => ({}),
+  // KEEP-966: lib/db/schema-extensions.ts's new directExecutions.receipts
+  // column default (sql`'[]'::jsonb`) is evaluated at module-import time, so
+  // this transitively-loaded mock needs a stand-in tagged-template function.
+  sql: () => ({}),
 }));
 
 // Mock generateId as a spy returning a deterministic test value

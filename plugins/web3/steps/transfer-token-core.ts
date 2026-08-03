@@ -76,6 +76,9 @@ export type TransferTokenResult =
   | {
       success: true;
       transactionHash: string;
+      // KEEP-966: chain the transaction was broadcast on, required for
+      // independent on-chain receipt verification at execution finalize time.
+      chainId: number;
       transactionLink: string;
       gasUsed: string;
       gasUsedUnits: string;
@@ -409,6 +412,7 @@ export async function transferTokenCore(
           success: true,
           sponsored: true,
           transactionHash: sponsoredResult.transactionHash,
+          chainId,
           transactionLink,
           gasUsed: sponsoredResult.gasUsed,
           gasUsedUnits: sponsoredResult.gasUsedUnits,
@@ -571,6 +575,7 @@ export async function transferTokenCore(
       return {
         success: true,
         transactionHash: receipt.hash,
+        chainId,
         transactionLink,
         gasUsed: gasCostWei,
         gasUsedUnits,

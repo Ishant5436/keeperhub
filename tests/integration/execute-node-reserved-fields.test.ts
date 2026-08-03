@@ -133,7 +133,7 @@ beforeEach(() => {
   });
   mocks.createExecution.mockResolvedValue({ executionId: "ex1" });
   mocks.markRunning.mockResolvedValue(undefined);
-  mocks.completeExecution.mockResolvedValue(undefined);
+  mocks.completeExecution.mockResolvedValue({ status: "completed" });
   mocks.failExecution.mockResolvedValue(undefined);
   mocks.setRetryCount.mockResolvedValue(undefined);
   mocks.redactInput.mockImplementation(

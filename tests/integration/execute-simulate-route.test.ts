@@ -186,6 +186,7 @@ function resetSpies(): void {
   checkAndReserveExecution.mockReset();
   markRunning.mockReset();
   completeExecution.mockReset();
+  completeExecution.mockResolvedValue({ status: "completed" });
   failExecution.mockReset();
   writeContractCore.mockReset();
   transferFundsCore.mockReset();

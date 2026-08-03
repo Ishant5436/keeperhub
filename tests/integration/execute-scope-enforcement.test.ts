@@ -150,7 +150,7 @@ describe("A-03 scope enforcement — POST /api/execute/transfer", () => {
     });
     mocks.redactInput.mockImplementation((input: unknown) => input);
     mocks.markRunning.mockResolvedValue(undefined);
-    mocks.completeExecution.mockResolvedValue(undefined);
+    mocks.completeExecution.mockResolvedValue({ status: "completed" });
     mocks.transferFundsCore.mockResolvedValue({
       success: true,
       transactionHash: "0xhash",

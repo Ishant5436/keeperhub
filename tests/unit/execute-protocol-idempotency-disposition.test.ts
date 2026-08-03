@@ -84,7 +84,7 @@ vi.mock("../../app/api/execute/_lib/concurrency-limit", () => ({
 
 vi.mock("../../app/api/execute/_lib/execution-service", () => ({
   markRunning: vi.fn(),
-  completeExecution: vi.fn(),
+  completeExecution: vi.fn().mockResolvedValue({ status: "completed" }),
   failExecution: vi.fn(),
   redactInput: (x: unknown) => x,
   withRejectedSignerOverride: (a: unknown) => a,

@@ -39,6 +39,11 @@ import { NA_ERROR_TYPE } from "@/lib/metrics/metric-constants";
 import { resolveOrgSlugForCounter } from "@/lib/metrics/org-slug.server";
 import { toJsonSafe } from "@/lib/utils/json-safe";
 import {
+  describeVerificationFailure,
+  type ReceiptVerificationResult,
+  verifyExecutionReceipts,
+} from "@/lib/web3/verify-receipt";
+import {
   EXCEEDED_MAX_RETRIES_REGEX,
   FAILED_AFTER_RETRIES_REGEX,
   NO_STEP_COMPLETION_REGEX,
@@ -196,6 +201,75 @@ async function resolveTransactionHashesForSuccess(
   return await loadHashesFromLogs(executionId);
 }
 
+function mergeReceiptResults(
+  entries: TransactionHashEntry[],
+  results: ReceiptVerificationResult[]
+): TransactionHashEntry[] {
+  const byHash = new Map(results.map((result) => [result.hash, result]));
+  return entries.map((entry) => {
+    const result = byHash.get(entry.hash);
+    if (!result) {
+      return entry;
+    }
+    return {
+      ...entry,
+      verified: result.verified,
+      receiptStatus: result.status,
+      blockNumber: result.blockNumber,
+      gasUsed: result.gasUsed,
+      verifiedAt: result.verifiedAt,
+    };
+  });
+}
+
+type ReconcileTransactionHashesResult =
+  | { ok: true; hashes: TransactionHashEntry[] }
+  | { ok: false; hashes: TransactionHashEntry[]; error: string };
+
+/**
+ * KEEP-966: independently re-verify every claimed transaction hash against
+ * the chain before a workflow execution is allowed to finalize as success.
+ * Shared by logWorkflowCompleteDb and selfHealWorkflowAfterLateStepCommit --
+ * both are places that can write status: "success", so both must gate on
+ * this rather than trusting the step-level self-reports that fed into
+ * `hashes`. Fail-closed: a hash missing chainId (cannot be verified at all)
+ * fails the whole batch, same as a hash that positively fails verification.
+ */
+async function reconcileTransactionHashes(
+  hashes: TransactionHashEntry[]
+): Promise<ReconcileTransactionHashesResult> {
+  if (hashes.length === 0) {
+    return { ok: true, hashes };
+  }
+
+  const verifiable = hashes.filter(
+    (entry): entry is TransactionHashEntry & { chainId: number } =>
+      entry.chainId !== undefined
+  );
+  if (verifiable.length < hashes.length) {
+    return {
+      ok: false,
+      hashes,
+      error:
+        "On-chain verification failed: missing chainId for one or more transaction hashes",
+    };
+  }
+
+  const { allVerified, results } = await verifyExecutionReceipts(
+    verifiable.map((entry) => ({ hash: entry.hash, chainId: entry.chainId }))
+  );
+  const merged = mergeReceiptResults(hashes, results);
+
+  if (!allVerified) {
+    return {
+      ok: false,
+      hashes: merged,
+      error: describeVerificationFailure(results),
+    };
+  }
+  return { ok: true, hashes: merged };
+}
+
 /**
  * Resolve the run-total gas (sum of per-step `gasUsed`, in wei) to persist when
  * a workflow reaches a terminal state.
@@ -329,10 +403,22 @@ async function selfHealWorkflowAfterLateStepCommit(
   // them now from durable logs so the success terminal state carries the
   // hashes that ran. Tracker may have been cleared on the originating pod;
   // loadHashesFromLogs is the durable source of truth at this point.
-  const [transactionHashes, gasUsedWei] = await Promise.all([
+  const [resolvedHashes, gasUsedWei] = await Promise.all([
     resolveTransactionHashesForSuccess(executionId),
     resolveGasTotal(executionId),
   ]);
+
+  // KEEP-966: self-heal only ever flips error -> success, so it must pass the
+  // same on-chain reconciliation gate as logWorkflowCompleteDb before it's
+  // allowed to write "success". A failure here means simply not flipping --
+  // the row stays in whatever error state it was already finalized to; no
+  // new write is needed on this branch.
+  const reconciled = await reconcileTransactionHashes(resolvedHashes);
+  if (resolvedHashes.length > 0 && !reconciled.ok) {
+    emitEarlyExit("receipt_verification_failed");
+    return;
+  }
+  const transactionHashes = reconciled.hashes;
 
   // CAS UPDATE: only flip if status is still 'error' (the state we just observed).
   // Drizzle's update returns the affected row count -- we use it to drive metrics.
@@ -746,6 +832,23 @@ export async function logWorkflowCompleteDb(
     resolveGasTotal(params.executionId),
   ]);
 
+  // KEEP-966: independently reconcile every claimed hash against the chain
+  // before "success" can be written. Runs after the KEEP-1549 spurious-error
+  // override above, so a demotion here wins over "no node-level errors
+  // found" -- a hash that fails on-chain reconciliation overrides that
+  // override. On demotion, still persist the enriched (non-empty) entries --
+  // this is the "per-execution receipts" deliverable: an operator needs to
+  // see which hash failed and why, not just that the run errored.
+  let verifiedTransactionHashes = transactionHashes;
+  if (resolvedStatus === "success" && transactionHashes.length > 0) {
+    const reconciled = await reconcileTransactionHashes(transactionHashes);
+    verifiedTransactionHashes = reconciled.hashes;
+    if (!reconciled.ok) {
+      resolvedStatus = "error";
+      resolvedError = reconciled.error;
+    }
+  }
+
   // KEEP-545: classify the error so the row carries error_category and
   // error_type at write time. Success rows get null for both columns.
   // KEEP-880: a step that knows the true nature of its failure (e.g. a
@@ -796,7 +899,7 @@ export async function logWorkflowCompleteDb(
       // Clear current step on completion
       currentNodeId: null,
       currentNodeName: null,
-      transactionHashes,
+      transactionHashes: verifiedTransactionHashes,
       gasUsedWei,
     })
     .from(prevExecution)

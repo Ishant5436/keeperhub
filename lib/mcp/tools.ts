@@ -583,7 +583,7 @@ export function registerTools(
 
   server.tool(
     "execute_workflow",
-    "Trigger a manual execution of a workflow. Returns the execution ID for status polling.",
+    'Trigger a manual execution of a workflow. This ONLY confirms the trigger was accepted -- the workflow runs in the background and has NOT completed when this call returns. Returns { executionId, status: "running" }. A successful (non-error) tool call here is evidence of triggering, never of completion or of any on-chain effect. Call get_execution with the returned executionId afterward to learn the actual outcome -- only get_execution\'s status and per-transaction receipts are on-chain verified.',
     {
       workflowId: z.string().describe("The workflow ID to execute"),
       input: z
@@ -603,8 +603,16 @@ export function registerTools(
           { input: args.input ?? {} },
           args.idempotency_key
         );
+        // KEEP-966: `data` already carries status: "running", not "completed"
+        // -- restate that explicitly at the MCP content layer so a calling
+        // agent can't read a non-error tool call as evidence of success and
+        // skip the get_execution follow-up.
+        const enriched = {
+          ...(data as Record<string, unknown>),
+          hint: "This confirms the workflow was triggered, not that it completed. Call get_execution with this executionId -- only its status and per-transaction receipts are on-chain verified.",
+        };
         return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }],
         };
       })
     )
@@ -612,7 +620,7 @@ export function registerTools(
 
   server.tool(
     "get_execution",
-    "Get combined status and step-by-step logs for a workflow execution. Replaces the v1.11 get_execution_status + get_execution_logs pair. Returns { status, logs } in a single response. By default returns full node input/output data (backward compatible with v1.11 get_execution_logs no-param callers). Pass `includeData: false` to omit input/output/outputRaw blobs, `nodeIds: string[]` to restrict full data to specific nodes (status and error always returned for every node), or `truncateData: number` (bytes) to cap individual input/output/outputRaw payloads. The `error` field is never truncated.",
+    "Get combined status and step-by-step logs for a workflow execution. Replaces the v1.11 get_execution_status + get_execution_logs pair. Returns { status, logs } in a single response. `status` and each log's `transactionHashes[].verified`/`receiptStatus` are independently reconciled against on-chain receipts before the execution is allowed to finalize as success -- this, not execute_workflow's trigger acknowledgement, is the authoritative signal for whether a workflow (and any money movement within it) actually completed. By default returns full node input/output data (backward compatible with v1.11 get_execution_logs no-param callers). Pass `includeData: false` to omit input/output/outputRaw blobs, `nodeIds: string[]` to restrict full data to specific nodes (status and error always returned for every node), or `truncateData: number` (bytes) to cap individual input/output/outputRaw payloads. The `error` field is never truncated.",
     {
       executionId: z
         .string()

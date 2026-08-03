@@ -619,6 +619,30 @@ export type NewWorkflowPublicTag = typeof workflowPublicTags.$inferInsert;
  * NOTE: apiKeyId has no FK -- the key may be revoked/deleted later but the audit record must persist.
  * Wei amounts stored as text to avoid PostgreSQL bigint overflow.
  */
+
+/**
+ * KEEP-966: per-transaction on-chain verification result, persisted on
+ * directExecutions.receipts. Field names/vocabulary intentionally match
+ * lib/db/schema.ts's TransactionHashEntry (the workflow-execution
+ * equivalent) so lib/web3/verify-receipt.ts's results map to either shape.
+ * No nodeId/nodeName here -- direct-execute has no node concept.
+ */
+export type DirectExecutionReceiptEntry = {
+  hash: string;
+  chainId?: number;
+  network?: string;
+  verified: boolean;
+  receiptStatus:
+    | "success"
+    | "reverted"
+    | "not_found"
+    | "timeout"
+    | "safe_inner_failure";
+  blockNumber?: number;
+  gasUsed?: string;
+  verifiedAt: string;
+};
+
 export const directExecutions = pgTable(
   "direct_executions",
   {
@@ -636,6 +660,13 @@ export const directExecutions = pgTable(
     output: jsonb("output").$type<any>(),
     status: text("status").notNull().default("pending"), // pending | running | completed | failed
     transactionHash: text("transaction_hash"),
+    // KEEP-966: on-chain verification results for every transaction hash this
+    // execution claims. Populated by completeExecution() regardless of
+    // outcome, so a failed reconciliation stays auditable (which hash, why).
+    receipts: jsonb("receipts")
+      .$type<DirectExecutionReceiptEntry[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     network: text("network"),
     error: text("error"),
     gasUsedWei: text("gas_used_wei"),

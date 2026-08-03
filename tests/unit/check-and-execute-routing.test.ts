@@ -158,7 +158,7 @@ function setupDefaultMocks(): void {
     executionId: "exec-1",
   });
   mockMarkRunning.mockResolvedValue(undefined);
-  mockCompleteExecution.mockResolvedValue(undefined);
+  mockCompleteExecution.mockResolvedValue({ status: "completed" });
   mockFailExecution.mockResolvedValue(undefined);
   mockRedactInput.mockReturnValue({});
 

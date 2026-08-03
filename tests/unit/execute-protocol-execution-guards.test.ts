@@ -117,10 +117,12 @@ beforeEach(() => {
   writeContractCoreMock.mockResolvedValue({
     success: true,
     transactionHash: "0xtx",
+    chainId: 8453,
     transactionLink: "https://scan/0xtx",
     gasUsed: "21000",
     effectiveGasPrice: "1000000000",
   });
+  completeExecutionMock.mockResolvedValue({ status: "completed" });
 });
 
 describe("A-07 / KEEP-793: protocol write actions are gated and recorded", () => {
