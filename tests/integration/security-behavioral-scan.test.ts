@@ -69,6 +69,9 @@ vi.mock("@/lib/db/schema", () => ({
     startedAt: "we.started_at",
     triggerSource: "we.trigger_source",
     triggeredByCountry: "we.triggered_by_country",
+    triggeredByUserApiKeyId: "we.triggered_by_user_api_key_id",
+    triggeredByOrgApiKeyId: "we.triggered_by_org_api_key_id",
+    transactionHashes: "we.transaction_hashes",
   },
 }));
 
@@ -131,6 +134,45 @@ describe("security-behavioral-scan auth", () => {
   });
 });
 
+type ScanRow = {
+  userId: string;
+  workflowId: string;
+  executionId: string;
+  triggerSource: string | null;
+  triggeredByCountry: string | null;
+  triggeredByUserApiKeyId: string | null;
+  triggeredByOrgApiKeyId: string | null;
+  transactionHashes: unknown[];
+  userCreatedAt: Date;
+  executionStartedAt: Date;
+};
+
+// Baseline row: a brand-new account manually running a workflow from a
+// browser session that touched nothing. This is the overwhelmingly common
+// real-world shape (the onboarding tour, a blank-canvas Run click), so it is
+// the default and each test opts INTO a piece of evidence.
+function makeRow(overrides: Partial<ScanRow> = {}): ScanRow {
+  return {
+    userId: "user_freshly_signed_up",
+    workflowId: "wf_1",
+    executionId: "exec_1",
+    triggerSource: "manual",
+    triggeredByCountry: "US",
+    triggeredByUserApiKeyId: null,
+    triggeredByOrgApiKeyId: null,
+    transactionHashes: [],
+    userCreatedAt: new Date("2026-05-26T10:00:00Z"),
+    executionStartedAt: new Date("2026-05-26T10:00:42Z"),
+    ...overrides,
+  };
+}
+
+function loggedEvents(): Record<string, unknown>[] {
+  return warnSpy.mock.calls.map(
+    (call) => JSON.parse(call[0] as string) as Record<string, unknown>
+  );
+}
+
 describe("security-behavioral-scan response shape", () => {
   function authedRequest(): Request {
     // Top-level beforeEach already sets mockAuthResult.authenticated = true.
@@ -142,26 +184,20 @@ describe("security-behavioral-scan response shape", () => {
     const res = await GET(authedRequest());
     const body = (await res.json()) as {
       newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+      executionPredatesAccountEvents: number;
       durationMs: number;
     };
     expect(body.newAccountFirstWorkflowEvents).toBe(0);
+    expect(body.newAccountRoutineEvents).toBe(0);
+    expect(body.executionPredatesAccountEvents).toBe(0);
     expect(body.durationMs).toBeGreaterThanOrEqual(0);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("emits one structured warn and one Sentry capture per matched row", async () => {
-    const userCreatedAt = new Date("2026-05-26T10:00:00Z");
-    const executionStartedAt = new Date("2026-05-26T10:00:42Z");
     mockSelectChain.mockResolvedValueOnce([
-      {
-        userId: "user_freshly_signed_up",
-        workflowId: "wf_1",
-        executionId: "exec_1",
-        triggerSource: "manual",
-        triggeredByCountry: "US",
-        userCreatedAt,
-        executionStartedAt,
-      },
+      makeRow({ triggeredByOrgApiKeyId: "orgkey_1" }),
     ]);
     const res = await GET(authedRequest());
     const body = (await res.json()) as {
@@ -170,8 +206,7 @@ describe("security-behavioral-scan response shape", () => {
     expect(body.newAccountFirstWorkflowEvents).toBe(1);
 
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
-    expect(logged).toMatchObject({
+    expect(loggedEvents()[0]).toMatchObject({
       event: "security.behavioral.new_account_first_workflow",
       userId: "user_freshly_signed_up",
       workflowId: "wf_1",
@@ -179,6 +214,7 @@ describe("security-behavioral-scan response shape", () => {
       triggerSource: "manual",
       triggeredByCountry: "US",
       ageSecondsSinceSignup: 42,
+      evidence: ["api_key"],
     });
 
     // Dual-emit pattern: Sentry mirrors the stdout signal so triage gets
@@ -204,6 +240,7 @@ describe("security-behavioral-scan response shape", () => {
       tags: {
         security: "behavioral.new_account_first_workflow",
         trigger_source: "manual",
+        evidence: "api_key",
       },
       user: { id: "user_freshly_signed_up" },
       extra: {
@@ -211,6 +248,7 @@ describe("security-behavioral-scan response shape", () => {
         executionId: "exec_1",
         triggeredByCountry: "US",
         ageSecondsSinceSignup: 42,
+        evidence: ["api_key"],
       },
     });
   });
@@ -219,21 +257,156 @@ describe("security-behavioral-scan response shape", () => {
     mockCaptureMessage.mockImplementationOnce(() => {
       throw new Error("sentry down");
     });
-    mockSelectChain.mockResolvedValueOnce([
-      {
-        userId: "u_1",
-        workflowId: "wf_1",
-        executionId: "exec_1",
-        triggerSource: "manual",
-        triggeredByCountry: null,
-        userCreatedAt: new Date("2026-05-26T10:00:00Z"),
-        executionStartedAt: new Date("2026-05-26T10:00:30Z"),
-      },
-    ]);
+    mockSelectChain.mockResolvedValueOnce([makeRow()]);
     const res = await GET(authedRequest());
     expect(res.status).toBe(200);
     // Sentry threw but stdout still emitted -- the signal is durable.
     expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("security-behavioral-scan evidence tiering", () => {
+  function authedRequest(): Request {
+    return makeRequest({ "x-kh-caller": "test-key" });
+  }
+
+  // The paging name is what the Loki rule matches by substring. A rename
+  // here silently stops the page, so it is asserted literally rather than
+  // through a constant.
+  const FLAGGED = "security.behavioral.new_account_first_workflow";
+  const ROUTINE = "security.behavioral.new_account_routine_execution";
+
+  it("does not page a manual session-credential run that touched nothing", async () => {
+    mockSelectChain.mockResolvedValueOnce([makeRow()]);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+    };
+
+    expect(body.newAccountFirstWorkflowEvents).toBe(0);
+    expect(body.newAccountRoutineEvents).toBe(1);
+    expect(loggedEvents()[0]).toMatchObject({
+      event: ROUTINE,
+      evidence: [],
+    });
+  });
+
+  it("keeps the routine event name disjoint from the paging name", () => {
+    // The Loki module matches a substring, so a routine name containing the
+    // flagged name would page on every routine event and undo the tiering.
+    expect(ROUTINE.includes(FLAGGED)).toBe(false);
+    expect(FLAGGED.includes(ROUTINE)).toBe(false);
+  });
+
+  it.each([
+    ["a user API key", { triggeredByUserApiKeyId: "userkey_1" }, "api_key"],
+    ["an org API key", { triggeredByOrgApiKeyId: "orgkey_1" }, "api_key"],
+    [
+      "an on-chain write",
+      { transactionHashes: [{ hash: "0xabc" }] },
+      "onchain_write",
+    ],
+    [
+      "a non-manual trigger",
+      { triggerSource: "schedule" },
+      "automated_trigger",
+    ],
+  ])("pages on %s", async (_label, overrides, expectedEvidence) => {
+    mockSelectChain.mockResolvedValueOnce([
+      makeRow(overrides as Partial<ScanRow>),
+    ]);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+    };
+
+    expect(body.newAccountFirstWorkflowEvents).toBe(1);
+    expect(body.newAccountRoutineEvents).toBe(0);
+    expect(loggedEvents()[0]).toMatchObject({
+      event: FLAGGED,
+      evidence: [expectedEvidence],
+    });
+  });
+
+  it("treats a NULL trigger_source as unknown, not as automation", async () => {
+    // trigger_source landed on 2026-06-02 and is NULL for every execution
+    // before it. A `!== "manual"` comparison reads all of those as automated
+    // and floods the page. Unknown is not evidence.
+    mockSelectChain.mockResolvedValueOnce([makeRow({ triggerSource: null })]);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+    };
+
+    expect(body.newAccountFirstWorkflowEvents).toBe(0);
+    expect(body.newAccountRoutineEvents).toBe(1);
+    expect(loggedEvents()[0]).toMatchObject({ event: ROUTINE, evidence: [] });
+  });
+
+  it("pages the whole burst once a single new user crosses the threshold", async () => {
+    // Six manual, credential-free, no-transaction runs by one account. No
+    // individual row carries evidence; the volume is the evidence.
+    const burst = Array.from({ length: 6 }, (_unused, index) =>
+      makeRow({ executionId: `exec_${index}` })
+    );
+    mockSelectChain.mockResolvedValueOnce(burst);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+    };
+
+    expect(body.newAccountFirstWorkflowEvents).toBe(6);
+    expect(body.newAccountRoutineEvents).toBe(0);
+    for (const event of loggedEvents()) {
+      expect(event).toMatchObject({ event: FLAGGED, evidence: ["burst"] });
+    }
+  });
+
+  it("does not attribute burst across different users", async () => {
+    // Six rows, six accounts. Volume belongs to an account, not to the
+    // scan window, so nothing here should page.
+    const rows = Array.from({ length: 6 }, (_unused, index) =>
+      makeRow({ userId: `user_${index}`, executionId: `exec_${index}` })
+    );
+    mockSelectChain.mockResolvedValueOnce(rows);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+    };
+
+    expect(body.newAccountFirstWorkflowEvents).toBe(0);
+    expect(body.newAccountRoutineEvents).toBe(6);
+  });
+
+  it("reports an execution that predates its account under its own name", async () => {
+    // Anonymous-to-registered conversion re-attributes anonymous work to the
+    // new user id, so the execution can legitimately precede users.created_at.
+    // Clamping that to 0 reported it as "ran instantly after signup".
+    mockSelectChain.mockResolvedValueOnce([
+      makeRow({
+        userCreatedAt: new Date("2026-05-26T10:00:00Z"),
+        executionStartedAt: new Date("2026-05-26T09:59:25Z"),
+      }),
+    ]);
+    const res = await GET(authedRequest());
+    const body = (await res.json()) as {
+      newAccountFirstWorkflowEvents: number;
+      newAccountRoutineEvents: number;
+      executionPredatesAccountEvents: number;
+    };
+
+    expect(body.executionPredatesAccountEvents).toBe(1);
+    expect(body.newAccountFirstWorkflowEvents).toBe(0);
+    expect(body.newAccountRoutineEvents).toBe(0);
+    expect(loggedEvents()[0]).toMatchObject({
+      event: "security.behavioral.execution_predates_account",
+      ageSecondsSinceSignup: -35,
+    });
   });
 });
 
