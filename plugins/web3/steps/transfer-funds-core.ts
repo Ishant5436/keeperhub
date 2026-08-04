@@ -10,7 +10,11 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "@/lib/db";
-import { chains, explorerConfigs, workflowExecutions } from "@/lib/db/schema";
+import { explorerConfigs, workflowExecutions } from "@/lib/db/schema";
+import {
+  describeNativeShortfall,
+  getNativeSymbol,
+} from "@/lib/execute/native-balance";
 import { getTransactionUrl } from "@/lib/explorer";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import {
@@ -42,6 +46,7 @@ import {
   computeSolanaLamportFee,
   SOLANA_BASE_FEE_LAMPORTS,
 } from "@/lib/web3/solana-fees";
+import { revertedTransactionHash } from "@/lib/web3/onchain-revert";
 import { resolveSponsoredSendError } from "@/lib/web3/sponsored-send-error";
 import { executeSponsoredTransaction } from "@/lib/web3/sponsored-transaction-manager";
 import { isGasSponsorshipEnabled } from "@/lib/web3/sponsorship-feature-flag";
@@ -87,7 +92,19 @@ export type TransferFundsResult =
       effectiveGasPrice: string;
       sponsored?: boolean;
     }
-  | { success: false; error: string; rejection?: RevertKind };
+  | {
+      success: false;
+      error: string;
+      rejection?: RevertKind;
+      // Set only when a transaction reached the chain and failed
+      // there, so the finalizer can persist a receipt for the failure. Absent
+      // on pre-broadcast failures, where no transaction exists.
+      transactionHash?: string;
+      chainId?: number;
+      // True when the terminal failure came from the gas-sponsored path, so
+      // the finalizer can report the route accurately on a failed execution.
+      sponsored?: boolean;
+    };
 
 /**
  * Core transfer funds logic
@@ -314,7 +331,14 @@ export async function transferFundsCore(
         chainId,
       });
       if (!decision.fallback) {
-        return { success: false, error: decision.error };
+        return {
+          success: false,
+          error: decision.error,
+          sponsored: true,
+          ...(decision.transactionHash
+            ? { transactionHash: decision.transactionHash, chainId }
+            : {}),
+        };
       }
     }
   }
@@ -349,21 +373,19 @@ export async function transferFundsCore(
       "preflight"
     );
     if (nativeBalance < amountInWei) {
-      const balanceFormatted = ethers.formatEther(nativeBalance);
-      const requestedFormatted = ethers.formatEther(amountInWei);
-      // Look up the chain's native symbol so the error reads "Insufficient
-      // ETH balance" / "Insufficient BNB balance" instead of the chain-
-      // agnostic "native". Looked up lazily because this branch only fires
-      // on the slow / unhappy path.
-      const chainRow = await db
-        .select({ symbol: chains.symbol })
-        .from(chains)
-        .where(eq(chains.chainId, chainId))
-        .limit(1);
-      const nativeSymbol = chainRow[0]?.symbol ?? "native";
+      // Wording (and the chain's native symbol, so the error reads
+      // "Insufficient ETH balance" rather than the chain-agnostic "native")
+      // comes from lib/execute/native-balance, shared with the dry-run
+      // simulator so the two paths cannot drift. Looked up lazily because
+      // this branch only fires on the slow / unhappy path.
+      const shortfall = describeNativeShortfall({
+        symbol: await getNativeSymbol(chainId),
+        balance: nativeBalance,
+        required: amountInWei,
+      });
       return {
         success: false,
-        error: `Insufficient ${nativeSymbol} balance. Have: ${balanceFormatted}, Need: ${requestedFormatted}`,
+        error: shortfall.message,
       };
     }
 
@@ -449,6 +471,9 @@ export async function transferFundsCore(
         success: false,
         error: formatContractError(error, undefined, "Transaction failed"),
         ...(rejection.kind !== "unknown" ? { rejection } : {}),
+        ...(revertedTransactionHash(error)
+          ? { transactionHash: revertedTransactionHash(error), chainId }
+          : {}),
       };
     }
   });

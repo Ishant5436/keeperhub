@@ -160,3 +160,72 @@ describe("step results that report a transaction hash", () => {
     });
   }
 });
+
+/**
+ * The type-level guard above protects reconciliation itself. This one covers
+ * the schema the platform publishes to agents and step authors: an action
+ * that advertises `transactionHash` in its outputFields but not `chainId`
+ * gives a reader no signal that omitting the chain fails the execution
+ * closed, which is exactly how the field came to be missing in the first
+ * place.
+ */
+const NON_EVM_HASH_ACTIONS = new Set([
+  "call-solana-program-anchor",
+  "send-raw-solana-instruction",
+  "transfer-spl-token",
+]);
+
+type PublishedAction = {
+  slug: string;
+  outputFields: string[];
+};
+
+function collectPublishedActions(): PublishedAction[] {
+  const actions: PublishedAction[] = [];
+  for (const plugin of readdirSync(PLUGINS_DIR, { withFileTypes: true })) {
+    if (!plugin.isDirectory()) {
+      continue;
+    }
+    let source: string;
+    try {
+      source = readFileSync(join(PLUGINS_DIR, plugin.name, "index.ts"), "utf8");
+    } catch {
+      continue;
+    }
+    for (const block of source.split(/\n {4}\{\n/).slice(1)) {
+      const slug = block.match(/^ {6}slug: "([^"]+)"/m)?.[1];
+      const fields = block.match(/outputFields: \[([\s\S]*?)\n {6}\],/)?.[1];
+      if (slug && fields) {
+        actions.push({
+          slug,
+          outputFields: [...fields.matchAll(/field: "([^"]+)"/g)].map(
+            (m) => m[1] as string
+          ),
+        });
+      }
+    }
+  }
+  return actions;
+}
+
+describe("published action schemas that report a transaction hash", () => {
+  const published = collectPublishedActions().filter((a) =>
+    a.outputFields.includes("transactionHash")
+  );
+
+  it("finds the EVM write actions", () => {
+    expect(published.length).toBeGreaterThan(0);
+  });
+
+  for (const { slug, outputFields } of published) {
+    if (NON_EVM_HASH_ACTIONS.has(slug)) {
+      continue;
+    }
+    it(`documents chainId alongside it: ${slug}`, () => {
+      expect(
+        outputFields.includes("chainId"),
+        `action "${slug}" publishes transactionHash without chainId; a step author reading this schema gets no signal that omitting the chain fails the execution closed`
+      ).toBe(true);
+    });
+  }
+});
