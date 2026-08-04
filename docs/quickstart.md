@@ -15,14 +15,14 @@ section links to its full reference page.
 The hosted MCP server is the fastest way to drive KeeperHub from an AI agent.
 
 ```bash
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp
 ```
 
 Run `/mcp` in Claude Code to complete OAuth in the browser. For headless or CI
 environments, pass an organization API key instead:
 
 ```bash
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp \
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp \
   --header "Authorization: Bearer kh_your_key_here"
 ```
 

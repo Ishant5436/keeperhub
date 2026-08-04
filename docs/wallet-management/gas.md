@@ -69,6 +69,8 @@ Setting a gas limit below the estimate will cause the transaction to revert with
 
 On supported networks, KeeperHub can sponsor the **gas fee** of a workflow transaction through Turnkey's Gas Station, so a workflow can run even when the sending wallet holds no native gas token. Sponsorship is enabled per organization and metered against a monthly gas credit allowance shown on your billing page.
 
+Sponsorship also changes how the transaction appears on a block explorer. See [What Your Transaction Looks Like On-Chain](/wallet-management/onchain-appearance).
+
 ### What sponsorship covers
 
 Sponsorship pays the **transaction fee only**. It does not provide the assets your transaction moves. The native value a transaction sends (for example, the ETH amount in a Transfer Native Token action) is always debited from your own wallet.

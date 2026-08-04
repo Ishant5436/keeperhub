@@ -51,11 +51,31 @@ a transaction.
 
 Send an `Idempotency-Key` header to safely retry a request without risking a double-execution. The key is any client-chosen string (for example an agent-side transaction id, ideally a UUID).
 
-- **Replay**: a retry with the same key and the same request body returns the original response (same `executionId`, same status) without executing again.
+- **Replay**: a retry with the same key and the same request body returns the original response (same `executionId`, same status) without executing again, plus an `idempotentReplay` marker described below.
 - **Conflict**: reusing a key with a different request body returns `409` with code `idempotency_conflict` and the `originalExecutionId` the key first produced. Use a new key for a different request.
 - **In progress**: a duplicate that arrives while the first request is still running returns `409` with code `idempotency_in_progress`; retry shortly.
 - **Scope**: keys are scoped per organization, so the same key is shared across an org's API keys.
 - **Window**: stored responses are replayable for 24 hours. After that the key is free to reuse.
+
+### Recognising a replay
+
+A replayed response is otherwise indistinguishable from a fresh one, which matters most when the stored outcome was a failure: the body carries the original error and nothing else, so a retry loop reads "still reverting" when in fact no transaction was sent. To make the difference visible, a replayed JSON-object body carries an extra top-level field:
+
+```json
+{
+  "success": false,
+  "error": "Contract call failed: Error(LK: not yet due)",
+  "idempotentReplay": true
+}
+```
+
+- `idempotentReplay` is present **only** on a replay, and is always `true`. A fresh response never carries it, so treat its absence as "this outcome just happened".
+- It is added to **every** replayed object body, successes as well as failures. A replayed `202` carries it alongside the original `executionId`.
+- It is added at read time only. The stored response is never modified, so replaying twice returns the same body both times.
+- Bodies that are not JSON objects (arrays, strings, `null`) are returned untouched, so a client that already parses those shapes is unaffected.
+- The marker rides in the body rather than a response header because the common consumer is an agent reading a tool result, where headers are not surfaced.
+
+Conflict and in-progress responses are not replays and never carry the field.
 
 Requests without an `Idempotency-Key` behave normally. Read-only and dry-run (`simulate: true`) requests are not affected.
 

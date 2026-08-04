@@ -19,6 +19,12 @@ Turnkey generates and stores private keys inside secure hardware enclaves (TEEs)
 - **Private key export** -- export your key if you need to migrate to another solution
 - **Integrated operations** -- seamless signing for workflow transactions
 
+On networks where gas is sponsored, a workflow write is submitted on your
+wallet's behalf rather than directly by it, so on a block explorer it shows a
+sender and a contract you will not recognise and a value of `0`. See
+[What Your Transaction Looks Like On-Chain](/wallet-management/onchain-appearance)
+before concluding a run did not work.
+
 ## Wallet Funding
 
 Topping up your Turnkey EOA with native gas tokens (ETH on Ethereum, ETH on Base, MATIC on Polygon, SOL on Solana, etc.) is required for any workflow that broadcasts a transaction.

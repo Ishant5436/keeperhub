@@ -14,7 +14,7 @@ The KeeperHub MCP server exposes tools over the Model Context Protocol, enabling
 Connect directly to KeeperHub's hosted MCP server. No local process or CLI installation needed.
 
 ```bash
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp
 ```
 
 Then run `/mcp` inside Claude Code to complete the OAuth authorization via browser. KeeperHub will ask you to approve access, and the token is stored automatically.
@@ -22,7 +22,7 @@ Then run `/mcp` inside Claude Code to complete the OAuth authorization via brows
 For headless or CI environments where browser auth is not available, pass an API key:
 
 ```bash
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp \
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp \
   --header "Authorization: Bearer kh_your_key_here"
 ```
 
@@ -43,7 +43,7 @@ This matters because LLMs select tools from `tools/list` in a single decision st
 ### Install
 
 ```bash
-claude mcp add --transport http my-workflow https://app.keeperhub.com/mcp/w/<slug> \
+claude mcp add --transport http --scope user my-workflow https://app.keeperhub.com/mcp/w/<slug> \
   --header "Authorization: Bearer kh_your_key_here"
 ```
 
@@ -103,7 +103,7 @@ To work with a different org, re-authenticate:
 
 ```bash
 claude mcp remove keeperhub
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp
 ```
 
 Complete the OAuth flow again -- the new active org will be captured.
