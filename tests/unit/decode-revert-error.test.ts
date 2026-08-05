@@ -6,6 +6,7 @@ vi.mock("server-only", () => ({}));
 import {
   classifyRevert,
   decodeRevertReason,
+  formatContractError,
 } from "@/lib/web3/decode-revert-error";
 
 /**
@@ -235,5 +236,88 @@ describe("decodeRevertReason: string-form fallback", () => {
     expect(decodeRevertReason({ data: "0x" })).toBeUndefined();
     expect(decodeRevertReason({})).toBeUndefined();
     expect(decodeRevertReason(null)).toBeUndefined();
+  });
+});
+
+describe("formatContractError: ABI output mismatch", () => {
+  const MEMO_ABI = [
+    "function transferWithMemo(address,uint256,bytes32) returns (bool)",
+  ];
+
+  function badDataError(abi: string[], data: string): unknown {
+    const iface = new ethers.Interface(abi);
+    try {
+      iface.decodeFunctionResult("transferWithMemo", data);
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected decodeFunctionResult to throw");
+  }
+
+  it("names the supplied ABI when the contract returns no data", () => {
+    const iface = new ethers.Interface(MEMO_ABI);
+    const message = formatContractError(badDataError(MEMO_ABI, "0x"), iface);
+    expect(message).toBe(
+      "Contract call failed: Contract returned no data, but the ABI you supplied declares 1 output (bool) for transferWithMemo. If this function returns nothing, use outputs: []."
+    );
+  });
+
+  it("reports the byte count when the returned data is the wrong shape", () => {
+    const iface = new ethers.Interface([
+      "function transferWithMemo(address,uint256,bytes32) returns (bool,uint256)",
+    ]);
+    const message = formatContractError(
+      badDataError(
+        [
+          "function transferWithMemo(address,uint256,bytes32) returns (bool,uint256)",
+        ],
+        `0x${"00".repeat(32)}`
+      ),
+      iface
+    );
+    expect(message).toContain("Contract returned 32 bytes");
+    expect(message).toContain("2 outputs (bool, uint256)");
+  });
+
+  it("still describes the mismatch without the contract interface", () => {
+    const message = formatContractError(badDataError(MEMO_ABI, "0x"));
+    expect(message).toContain("declares a return value for transferWithMemo");
+  });
+
+  it("leaves revert errors and their decoded reason untouched", () => {
+    expect(
+      formatContractError({ data: encodeStringRevert("LK: not yet due") })
+    ).toBe("Contract call failed: Error(LK: not yet due)");
+  });
+
+  it("redacts a keyed provider URL from a pass-through message", () => {
+    const message = formatContractError(
+      new Error(
+        'could not coalesce error (info={ "requestUrl": "https://lb.drpc.live/ethereum/FAKE_TEST_KEY_DO_NOT_USE_AAAAAAAAAAAAAAAAAAAA" }, code=UNKNOWN_ERROR)'
+      )
+    );
+    expect(message).not.toContain("drpc.live");
+    expect(message).not.toContain("FAKE_TEST_KEY");
+    expect(message).toContain("[REDACTED-URL]");
+  });
+
+  it("redacts an internal provider host carrying no key", () => {
+    const message = formatContractError(
+      new Error(
+        'server response 500 (info={ "requestUrl": "https://rpc-internal.example.invalid/ethereum" }, code=SERVER_ERROR)'
+      )
+    );
+    expect(message).not.toContain("rpc-internal.example.invalid");
+    expect(message).toContain("[REDACTED-URL]");
+  });
+
+  it("drops the ethers version from pass-through messages", () => {
+    const message = formatContractError(
+      new Error(
+        'missing revert data (action="estimateGas", code=CALL_EXCEPTION, version=6.16.0)'
+      )
+    );
+    expect(message).not.toContain("version=");
+    expect(message).toContain("code=CALL_EXCEPTION");
   });
 });

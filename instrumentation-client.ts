@@ -8,6 +8,7 @@ import {
   isBrowserExtensionError,
   isEip1193ProviderRejection,
   isMonacoCancellation,
+  throwsOutsideAppBundle,
 } from "@/lib/sentry-filters";
 
 const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN || process.env.SENTRY_DSN;
@@ -42,6 +43,9 @@ if (SENTRY_DSN) {
         return null;
       }
       if (isBrowserExtensionError(event)) {
+        return null;
+      }
+      if (throwsOutsideAppBundle(event)) {
         return null;
       }
       if (isMonacoCancellation(event)) {

@@ -5,6 +5,7 @@ import {
   isBrowserExtensionError,
   isEip1193ProviderRejection,
   isMonacoCancellation,
+  throwsOutsideAppBundle,
 } from "@/lib/sentry-filters";
 
 // Minimal shape the filter predicates actually read. Cast to ErrorEvent so we
@@ -220,6 +221,120 @@ describe("isBrowserExtensionError", () => {
   it("does not match when there are no frames", () => {
     const event = makeEvent({ exception: { values: [{}] } });
     expect(isBrowserExtensionError(event)).toBe(false);
+  });
+});
+
+describe("throwsOutsideAppBundle", () => {
+  function eventWithFrames(filenames: string[]): ErrorEvent {
+    return makeEvent({
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            mechanism: {
+              type: "auto.browser.global_handlers.onerror",
+              handled: false,
+            },
+            stacktrace: {
+              frames: filenames.map((filename) => ({ in_app: true, filename })),
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  // Injectors seen in production. Sentry rewrote every one of these to our own
+  // origin, which is why the in-app checks let them through.
+  const injectedFilenames = [
+    "app:///welcome:1:19",
+    "app:///hub:1:592482",
+    "app:///window-provider.js:520:122",
+    "app:///scripts/inject.js:1:20071",
+    "app:///injectedScript.bundle.js:2:94489",
+  ];
+
+  for (const filename of injectedFilenames) {
+    it(`drops a throw from ${filename}`, () => {
+      expect(throwsOutsideAppBundle(eventWithFrames([filename]))).toBe(true);
+    });
+  }
+
+  it("drops a document throw even when the SDK wrapper frame is ours", () => {
+    const event = eventWithFrames([
+      "app:///_next/static/chunks/main-0000.js:6:1332",
+      "app:///hub:1:592482",
+    ]);
+    expect(throwsOutsideAppBundle(event)).toBe(true);
+  });
+
+  it("keeps a throw from our own bundle", () => {
+    const event = eventWithFrames([
+      "app:///_next/static/chunks/framework-0000.js:20:198900",
+      "app:///_next/static/chunks/page-0000.js:2:71984",
+    ]);
+    expect(throwsOutsideAppBundle(event)).toBe(false);
+  });
+
+  it("keeps an event whose throwing frame has no filename", () => {
+    const event = makeEvent({
+      exception: { values: [{ stacktrace: { frames: [{ in_app: true }] } }] },
+    });
+    expect(throwsOutsideAppBundle(event)).toBe(false);
+  });
+
+  it("keeps an event with no frames", () => {
+    const event = makeEvent({ exception: { values: [{}] } });
+    expect(throwsOutsideAppBundle(event)).toBe(false);
+  });
+
+  // Linked errors, as produced by auto.core.linked_errors, split the thrown
+  // error and its cause across separate exception values.
+  it("drops linked errors when every value is third party", () => {
+    const event = makeEvent({
+      exception: {
+        values: [
+          {
+            stacktrace: {
+              frames: [{ in_app: true, filename: "app:///scripts/inpage.js" }],
+            },
+          },
+          {
+            stacktrace: {
+              frames: [
+                { in_app: true, filename: "app:///scripts/inpage.js:4:41709" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(throwsOutsideAppBundle(event)).toBe(true);
+  });
+
+  it("keeps linked errors when one value is ours", () => {
+    const event = makeEvent({
+      exception: {
+        values: [
+          {
+            stacktrace: {
+              frames: [{ in_app: true, filename: "app:///scripts/inpage.js" }],
+            },
+          },
+          {
+            stacktrace: {
+              frames: [
+                {
+                  in_app: true,
+                  filename: "app:///_next/static/chunks/page-0000.js",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(throwsOutsideAppBundle(event)).toBe(false);
   });
 });
 

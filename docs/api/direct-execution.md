@@ -315,6 +315,8 @@ Add `"simulate": true` to any of the standard request bodies:
 
 `simulate` must be a strict boolean — `true` or `false`. Strings (`"true"`), numbers (`1`), and other non-boolean values are rejected with HTTP 400 to prevent silent fall-through to a real broadcast. There is no query-string form; the body field is the only way to request a dry run.
 
+Because a dry run never signs or broadcasts, an OAuth token scoped `mcp:read` may run one. Removing `simulate` to broadcast requires `mcp:write`.
+
 ### Response — successful simulate
 
 ```json
@@ -503,6 +505,20 @@ Direct execution endpoints return detailed error information:
 **Common Error Codes:**
 
 - `401`: Invalid or missing API key
+- `403`: The daily spending cap is exceeded, or an OAuth token lacks the scope the request needs (`insufficient_scope`). API keys are unaffected by scope.
 - `422`: Wallet not configured, code `WALLET_NOT_CONFIGURED` (see [Wallet Management](/wallet-management/turnkey))
 - `429`: Rate limit exceeded
 - `400`: Invalid request parameters
+
+An `insufficient_scope` response names both scopes so the caller can reauthorize with the right one:
+
+```json
+{
+  "error": "insufficient_scope",
+  "message": "This endpoint requires the `mcp:write` OAuth scope. The current token has `mcp:read`.",
+  "required_scope": "mcp:write",
+  "granted_scope": "mcp:read"
+}
+```
+
+Broadcasting requires `mcp:write`. A dry run (`simulate: true`) neither signs nor broadcasts, so `mcp:read` is sufficient.

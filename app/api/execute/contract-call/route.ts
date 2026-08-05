@@ -14,7 +14,7 @@ import {
   recordIdempotentResponse,
   withIdempotencyHeartbeat,
 } from "@/lib/idempotency";
-import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
+import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { applyRateLimitHeaders } from "@/lib/rate-limit-headers";
 import { getErrorMessage } from "@/lib/utils";
@@ -244,7 +244,33 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const scopeError = requireScope(apiKeyCtx.scope, SCOPE_MCP_WRITE);
+  // Parsed before the scope gate because the required scope depends on
+  // whether this is a dry run.
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: HttpStatus.BAD_REQUEST }
+    );
+  }
+
+  const simulateFlag = parseSimulateFlag(body);
+  if (!simulateFlag.ok) {
+    return NextResponse.json(
+      { error: simulateFlag.error, field: "simulate" },
+      { status: HttpStatus.BAD_REQUEST }
+    );
+  }
+
+  // A dry run never signs, broadcasts, or reserves, so mcp:read satisfies it.
+  // parseSimulateFlag is strict-boolean, so a non-boolean `simulate` is
+  // rejected above rather than downgrading the requirement.
+  const scopeError = requireScope(
+    apiKeyCtx.scope,
+    simulateFlag.simulate ? SCOPE_MCP_READ : SCOPE_MCP_WRITE
+  );
   if (scopeError) {
     return scopeError;
   }
@@ -266,16 +292,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   const executionGuard = await enforceExecutionLimit(apiKeyCtx.organizationId);
   if (executionGuard.blocked) {
     return executionGuard.response;
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body" },
-      { status: HttpStatus.BAD_REQUEST }
-    );
   }
 
   const validation = validateContractCallInput(body);
@@ -322,15 +338,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Dry-run path: validate inputs, simulate via provider.call + estimateGas,
-  // never broadcast, never reserve a directExecutions row. Triggered by
-  // strict boolean `simulate: true` on the body.
-  const simulateFlag = parseSimulateFlag(body);
-  if (!simulateFlag.ok) {
-    return NextResponse.json(
-      { error: simulateFlag.error, field: "simulate" },
-      { status: HttpStatus.BAD_REQUEST }
-    );
-  }
+  // never broadcast, never reserve a directExecutions row.
   if (simulateFlag.simulate) {
     return applyRateLimitHeaders(
       await handleSimulateCall(body, resolvedAbi, apiKeyCtx.organizationId),

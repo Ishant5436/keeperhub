@@ -3,7 +3,12 @@ import { z } from "zod";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { SUPPORTED_CHAIN_IDS } from "@/lib/rpc/types";
 import { withToolLogging } from "./logging";
-import { getRequiredScopeForTool, isToolAllowed } from "./oauth-scopes";
+import {
+  getRequiredScopeForTool,
+  isToolAllowed,
+  SCOPE_MCP_READ,
+  scopeSatisfies,
+} from "./oauth-scopes";
 
 type ScopeDeniedContent = {
   content: [{ type: "text"; text: string }];
@@ -54,10 +59,22 @@ function buildScopeDeniedResult(
 // biome-ignore lint/suspicious/noExplicitAny: SDK ToolCallback uses complex generic overloads that cannot be expressed without any
 type AnyToolHandler = (...args: any[]) => unknown;
 
+/**
+ * A tool whose requirement drops to mcp:read for some argument shapes.
+ * `isToolAllowed` matches on tool name alone, so a write tool with a
+ * read-only mode needs the arguments to decide.
+ */
+type ReadOnlyWhen = (args: unknown) => boolean;
+
+/** The execute tools are writes unless the caller asked for a dry run. */
+const isSimulationRequest: ReadOnlyWhen = (args) =>
+  (args as { simulate?: unknown } | undefined)?.simulate === true;
+
 function withScopeCheck<H extends AnyToolHandler>(
   toolName: string,
   scope: string | undefined,
-  handler: H
+  handler: H,
+  readOnlyWhen?: ReadOnlyWhen
 ): H {
   if (scope === undefined) {
     return handler;
@@ -65,6 +82,12 @@ function withScopeCheck<H extends AnyToolHandler>(
   const wrapped = (
     ...args: Parameters<H>
   ): ReturnType<H> | ScopeDeniedContent => {
+    // A dry run neither signs nor broadcasts, so mcp:read is enough. The
+    // predicate tests for strict `true`, matching the REST routes' strict
+    // boolean parse, so a non-boolean cannot downgrade the requirement.
+    if (readOnlyWhen?.(args[0]) && scopeSatisfies(scope, SCOPE_MCP_READ)) {
+      return handler(...args) as ReturnType<H>;
+    }
     if (!isToolAllowed(toolName, scope)) {
       return buildScopeDeniedResult(toolName, scope);
     }
@@ -1217,27 +1240,31 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Transfer Funds", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck("execute_transfer", scope, async (args) =>
-      withToolLogging("execute_transfer", undefined, async () => {
-        assertSimulationSupported(args.chain_id, args.simulate);
-        const data = await callApi(
-          internalApiBaseUrl,
-          authHeader,
-          "/api/execute/transfer",
-          "POST",
-          {
-            chainId: args.chain_id,
-            recipientAddress: args.to_address,
-            amount: args.amount,
-            tokenAddress: args.token_address,
-            simulate: args.simulate,
-          },
-          args.idempotency_key
-        );
-        return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-        };
-      })
+    withScopeCheck(
+      "execute_transfer",
+      scope,
+      async (args) =>
+        withToolLogging("execute_transfer", undefined, async () => {
+          assertSimulationSupported(args.chain_id, args.simulate);
+          const data = await callApi(
+            internalApiBaseUrl,
+            authHeader,
+            "/api/execute/transfer",
+            "POST",
+            {
+              chainId: args.chain_id,
+              recipientAddress: args.to_address,
+              amount: args.amount,
+              tokenAddress: args.token_address,
+              simulate: args.simulate,
+            },
+            args.idempotency_key
+          );
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        }),
+      isSimulationRequest
     )
   );
 
@@ -1269,31 +1296,35 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Contract Call", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck("execute_contract_call", scope, async (args) =>
-      withToolLogging("execute_contract_call", undefined, async () => {
-        assertSimulationSupported(args.chain_id, args.simulate);
-        const data = await callApi(
-          internalApiBaseUrl,
-          authHeader,
-          "/api/execute/contract-call",
-          "POST",
-          {
-            contractAddress: args.contract_address,
-            chainId: args.chain_id,
-            functionName: args.function_name,
-            functionArgs: args.function_args,
-            abi: args.abi,
-            value: args.value,
-            gasLimitMultiplier: args.gas_limit_multiplier,
-            priorityFeeGwei: args.priority_fee_gwei,
-            simulate: args.simulate,
-          },
-          args.idempotency_key
-        );
-        return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-        };
-      })
+    withScopeCheck(
+      "execute_contract_call",
+      scope,
+      async (args) =>
+        withToolLogging("execute_contract_call", undefined, async () => {
+          assertSimulationSupported(args.chain_id, args.simulate);
+          const data = await callApi(
+            internalApiBaseUrl,
+            authHeader,
+            "/api/execute/contract-call",
+            "POST",
+            {
+              contractAddress: args.contract_address,
+              chainId: args.chain_id,
+              functionName: args.function_name,
+              functionArgs: args.function_args,
+              abi: args.abi,
+              value: args.value,
+              gasLimitMultiplier: args.gas_limit_multiplier,
+              priorityFeeGwei: args.priority_fee_gwei,
+              simulate: args.simulate,
+            },
+            args.idempotency_key
+          );
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        }),
+      isSimulationRequest
     )
   );
 
@@ -1339,36 +1370,40 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Check and Execute", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck("execute_check_and_execute", scope, async (args) =>
-      withToolLogging("execute_check_and_execute", undefined, async () => {
-        assertSimulationSupported(args.chain_id, args.simulate);
-        const data = await callApi(
-          internalApiBaseUrl,
-          authHeader,
-          "/api/execute/check-and-execute",
-          "POST",
-          {
-            contractAddress: args.contract_address,
-            chainId: args.chain_id,
-            functionName: args.function_name,
-            functionArgs: args.function_args,
-            abi: args.abi,
-            condition: args.condition,
-            action: {
-              contractAddress: args.action.contract_address,
-              functionName: args.action.function_name,
-              functionArgs: args.action.function_args,
-              abi: args.action.abi,
-              gasLimitMultiplier: args.action.gas_limit_multiplier,
+    withScopeCheck(
+      "execute_check_and_execute",
+      scope,
+      async (args) =>
+        withToolLogging("execute_check_and_execute", undefined, async () => {
+          assertSimulationSupported(args.chain_id, args.simulate);
+          const data = await callApi(
+            internalApiBaseUrl,
+            authHeader,
+            "/api/execute/check-and-execute",
+            "POST",
+            {
+              contractAddress: args.contract_address,
+              chainId: args.chain_id,
+              functionName: args.function_name,
+              functionArgs: args.function_args,
+              abi: args.abi,
+              condition: args.condition,
+              action: {
+                contractAddress: args.action.contract_address,
+                functionName: args.action.function_name,
+                functionArgs: args.action.function_args,
+                abi: args.action.abi,
+                gasLimitMultiplier: args.action.gas_limit_multiplier,
+              },
+              simulate: args.simulate,
             },
-            simulate: args.simulate,
-          },
-          args.idempotency_key
-        );
-        return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-        };
-      })
+            args.idempotency_key
+          );
+          return {
+            content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          };
+        }),
+      isSimulationRequest
     )
   );
 
@@ -1407,6 +1442,30 @@ export function registerTools(
 // Protocol meta-tools (replaces individual per-action tool registration)
 // =============================================================================
 
+const QUERY_TERM_SPLIT_RE = /\s+/;
+
+// An empty result reads as "the platform cannot do this", so name the
+// filters that can hide an action the caller asked for.
+function buildNoActionMatchHint(args: {
+  query?: string;
+  protocol?: string;
+}): string {
+  const parts = [
+    "No action matched this search, which does not mean the capability is missing.",
+  ];
+  if (args.query) {
+    parts.push(
+      `Every word in query "${args.query}" must appear in an action's label, description, or actionType. Retry with a single keyword such as "swap", "balance", or "borrow".`
+    );
+  }
+  if (args.protocol) {
+    parts.push(
+      `The protocol filter "${args.protocol}" must match a protocol slug exactly (e.g. "uniswap", not "uniswap-v3"). Drop it to search every protocol.`
+    );
+  }
+  return parts.join(" ");
+}
+
 export function registerMetaTools(
   server: McpServer,
   internalApiBaseUrl: string,
@@ -1422,7 +1481,7 @@ export function registerMetaTools(
         .string()
         .optional()
         .describe(
-          "Keyword search across action names and descriptions (e.g., 'ETH balance', 'borrow', 'swap')"
+          "Keyword search across action names, descriptions, and action types. Every word must match, so fewer words match more actions (e.g., 'ETH balance', 'borrow', 'swap'). Omit to list every action."
         ),
       protocol: z
         .string()
@@ -1465,15 +1524,19 @@ export function registerMetaTools(
 
         let results = Object.values(actions);
 
-        // Client-side keyword filtering
+        // Every term must appear somewhere in the action's searchable
+        // text, so a phrase like "token swap" matches instead of being
+        // treated as one literal substring that never occurs.
         if (args.query) {
-          const q = args.query.toLowerCase();
-          results = results.filter(
-            (a) =>
-              a.label?.toLowerCase().includes(q) ||
-              a.description?.toLowerCase().includes(q) ||
-              a.actionType?.toLowerCase().includes(q)
-          );
+          const terms = args.query
+            .toLowerCase()
+            .split(QUERY_TERM_SPLIT_RE)
+            .filter(Boolean);
+          results = results.filter((a) => {
+            const haystack =
+              `${a.label ?? ""} ${a.description ?? ""} ${a.actionType ?? ""}`.toLowerCase();
+            return terms.every((term) => haystack.includes(term));
+          });
         }
 
         // Return compact results
@@ -1491,7 +1554,13 @@ export function registerMetaTools(
             {
               type: "text",
               text: JSON.stringify(
-                { count: compact.length, actions: compact },
+                {
+                  count: compact.length,
+                  actions: compact,
+                  ...(compact.length === 0
+                    ? { hint: buildNoActionMatchHint(args) }
+                    : {}),
+                },
                 null,
                 2
               ),

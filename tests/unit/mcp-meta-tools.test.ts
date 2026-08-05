@@ -1136,3 +1136,112 @@ describe("POST /api/mcp/workflows/[slug]/call: write workflow returns calldata",
     expect(mockGenerateCalldata).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// search_protocol_actions query filtering
+// ---------------------------------------------------------------------------
+
+describe("search_protocol_actions: query filtering", () => {
+  const SCHEMA_ACTIONS = {
+    "uniswap/swap-exact-input": {
+      actionType: "uniswap/swap-exact-input",
+      label: "Uniswap V3: Swap Exact Input",
+      description:
+        "Swap an exact amount of input tokens for as many output tokens as possible (single-hop)",
+    },
+    "web3/approve-token": {
+      actionType: "web3/approve-token",
+      label: "Approve ERC20 Token",
+      description:
+        "Approve a spender contract to spend ERC20 tokens on behalf of your wallet (required before swaps and DeFi interactions)",
+    },
+    "web3/check-balance": {
+      actionType: "web3/check-balance",
+      label: "Get Native Token Balance",
+      description: "Get native token balance (ETH, MATIC, etc.) of any address",
+    },
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: { get: (_key: string) => "application/json" },
+        json: async () => ({ actions: SCHEMA_ACTIONS }),
+        text: async () => "",
+      })
+    );
+  });
+
+  async function invokeSearch(args: Record<string, unknown>) {
+    const { server, registeredTools } = makeMockServer();
+    const { registerMetaTools } = await import("@/lib/mcp/tools");
+    registerMetaTools(server, "http://localhost:3000", "Bearer tok");
+    const tool = registeredTools.find(
+      (t) => t.name === "search_protocol_actions"
+    );
+    if (!tool) {
+      throw new Error("search_protocol_actions not registered");
+    }
+    const result = (await tool.handler(args)) as {
+      content: [{ text: string }];
+    };
+    return JSON.parse(result.content[0].text) as {
+      count: number;
+      actions: Array<{ actionType: string }>;
+      hint?: string;
+    };
+  }
+
+  it("Test 29: multi-word query matches actions carrying every term", async () => {
+    const body = await invokeSearch({ query: "token swap" });
+    expect(body.actions.map((a) => a.actionType)).toEqual([
+      "uniswap/swap-exact-input",
+      "web3/approve-token",
+    ]);
+  });
+
+  it("Test 30: term order does not change the result set", async () => {
+    const forward = await invokeSearch({ query: "token swap" });
+    const reversed = await invokeSearch({ query: "swap token" });
+    expect(reversed.actions.map((a) => a.actionType)).toEqual(
+      forward.actions.map((a) => a.actionType)
+    );
+  });
+
+  it("Test 31: the advertised 'ETH balance' example matches", async () => {
+    const body = await invokeSearch({ query: "ETH balance" });
+    expect(body.actions.map((a) => a.actionType)).toEqual([
+      "web3/check-balance",
+    ]);
+  });
+
+  it("Test 32: single-word query still matches across all three fields", async () => {
+    const body = await invokeSearch({ query: "swap" });
+    expect(body.count).toBe(2);
+  });
+
+  it("Test 33: an unmatched query returns a hint naming the query", async () => {
+    const body = await invokeSearch({ query: "perpetual futures" });
+    expect(body.count).toBe(0);
+    expect(body.hint).toContain("perpetual futures");
+    expect(body.hint).toContain("does not mean the capability is missing");
+  });
+
+  it("Test 34: an unmatched protocol filter is called out in the hint", async () => {
+    const body = await invokeSearch({
+      query: "zzz-no-match",
+      protocol: "uniswap-v3",
+    });
+    expect(body.hint).toContain("uniswap-v3");
+    expect(body.hint).toContain("Drop it to search every protocol");
+  });
+
+  it("Test 35: omitting the query returns every action", async () => {
+    const body = await invokeSearch({});
+    expect(body.count).toBe(3);
+    expect(body.hint).toBeUndefined();
+  });
+});

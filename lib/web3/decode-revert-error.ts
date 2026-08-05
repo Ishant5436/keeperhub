@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { redactAllUrls } from "@/lib/rpc/scrub-rpc-urls";
 
 /**
  * Well-known custom error selectors that appear frequently in contracts
@@ -107,13 +108,74 @@ export function decodeRevertReason(
   return;
 }
 
+const ETHERS_VERSION_FRAGMENT_RE = /,?\s*version=[\w.+-]+/g;
+
+type DecodeFailure = {
+  code?: unknown;
+  value?: unknown;
+  info?: { method?: unknown; signature?: unknown };
+};
+
+function findFunctionOutputs(
+  contractInterface: ethers.Interface | undefined,
+  key: string | undefined
+): readonly ethers.ParamType[] | undefined {
+  if (!(contractInterface && key)) {
+    return;
+  }
+  try {
+    return contractInterface.getFunction(key)?.outputs;
+  } catch {
+    // Ambiguous or absent in this ABI.
+    return;
+  }
+}
+
+/**
+ * The raw ethers BAD_DATA text describes the decoder's problem, not the
+ * caller's. The supplied ABI is the one place worth looking, so name it.
+ */
+function describeOutputMismatch(
+  error: unknown,
+  contractInterface?: ethers.Interface
+): string | undefined {
+  if (!error || typeof error !== "object") {
+    return;
+  }
+  const err = error as DecodeFailure;
+  if (err.code !== "BAD_DATA" || typeof err.value !== "string") {
+    return;
+  }
+
+  const method =
+    typeof err.info?.method === "string" ? err.info.method : undefined;
+  const signature =
+    typeof err.info?.signature === "string" ? err.info.signature : undefined;
+  const outputs = findFunctionOutputs(
+    contractInterface,
+    signature ?? method
+  )?.map((output) => output.type);
+  const declared =
+    outputs && outputs.length > 0
+      ? `${outputs.length} output${outputs.length === 1 ? "" : "s"} (${outputs.join(", ")})`
+      : "a return value";
+  const forFunction = method ? ` for ${method}` : "";
+
+  if (err.value === "0x") {
+    return `Contract returned no data, but the ABI you supplied declares ${declared}${forFunction}. If this function returns nothing, use outputs: [].`;
+  }
+
+  return `Contract returned ${ethers.dataLength(err.value)} bytes, which does not match the ${declared} the ABI you supplied declares${forFunction}. Check the output types against the contract.`;
+}
+
 /**
  * Build a user-facing error message for a contract call failure.
  *
  * If the revert data can be decoded, produces a message like:
  *   "Contract call failed: Unauthorized()"
  *
- * Otherwise falls back to the raw ethers.js error message.
+ * Otherwise falls back to the raw ethers.js error message, minus the
+ * ethers version, which describes our internals rather than the input.
  */
 export function formatContractError(
   error: unknown,
@@ -127,8 +189,18 @@ export function formatContractError(
     return `${label}: ${decoded}`;
   }
 
+  const mismatch = describeOutputMismatch(error, contractInterface);
+  if (mismatch) {
+    return `${label}: ${mismatch}`;
+  }
+
   const message = error instanceof Error ? error.message : String(error);
-  return `${label}: ${message}`;
+  // Every URL an ethers contract error carries is one of our provider
+  // endpoints, so the host goes too, not just the key.
+  const cleaned = redactAllUrls(
+    message.replace(ETHERS_VERSION_FRAGMENT_RE, "")
+  );
+  return `${label}: ${cleaned}`;
 }
 
 /**
