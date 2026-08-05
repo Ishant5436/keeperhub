@@ -174,6 +174,60 @@ describe("classifyExecutionError", () => {
     });
   });
 
+  // Message shapes below are taken verbatim from production execution rows.
+  // Before these rules existed they all fell through to the catch-all and
+  // paged the System Error alert as if KeeperHub had failed.
+  describe("user-config: wallet funding and on-chain outcomes", () => {
+    it.each([
+      "Insufficient USDC balance. Have: 0.5, Need: 1",
+      "Insufficient ETH balance. Have: 0.05, Need: 0.051",
+      "Insufficient USDT balance. Have: 0, Need: 25",
+      "Insufficient SOL balance. Have: 0 lamports, Need: 5000 lamports (5000 fee)",
+      "Transaction reverted: Execution reverted on chain (tx 0xbadab698fa3d746b7ba3ff6c87b6baf40271f4650be01f1118eb16)",
+    ])("classifies %s as transaction + user", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.TRANSACTION);
+      expect(r.errorType).toBe("user");
+      expect(r.code).toBeNull();
+    });
+
+    it("Wallet has no token account for mint: configuration + user", () => {
+      const r = classifyExecutionError(
+        "Wallet has no token account for mint 4zMMC9srt5Ri5X14GAgXhaHii5GnPAEERYPJgZJDncDU"
+      );
+      expect(r.errorCategory).toBe(ErrorCategory.CONFIGURATION);
+      expect(r.errorType).toBe("user");
+    });
+
+    it("typedData.domain.chainId on an unsupported chain: validation + user", () => {
+      const r = classifyExecutionError(
+        "typedData.domain.chainId 137 is not a supported chain"
+      );
+      expect(r.errorCategory).toBe(ErrorCategory.VALIDATION);
+      expect(r.errorType).toBe("user");
+    });
+
+    // The funding rules are start-anchored on purpose. An RPC exhaustion
+    // message can quote a provider body that contains the same phrase, and
+    // that must stay a KeeperHub-managed RPC fault rather than being
+    // reattributed to the workflow author.
+    it("keeps an RPC exhaustion message system even when it quotes a balance error", () => {
+      const r = classifyExecutionError(
+        "RPC failed on both endpoints. Primary: Insufficient ETH balance. Have: 0.05, Need: 0.051. Fallback: timeout"
+      );
+      expect(r.errorCategory).toBe(ErrorCategory.NETWORK_RPC);
+      expect(r.errorType).toBe("system");
+    });
+
+    it("still defaults a genuinely unknown engine failure to system", () => {
+      const r = classifyExecutionError(
+        "Insufficient. balance without the expected shape"
+      );
+      expect(r.errorCategory).toBe(ErrorCategory.WORKFLOW_ENGINE);
+      expect(r.errorType).toBe("system");
+    });
+  });
+
   describe("user-config: bad request/auth to an external endpoint (4xx)", () => {
     it.each([
       'HTTP 401: {"error":"unauthorized"}',

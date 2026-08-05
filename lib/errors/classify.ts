@@ -142,6 +142,33 @@ const RULES: readonly Rule[] = [
     errorType: ExecutionErrorType.USER,
     code: null,
   },
+  // The step reported a revert directly rather than through the finalize
+  // gate's `On-chain verification failed` wrapper. Same outcome, same bucket.
+  {
+    pattern: /^Transaction reverted:/i,
+    errorCategory: ErrorCategory.TRANSACTION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  },
+  // The author's wallet does not hold enough of the asset (or native gas
+  // token) for the transfer the workflow asked for. Observed shapes are
+  // `Insufficient USDC balance. Have: N, Need: N` and the Solana lamports
+  // variant. Anchored so an RPC-exhaustion message that quotes a provider
+  // body containing this phrase still falls through to the system RPC rules.
+  {
+    pattern: /^Insufficient \S+ balance\b/i,
+    errorCategory: ErrorCategory.TRANSACTION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  },
+  // Solana: the destination wallet has no associated token account for the
+  // mint the author configured, so the transfer cannot be routed.
+  {
+    pattern: /^Wallet has no token account for mint/i,
+    errorCategory: ErrorCategory.CONFIGURATION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  },
   {
     pattern: /^Invalid contract address/i,
     errorCategory: ErrorCategory.VALIDATION,
@@ -276,6 +303,15 @@ const RULES: readonly Rule[] = [
   },
   {
     pattern: /Unsupported network:/i,
+    errorCategory: ErrorCategory.VALIDATION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  },
+  // Typed-data signing against a chain the platform does not support -- the
+  // author picked it. Anchored on the field name for the same reason as the
+  // rules above: the phrase can appear inside a quoted provider response.
+  {
+    pattern: /^typedData\.domain\.chainId\b.*is not a supported chain/i,
     errorCategory: ErrorCategory.VALIDATION,
     errorType: ExecutionErrorType.USER,
     code: null,
