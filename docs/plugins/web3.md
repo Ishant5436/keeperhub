@@ -479,7 +479,7 @@ If you're building this action via the [Workflows API](/api/workflows) rather th
 | Web3 Connection | `web3Connection` | Sender routing: `"default"` (org policy), `"eoa"` (force the Turnkey EOA), or `"safe:<safeWalletId>"`. The signing wallet is your org's Turnkey wallet, resolved automatically. |
 | Network | `network` | numeric chain id as a string (e.g. `"11155111"`) |
 
-See the [generic web3 write-contract example](/api/workflows#generic-web3-write-contract-example-http-trigger) in the Workflows API docs for a full working request body.
+See the [generic web3 write-contract example](/api/workflows#generic-web3-write-contract-example-manual-trigger) in the Workflows API docs for a full working request body.
 
 ---
 

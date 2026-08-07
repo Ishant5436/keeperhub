@@ -15,6 +15,11 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  formatGasAsEth,
+  gasDecimals,
+  parseWei,
+} from "@/lib/analytics/format-gas";
+import {
   analyticsLoadingAtom,
   analyticsNetworksAtom,
 } from "@/lib/atoms/analytics";
@@ -26,15 +31,6 @@ const BAR_COLORS = [
   "var(--chart-4)",
   "var(--chart-5)",
 ] as const;
-
-function formatGasAsEth(weiString: string): string {
-  const wei = Number(weiString);
-  if (Number.isNaN(wei) || wei === 0) {
-    return "0 ETH";
-  }
-  const eth = wei / 1e18;
-  return `${eth.toFixed(4)} ETH`;
-}
 
 type ChartDatum = {
   network: string;
@@ -52,9 +48,14 @@ type TooltipPayloadEntry = {
 type CustomTooltipProps = {
   active?: boolean;
   payload?: TooltipPayloadEntry[];
+  decimals?: number;
 };
 
-function ChartTooltip({ active, payload }: CustomTooltipProps): ReactNode {
+function ChartTooltip({
+  active,
+  payload,
+  decimals,
+}: CustomTooltipProps): ReactNode {
   if (!(active && payload?.length)) {
     return null;
   }
@@ -65,7 +66,7 @@ function ChartTooltip({ active, payload }: CustomTooltipProps): ReactNode {
     <div className="rounded-lg border bg-background px-3 py-2 shadow-md">
       <p className="mb-1 text-sm font-medium">{data.network}</p>
       <div className="space-y-0.5 text-xs text-muted-foreground">
-        <p>Gas: {formatGasAsEth(data.gasWei)}</p>
+        <p>Gas: {formatGasAsEth(data.gasWei, decimals)}</p>
         <p>Executions: {data.executions}</p>
         <p>Success: {data.successCount}</p>
         <p>Errors: {data.errorCount}</p>
@@ -84,9 +85,11 @@ function ChartSkeleton(): ReactNode {
 
 function GasChartContent({
   chartData,
+  decimals,
   loading,
 }: {
   chartData: ChartDatum[];
+  decimals: number;
   loading: boolean;
 }): ReactNode {
   const isEmpty = chartData.length === 0;
@@ -114,7 +117,7 @@ function GasChartContent({
         <XAxis
           axisLine={false}
           tick={{ fill: "var(--color-muted-foreground)", fontSize: 12 }}
-          tickFormatter={(value: number) => `${value.toFixed(4)}`}
+          tickFormatter={(value: number) => value.toFixed(decimals)}
           tickLine={false}
           type="number"
         />
@@ -126,7 +129,10 @@ function GasChartContent({
           type="category"
           width={100}
         />
-        <RechartsTooltip content={<ChartTooltip />} cursor={false} />
+        <RechartsTooltip
+          content={<ChartTooltip decimals={decimals} />}
+          cursor={false}
+        />
         <Bar dataKey="gasEth" radius={[0, 4, 4, 0]}>
           {chartData.map((entry, index) => (
             <Cell
@@ -157,13 +163,24 @@ export function GasBreakdownChart(): ReactNode {
     [networks]
   );
 
+  // One precision for the whole chart so the axis ticks and every tooltip read
+  // on the same scale, wide enough for the smallest network's total.
+  const decimals = useMemo(
+    () => gasDecimals(chartData.map((datum) => parseWei(datum.gasWei))),
+    [chartData]
+  );
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Gas by Network</CardTitle>
       </CardHeader>
       <CardContent>
-        <GasChartContent chartData={chartData} loading={loading} />
+        <GasChartContent
+          chartData={chartData}
+          decimals={decimals}
+          loading={loading}
+        />
       </CardContent>
     </Card>
   );

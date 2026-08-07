@@ -151,6 +151,10 @@ function applyPrivateMempoolSwap(
     ...baseConfig,
     primaryRpcUrl: baseConfig.privateRpcUrl,
     fallbackRpcUrl: strict ? undefined : baseConfig.primaryRpcUrl,
+    // Only reached when the swap actually happened: the node asked for the
+    // private mempool and the chain had a relay to route to. We configure that
+    // pointer but do not run the node behind it.
+    primaryIsPrivateRelay: true,
   };
 }
 

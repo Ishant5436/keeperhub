@@ -44,6 +44,56 @@ export function isNonRetryableError(error: unknown): boolean {
   return NON_RETRYABLE_ERROR_CODES.has(ethersError.code as string);
 }
 
+export const RPC_CONNECTION_ERROR_PATTERNS: readonly string[] = [
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "fetch failed",
+];
+
+/** Lowest HTTP status that means the endpoint itself failed to serve us. */
+const SERVER_ERROR_STATUS_FLOOR = 500;
+const RATE_LIMIT_STATUS = 429;
+
+/**
+ * Whether an error means we could not get an answer out of the endpoint at all
+ * -- it timed out, refused the connection, did not resolve, rate-limited us, or
+ * answered 5xx. Deliberately excludes anything the endpoint answered
+ * definitively (reverts, insufficient funds, nonce conflicts, malformed
+ * responses): those are the same on every node, so they say nothing about who
+ * operates this one.
+ *
+ * Used to decide whether a failover exhaustion can be attributed to whoever
+ * runs the endpoint. Unrecognised errors return false, so an unknown failure
+ * stays with the platform rather than being blamed on a third party.
+ */
+export function isTransportFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  // RpcProviderManager.withTimeout, which races the operation itself.
+  if (error.message.startsWith("Timeout after ")) {
+    return true;
+  }
+  if (isError(error, "TIMEOUT") || isError(error, "NETWORK_ERROR")) {
+    return true;
+  }
+  if (isError(error, "SERVER_ERROR")) {
+    const status = (
+      error as EthersError & { response?: { statusCode?: number } }
+    ).response?.statusCode;
+    // No status at all means the request never completed a round trip.
+    return (
+      status === undefined ||
+      status === RATE_LIMIT_STATUS ||
+      status >= SERVER_ERROR_STATUS_FLOOR
+    );
+  }
+  return RPC_CONNECTION_ERROR_PATTERNS.some((pattern) =>
+    error.message.includes(pattern)
+  );
+}
+
 /**
  * Type guard for 429 rate-limit responses. Used by RpcProviderManager to
  * extract Retry-After headers.

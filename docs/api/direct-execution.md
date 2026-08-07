@@ -537,6 +537,32 @@ For ERC-20 transfers, `decimals` is optional — when omitted, the simulator loo
 
 `executed` reflects whether the action would have successfully run, so a reverted simulate returns `executed: false`.
 
+#### When no action is simulated
+
+A dry run reaches the action only when the condition is met and the action is a
+write. Two outcomes stop earlier, and both answer `200` with `success: true` and
+`status: "simulated"`, so the run is never mistaken for a failure:
+
+```json
+{
+  "success": true,
+  "status": "simulated",
+  "executed": false,
+  "conditionResult": { "met": false, "...": "..." }
+}
+```
+
+A read-only action answers the same way with `executed: true` and the `result`
+of the read.
+
+Neither carries `wouldRevert`. That field is a statement about a specific call
+that was encoded and estimated, and on these paths no such call was made, so
+there is nothing to report. Read `wouldRevert` only when it is present, and use
+`success` to decide whether the dry run itself completed.
+
+Broadcast responses are unaffected: without `simulate: true` these two outcomes
+return `{ executed, conditionResult }` exactly as before.
+
 ### Known limitation
 
 The `from` address used during simulation is the org's wallet (`getOrganizationWalletAddress`). Organizations that route writes through a Safe will see a simulation that reflects the EOA sending the call, not the Safe. Most config-bug categories (bad ABI, bad args, allowance mismatches) still surface; Safe-routed `msg.sender` semantics do not.

@@ -10,7 +10,9 @@ The function signature should be in Solidity format (e.g. "balanceOf(address)").
 Arguments are positional and must match the function signature types.
 
 Supported argument types: address, uint256, bool, bytes32.
-No auth required; uses public RPC endpoints by default.
+
+No auth required. The RPC endpoint is yours to supply, via --rpc-url, the
+KH_RPC_URL env var, or an rpc.<chain-id> entry in the config file.
 
 ```
 kh read <contract-address> <function-signature> [args...] [flags]

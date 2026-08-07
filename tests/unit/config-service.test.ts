@@ -40,6 +40,18 @@ describe("config-service", () => {
     updatedAt: new Date(),
   };
 
+  function mockChainQuery(chain: Record<string, unknown>): void {
+    vi.mocked(db.select).mockImplementation(
+      vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([chain]),
+          }),
+        }),
+      })
+    );
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -170,6 +182,64 @@ describe("config-service", () => {
       const result = await resolveRpcConfig(1);
 
       expect(result).toBeNull();
+    });
+
+    it("flags the primary as the private relay when the swap applies", async () => {
+      mockChainQuery({
+        ...mockChain,
+        usePrivateMempoolRpc: true,
+        defaultPrivateRpcUrl: "https://rpc.flashbots.example.com",
+      });
+
+      const result = await resolveRpcConfig(1, undefined, {
+        usePrivateMempool: true,
+      });
+
+      expect(result?.primaryRpcUrl).toBe("https://rpc.flashbots.example.com");
+      expect(result?.primaryIsPrivateRelay).toBe(true);
+      // Strict by default: no fallback, so the relay is the only endpoint in
+      // the round and a transport failure is attributable to it alone.
+      expect(result?.fallbackRpcUrl).toBeUndefined();
+    });
+
+    it("keeps our own endpoint as the fallback when the swap is not strict", async () => {
+      mockChainQuery({
+        ...mockChain,
+        usePrivateMempoolRpc: true,
+        defaultPrivateRpcUrl: "https://rpc.flashbots.example.com",
+      });
+
+      const result = await resolveRpcConfig(1, undefined, {
+        usePrivateMempool: true,
+        strict: false,
+      });
+
+      expect(result?.primaryIsPrivateRelay).toBe(true);
+      expect(result?.fallbackRpcUrl).toBe("https://default-eth.example.com");
+    });
+
+    it("does not flag the relay when the chain does not support private mempool", async () => {
+      mockChainQuery(mockChain);
+
+      const result = await resolveRpcConfig(1, undefined, {
+        usePrivateMempool: true,
+      });
+
+      expect(result?.primaryRpcUrl).toBe("https://default-eth.example.com");
+      expect(result?.primaryIsPrivateRelay).toBeUndefined();
+    });
+
+    it("does not flag the relay when the node did not ask for the private mempool", async () => {
+      mockChainQuery({
+        ...mockChain,
+        usePrivateMempoolRpc: true,
+        defaultPrivateRpcUrl: "https://rpc.flashbots.example.com",
+      });
+
+      const result = await resolveRpcConfig(1);
+
+      expect(result?.primaryRpcUrl).toBe("https://default-eth.example.com");
+      expect(result?.primaryIsPrivateRelay).toBeUndefined();
     });
   });
 

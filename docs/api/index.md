@@ -19,6 +19,17 @@ base above exactly as shown. Setting a client's base URL to
 `https://app.keeperhub.com/api` and then appending a documented path produces a
 doubled `/api/api` prefix and a 404.
 
+That particular 404 names itself, so you do not have to guess. It answers with
+`error: "doubled_api_prefix"` and a `hint` carrying the corrected path:
+
+```json
+{
+  "error": "doubled_api_prefix",
+  "detail": "Route GET /api/api/chains not found. The path is doubled: it contains /api twice.",
+  "hint": "Your base URL already includes /api. Drop it from the base URL, or call /api/chains instead."
+}
+```
+
 ## Authentication
 
 API requests require authentication. Two methods are supported, but their accepted scope differs:

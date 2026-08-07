@@ -19,8 +19,12 @@ export { ExecutionErrorType } from "@/lib/errors/execution-error-type";
  *                    configured the workflow to call (HTTP request / webhook
  *                    transport failures such as timeouts, connection resets, DNS
  *                    failures) where neither the customer's config nor KeeperHub
- *                    is at fault. RPC endpoints are KeeperHub-managed, so their
- *                    failures stay "system", not "external".
+ *                    is at fault. RPC endpoints are KeeperHub-managed, so an
+ *                    `RPC failed ...` message stays "system" here; the one
+ *                    exception is the private-mempool relay a node opted into,
+ *                    which we point at but do not operate. The RPC layer tags
+ *                    that at the failure site and the step forwards it as an
+ *                    errorClass hint.
  *   - code:          a `PREFIX-NNNN` system error code for system failures, or
  *                    null for user and external failures (which surface their
  *                    raw message).

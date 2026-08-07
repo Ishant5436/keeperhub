@@ -131,7 +131,7 @@ POST /api/workflows/create
 
 `name`, `nodes`, and `edges` are required. `description`, `projectId`, `tagId`, and `enabled` are optional. `projectId` assigns the workflow to a [project](/api/projects); `tagId` assigns it to an organization tag for categorization; `enabled` (boolean) controls whether the workflow is active on creation.
 
-### Generic web3 write-contract example (HTTP trigger)
+### Generic web3 write-contract example (Manual trigger)
 
 Named-protocol actions (`aave-v3/supply`, etc.) hide most of the plumbing behind protocol-aware config keys. When you want to call an arbitrary contract that isn't in the [plugin catalog](/plugins/web3), use the generic `web3/write-contract` action. The trap is that the UI labels ("Function", "Function Arguments") don't line up 1:1 with the API field names, and `functionArgs` is a **JSON-encoded array string**, not a raw array. The full config shape:
 
@@ -143,8 +143,8 @@ Named-protocol actions (`aave-v3/supply`, etc.) hide most of the plumbing behind
       "id": "trigger-1",
       "type": "trigger",
       "data": {
-        "label": "HTTP",
-        "config": { "triggerType": "HTTP", "httpMethod": "POST" }
+        "label": "Manual",
+        "config": { "triggerType": "Manual" }
       }
     },
     {
@@ -159,7 +159,7 @@ Named-protocol actions (`aave-v3/supply`, etc.) hide most of the plumbing behind
           "contractAddress": "0x599869cef2e4c52e2c9074caaf8f9fb0cb191776",
           "abi": "[{\"type\":\"function\",\"name\":\"release\",\"stateMutability\":\"nonpayable\",\"inputs\":[{\"name\":\"depositId\",\"type\":\"bytes32\"}],\"outputs\":[]}]",
           "abiFunction": "release",
-          "functionArgs": "[\"{{@trigger-1:HTTP.depositId}}\"]"
+          "functionArgs": "[\"{{@trigger-1:Manual.depositId}}\"]"
         }
       }
     }
@@ -181,7 +181,7 @@ Field-name gotchas the strict validator will reject:
 
 A warning on `functionName` and `args`: the save-time validator accepts them, because workflows persisted before a field rename still carry that shape and have to stay re-savable. The runtime does not translate them. A workflow that uses `functionName` will therefore save without complaint and then fail at execution with ``Missing `abiFunction` in the step config``. Always send `abiFunction` and `functionArgs`.
 
-Trigger data reference from a downstream action uses the [stored templating format](/workflows/templating): `{{@<nodeId>:<Label>.<field>}}`. For an HTTP trigger, top-level fields on the request body are spread into the trigger's output, so `{"input": {"depositId": "0x…"}}` sent to [`POST /api/workflows/{id}/execute`](#execute-workflow) is reachable at `{{@trigger-1:HTTP.depositId}}`.
+Trigger data reference from a downstream action uses the [stored templating format](/workflows/templating): `{{@<nodeId>:<Label>.<field>}}`. Fields on the `input` object are spread into the trigger's output, so `{"input": {"depositId": "0x…"}}` sent to [`POST /api/workflows/{id}/execute`](#execute-workflow) is reachable at `{{@trigger-1:Manual.depositId}}`. Valid `triggerType` values are `Manual`, `Schedule`, `Webhook`, `Event`, `Block`, and `Transfer`; a `Webhook` trigger receives the same treatment on its own `POST /api/workflows/{id}/webhook` URL.
 
 ### Response
 

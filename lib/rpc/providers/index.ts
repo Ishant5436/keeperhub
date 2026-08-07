@@ -2,12 +2,20 @@ import { ethers, isError } from "ethers";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import { safeEthersGetUrl } from "../safe-ethers-fetch";
 import { redactAllUrls, scrubRpcUrls } from "../scrub-rpc-urls";
-import { isNonRetryableError } from "./error-classification";
+import {
+  isNonRetryableError,
+  isTransportFailure,
+  RPC_CONNECTION_ERROR_PATTERNS,
+} from "./error-classification";
+import { RpcRelayTransportError } from "./transport-error";
 
 export {
   isNonRetryableError,
+  isTransportFailure,
   NON_RETRYABLE_ERROR_CODES,
+  RPC_CONNECTION_ERROR_PATTERNS,
 } from "./error-classification";
+export { RpcRelayTransportError, rpcRelayErrorClass } from "./transport-error";
 
 /**
  * Interface for metrics collection - allows dependency injection
@@ -143,13 +151,6 @@ export const consoleMetricsCollector: RpcMetricsCollector = {
     ),
 };
 
-export const RPC_CONNECTION_ERROR_PATTERNS: readonly string[] = [
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  "ETIMEDOUT",
-  "fetch failed",
-];
-
 /**
  * Classify an RPC error into a category for metrics tracking.
  * Standalone version for use outside of executeWithFailover
@@ -185,6 +186,10 @@ export type RpcProviderConfig = {
   timeoutMs?: number;
   chainName?: string;
   chainId?: number;
+  // True only when the private-mempool swap put the chain's relay on the
+  // primary. Defaults to false, so a manager built from raw URLs keeps
+  // attributing its failures to KeeperHub.
+  primaryIsPrivateRelay?: boolean;
 };
 
 export type RpcProviderMetrics = {
@@ -234,6 +239,7 @@ export class RpcProviderManager {
       timeoutMs: config.timeoutMs ?? RpcProviderManager.DEFAULT_TIMEOUT_MS,
       chainName: config.chainName ?? "unknown",
       chainId: config.chainId ?? 1,
+      primaryIsPrivateRelay: config.primaryIsPrivateRelay ?? false,
     };
 
     this.metricsCollector = metricsCollector;
@@ -376,10 +382,12 @@ export class RpcProviderManager {
         // Thrown messages reach end users via step errors; drop provider
         // URLs entirely (host included). Internal logs above keep the
         // host-visible masked form.
-        throw new Error(
-          redactAllUrls(
-            `RPC failed on both endpoints. Fallback: ${fallbackResult.error}. Primary: ${primaryResult.error}`
-          )
+        throw this.failoverError(
+          `RPC failed on both endpoints. Fallback: ${fallbackResult.error}. Primary: ${primaryResult.error}`,
+          [
+            { endpoint: "fallback", transport: fallbackResult.transport },
+            { endpoint: "primary", transport: primaryResult.transport },
+          ]
         );
       }
     }
@@ -443,16 +451,47 @@ export class RpcProviderManager {
           chain: this.config.chainName,
         }
       );
-      throw new Error(
-        redactAllUrls(
-          `RPC failed on both endpoints. Primary: ${primaryResult.error}. Fallback: ${fallbackResult.error}`
-        )
+      throw this.failoverError(
+        `RPC failed on both endpoints. Primary: ${primaryResult.error}. Fallback: ${fallbackResult.error}`,
+        [
+          { endpoint: "primary", transport: primaryResult.transport },
+          { endpoint: "fallback", transport: fallbackResult.transport },
+        ]
       );
     }
 
-    throw new Error(
-      redactAllUrls(`RPC failed on primary endpoint: ${primaryResult.error}`)
+    throw this.failoverError(
+      `RPC failed on primary endpoint: ${primaryResult.error}`,
+      [{ endpoint: "primary", transport: primaryResult.transport }]
     );
+  }
+
+  /**
+   * Build the error for an exhausted failover round.
+   *
+   * Becomes a relay error only when the round never touched an endpoint we
+   * operate AND every attempt failed on transport. In practice that is the
+   * strict private-mempool case, where the swap left the relay as the only
+   * endpoint. Anything else stays a plain Error so the message classifier
+   * keeps deciding, which for RPC means a platform fault.
+   */
+  private failoverError(
+    message: string,
+    failures: readonly {
+      endpoint: "primary" | "fallback";
+      transport?: boolean;
+    }[]
+  ): Error {
+    const redacted = redactAllUrls(message);
+    const allOnTheRelay = failures.every(
+      (failure) =>
+        failure.transport &&
+        failure.endpoint === "primary" &&
+        this.config.primaryIsPrivateRelay
+    );
+    return allOnTheRelay
+      ? new RpcRelayTransportError(redacted)
+      : new Error(redacted);
   }
 
   private recordAttempt(
@@ -550,7 +589,13 @@ export class RpcProviderManager {
     providerType: "primary" | "fallback",
     maxRetries: number,
     operationType: RpcOperationType = "read"
-  ): Promise<{ success: boolean; result?: T; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    result?: T;
+    error?: string;
+    /** Whether the last attempt failed on transport rather than on an answer. */
+    transport?: boolean;
+  }> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -609,6 +654,7 @@ export class RpcProviderManager {
       // Ethers v6 inlines info.requestUrl (keyed RPC URL) into Error.message;
       // mask the key before the message reaches thrown errors and logs.
       error: scrubRpcUrls(lastError?.message ?? "") || "Unknown error",
+      transport: isTransportFailure(lastError),
     };
   }
 
@@ -692,6 +738,7 @@ export type CreateRpcProviderManagerOptions = {
   timeoutMs?: number;
   chainName?: string;
   chainId?: number;
+  primaryIsPrivateRelay?: boolean;
   metricsCollector?: RpcMetricsCollector;
   onFailoverStateChange?: FailoverStateChangeCallback;
 };
@@ -711,6 +758,7 @@ export function createRpcProviderManager(
         timeoutMs: options.timeoutMs,
         chainName: options.chainName,
         chainId: options.chainId,
+        primaryIsPrivateRelay: options.primaryIsPrivateRelay,
       },
       metricsCollector: options.metricsCollector,
       onFailoverStateChange: options.onFailoverStateChange,

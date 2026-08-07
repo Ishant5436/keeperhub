@@ -30,6 +30,14 @@ export type ResolvedRpcConfig = {
   chainName: string;
   primaryRpcUrl: string;
   fallbackRpcUrl?: string;
+  /**
+   * True when the private-mempool swap put the chain's relay (Flashbots
+   * Protect and friends, from `chains.default_private_rpc_url`) on the primary.
+   * Every other endpoint we hand out is one we run: chain defaults come from
+   * env-configured infrastructure. The fallback is never the relay -- strict
+   * mode clears it, non-strict keeps the public endpoint the swap replaced.
+   */
+  primaryIsPrivateRelay?: boolean;
   primaryWssUrl?: string;
   fallbackWssUrl?: string;
   // KEEP-137: whether the chain supports private mempool routing (Flashbots Protect).

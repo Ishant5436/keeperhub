@@ -95,3 +95,52 @@ describe("/api/[...slug] catch-all 404", () => {
     expect(body.detail).toBe("Route POST /api/me not found");
   });
 });
+
+// A base URL that already ends in /api produces /api/api/... . That is a
+// configuration mistake with one cause, so it gets its own code rather than
+// being indistinguishable from a wrong path.
+describe("/api/[...slug] doubled prefix", () => {
+  it("names the cause instead of returning a bare not_found", async () => {
+    const response = GET(buildRequest("GET", "/api/api/chains"));
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.error).toBe("doubled_api_prefix");
+    expect(body.detail).toContain("/api twice");
+  });
+
+  it("hints the corrected path with the duplicate segment removed", async () => {
+    const response = GET(buildRequest("GET", "/api/api/chains"));
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.hint).toContain("/api/chains");
+    expect(body.hint).not.toContain("/api/api/chains");
+  });
+
+  it("catches the bare doubled root", async () => {
+    const response = GET(buildRequest("GET", "/api/api"));
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.error).toBe("doubled_api_prefix");
+  });
+
+  it("applies to every verb", async () => {
+    for (const [method, handler] of Object.entries(HANDLERS)) {
+      const response = handler(buildRequest(method, "/api/api/workflows"));
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.error).toBe("doubled_api_prefix");
+    }
+  });
+
+  it("leaves a path that merely contains api elsewhere alone", async () => {
+    const response = GET(buildRequest("GET", "/api/workflows/api/runs"));
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.error).toBe("not_found");
+  });
+
+  it("keeps the canonical envelope fields", async () => {
+    const response = GET(
+      buildRequest("GET", "/api/api/chains", { "x-request-id": "trace-dup-1" })
+    );
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.request_id).toBe("trace-dup-1");
+  });
+});

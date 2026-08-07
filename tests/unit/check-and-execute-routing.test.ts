@@ -230,3 +230,104 @@ describe("check-and-execute routing", () => {
     expect(mockReadContractCore).toHaveBeenCalledTimes(1);
   });
 });
+
+// A dry run answers with one shape whatever it finds, so a caller cannot
+// mistake an absent `success` for a failed simulation.
+describe("check-and-execute dry-run response shape", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  type DryRun = {
+    success?: boolean;
+    status?: string;
+    wouldRevert?: boolean;
+    executed: boolean;
+  };
+
+  async function postJson(body: Record<string, unknown>): Promise<{
+    status: number;
+    json: DryRun;
+  }> {
+    const res = await POST(createRequest(body));
+    return { status: res.status, json: (await res.json()) as DryRun };
+  }
+
+  it("reports success when the condition is not met", async () => {
+    mockEvaluateCondition.mockReturnValue({
+      met: false,
+      actual: "10",
+      operator: "gt",
+      expected: "50",
+    });
+
+    const { status, json } = await postJson({
+      ...makeBody("nonpayable"),
+      simulate: true,
+    });
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.status).toBe("simulated");
+    expect(json.executed).toBe(false);
+    expect(mockWriteContractCore).not.toHaveBeenCalled();
+  });
+
+  it("claims nothing about reverting when no action was simulated", async () => {
+    mockEvaluateCondition.mockReturnValue({
+      met: false,
+      actual: "10",
+      operator: "gt",
+      expected: "50",
+    });
+
+    const { json } = await postJson({
+      ...makeBody("nonpayable"),
+      simulate: true,
+    });
+
+    expect(json).not.toHaveProperty("wouldRevert");
+  });
+
+  it("reports success when the action is read-only", async () => {
+    const { status, json } = await postJson({
+      ...makeBody("view"),
+      simulate: true,
+    });
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.status).toBe("simulated");
+    expect(json.executed).toBe(true);
+    expect(json).not.toHaveProperty("wouldRevert");
+    expect(mockWriteContractCore).not.toHaveBeenCalled();
+  });
+
+  it("leaves the broadcast response untouched when the condition is not met", async () => {
+    mockEvaluateCondition.mockReturnValue({
+      met: false,
+      actual: "10",
+      operator: "gt",
+      expected: "50",
+    });
+
+    const { status, json } = await postJson(makeBody("nonpayable"));
+
+    expect(status).toBe(200);
+    expect(json.executed).toBe(false);
+    expect(json).not.toHaveProperty("success");
+    expect(json).not.toHaveProperty("status");
+    expect(json).not.toHaveProperty("wouldRevert");
+  });
+
+  it("leaves the broadcast response untouched for a read-only action", async () => {
+    const { status, json } = await postJson(makeBody("view"));
+
+    expect(status).toBe(200);
+    expect(json.executed).toBe(true);
+    expect(json).not.toHaveProperty("success");
+    expect(json).not.toHaveProperty("status");
+    expect(json).not.toHaveProperty("wouldRevert");
+  });
+});

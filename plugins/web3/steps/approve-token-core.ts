@@ -20,6 +20,8 @@ import {
 } from "@/lib/web3/wallet-helpers";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
+import { rpcRelayErrorClass } from "@/lib/rpc/providers";
+import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { getErrorMessage } from "@/lib/utils";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -103,6 +105,9 @@ export type ApproveTokenResult =
        * the revert payload was empty / unrecognised.
        */
       rejection?: RevertKind;
+      // Authoritative fault domain when the failure site knows it: the
+      // private-mempool relay never answered, and we do not run that node.
+      errorClass?: ExecutionErrorType;
       // Set only when a transaction reached the chain and failed
       // there, so the finalizer can persist a receipt for the failure. Absent
       // on pre-broadcast failures, where no transaction exists.
@@ -219,7 +224,12 @@ export async function approveTokenCore(
         chain_id: String(chainId),
       }
     );
-    return { success: false, error: getErrorMessage(error) };
+    const errorClass = rpcRelayErrorClass(error);
+    return {
+      success: false,
+      error: getErrorMessage(error),
+      ...(errorClass ? { errorClass } : {}),
+    };
   }
 
   // Get wallet address for nonce management
@@ -532,6 +542,7 @@ export async function approveTokenCore(
         }
       );
       const rejection = classifyRevert(error, contract.interface);
+      const errorClass = rpcRelayErrorClass(error);
       return {
         success: false,
         error: formatContractError(
@@ -539,6 +550,7 @@ export async function approveTokenCore(
           contract.interface,
           "Token approval failed"
         ),
+        ...(errorClass ? { errorClass } : {}),
         ...(rejection.kind !== "unknown" ? { rejection } : {}),
         ...(revertedTransactionHash(error)
           ? { transactionHash: revertedTransactionHash(error), chainId }

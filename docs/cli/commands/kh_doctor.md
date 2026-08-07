@@ -5,8 +5,13 @@ Check CLI health
 ### Synopsis
 
 Run diagnostic checks against your KeeperHub configuration and API
-connectivity. Checks auth validity, API reachability, wallet status,
-spend cap, chain availability, and CLI version.
+connectivity. Checks auth validity, API reachability, organization wallet
+status, agentic wallet status and credit, spend cap, chain availability,
+and CLI version.
+
+The agentic wallet check signs its request with the HMAC secret in
+~/.keeperhub/wallet.json, so it reports only the wallet held on this machine.
+The secret is never printed.
 
 See also: kh auth status, kh version
 

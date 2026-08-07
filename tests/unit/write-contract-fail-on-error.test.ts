@@ -311,4 +311,21 @@ describe("applyFailOnError", () => {
 
     expect(applyFailOnError(failure, false)).toEqual(failure);
   });
+
+  it("softens an EXTERNAL-classified relay outage when failOnError is false", () => {
+    const failure: WriteContractResult = {
+      success: false,
+      error: "RPC failed on primary endpoint: timeout",
+      errorClass: ExecutionErrorType.EXTERNAL,
+    };
+
+    // A third-party endpoint being down is transient, unlike the config faults
+    // above, so it is exactly what the toggle exists to continue past.
+    expect(applyFailOnError(failure, false)).toEqual({
+      success: true,
+      error: "RPC failed on primary endpoint: timeout",
+      rejection: undefined,
+    });
+    expect(applyFailOnError(failure, undefined)).toEqual(failure);
+  });
 });

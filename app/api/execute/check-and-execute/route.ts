@@ -63,12 +63,19 @@ async function resolveAbiFromField(
   }
 }
 
+// Every dry-run response says whether the run itself completed, so a caller
+// never has to read an absent `success` as a failure. `wouldRevert` is not in
+// here on purpose: it is a claim about a specific call, so it is only set on
+// the branches that actually made one.
+const SIMULATION_RAN = { success: true, status: "simulated" } as const;
+
 async function executeConditionalRead(
   action: ActionBody,
   network: string,
   resolvedWriteAbi: string,
   organizationId: string,
-  conditionResult: ConditionResult
+  conditionResult: ConditionResult,
+  simulate: boolean
 ): Promise<NextResponse> {
   const readResult = await readContractCore({
     contractAddress: action.contractAddress,
@@ -86,8 +93,17 @@ async function executeConditionalRead(
     );
   }
 
+  // No `wouldRevert`: nothing was written or estimated here, so the field has
+  // no answer to give about this call.
   return NextResponse.json(
-    { executed: true, conditionResult, result: readResult.result },
+    simulate
+      ? {
+          ...SIMULATION_RAN,
+          executed: true,
+          conditionResult,
+          result: readResult.result,
+        }
+      : { executed: true, conditionResult, result: readResult.result },
     { status: HttpStatus.OK }
   );
 }
@@ -320,8 +336,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   const conditionResult = evaluateCondition(readResult.result, condition);
 
   if (!conditionResult.met) {
+    // No `wouldRevert`: the action was never encoded or estimated, so we have
+    // no evidence either way and will not invent one.
     return NextResponse.json(
-      { executed: false, conditionResult },
+      simulateFlag.simulate
+        ? { ...SIMULATION_RAN, executed: false, conditionResult }
+        : { executed: false, conditionResult },
       { status: HttpStatus.OK }
     );
   }
@@ -365,7 +385,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         network,
         writeAbiResult.abi,
         apiKeyCtx.organizationId,
-        conditionResult
+        conditionResult,
+        simulateFlag.simulate
       ),
       rateLimit
     );

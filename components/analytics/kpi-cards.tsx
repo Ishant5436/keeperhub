@@ -18,6 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { formatGasSplit } from "@/lib/analytics/format-gas";
 import type { TimeRange } from "@/lib/analytics/types";
 import {
   analyticsLoadingAtom,
@@ -41,18 +42,9 @@ function formatDuration(ms: number | null): string {
   return `${minutes}m ${seconds}s`;
 }
 
-function formatGasAsEth(weiString: string): string {
-  const wei = Number(weiString);
-  if (Number.isNaN(wei) || wei === 0) {
-    return "0 ETH";
-  }
-  const eth = wei / 1e18;
-  return `${eth.toFixed(4)} ETH`;
-}
-
 // Wallet-paid and sponsored gas are tracked in separate ledgers, so the headline
 // figure is their sum. BigInt keeps the addition exact before the lossy
-// Number() conversion that formatting needs.
+// Number() conversion that the delta needs.
 function addWeiStrings(a: string, b: string): string {
   try {
     return (BigInt(a) + BigInt(b)).toString();
@@ -298,6 +290,7 @@ export function KpiCards(): ReactNode {
       : null;
 
     const hasSponsoredGas = sponsoredGasWei !== "0" && sponsoredGasWei !== "";
+    const gas = formatGasSplit(walletGasWei, sponsoredGasWei);
 
     return [
       {
@@ -334,7 +327,7 @@ export function KpiCards(): ReactNode {
         key: "gas-spent",
         icon: <Fuel className="size-5" />,
         label: "Gas Spent",
-        value: formatGasAsEth(totalGasWei),
+        value: gas.total,
         delta: gasDelta,
         deltaTooltip: deltaTooltip("total gas spent"),
         invertDeltaColor: true,
@@ -343,11 +336,11 @@ export function KpiCards(): ReactNode {
           ? ([
               {
                 key: "wallet",
-                text: `${formatGasAsEth(walletGasWei)} from wallet`,
+                text: `${gas.wallet} from wallet`,
               },
               {
                 key: "sponsored",
-                text: `${formatGasAsEth(sponsoredGasWei)} sponsored`,
+                text: `${gas.sponsored} sponsored`,
                 highlighted: true,
               },
             ] as const)

@@ -132,7 +132,10 @@ faucets above, then use this sequence:
 3. Repeat the same call with `simulate` omitted and a new
    `idempotency_key`.
 4. Pass the returned `executionId` to `get_direct_execution_status` and poll
-   until the status is `completed` or `failed`.
+   until the status is `completed` or `failed`. Wait the number of seconds in
+   the `X-Poll-Interval-Hint` response header between polls rather than
+   picking your own interval; a value of `0` means the execution is terminal
+   and you can stop.
 5. Save `transactionLink` from the terminal response as the onchain proof.
 
 Example simulation on Base Sepolia:
