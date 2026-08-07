@@ -4,18 +4,15 @@ import { Plus, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TemplateBadgeInput } from "@/components/ui/template-badge-input";
-import type { AbiComponent } from "@/components/workflow/config/abi-types";
 import { ArrayInputField } from "@/components/workflow/config/array-input-field";
+import { MalformedAbiArgsNotice } from "@/components/workflow/config/malformed-abi-notice";
 import { TupleInputField } from "@/components/workflow/config/tuple-input-field";
 import { coerceAbiArgValue } from "@/lib/abi/parse-args";
-import { findAbiFunction } from "@/lib/abi/utils";
+import {
+  type AbiFunctionInput,
+  resolveFunctionInputs,
+} from "@/lib/abi/function-inputs";
 import type { ActionConfigFieldBase } from "@/plugins/registry";
-
-type FunctionInput = {
-  name: string;
-  type: string;
-  components?: AbiComponent[];
-};
 
 type ArgSetEntry = {
   id: number;
@@ -25,31 +22,8 @@ type ArgSetEntry = {
 export function parseFunctionInputs(
   abiValue: string,
   functionValue: string
-): FunctionInput[] {
-  if (!(abiValue && functionValue && abiValue.trim() && functionValue.trim())) {
-    return [];
-  }
-
-  try {
-    const abi: unknown = JSON.parse(abiValue);
-    if (!Array.isArray(abi)) {
-      return [];
-    }
-
-    const func = findAbiFunction(abi, functionValue);
-
-    if (!(func?.inputs && Array.isArray(func.inputs))) {
-      return [];
-    }
-
-    return func.inputs.map((input) => ({
-      name: input.name || "unnamed",
-      type: input.type,
-      components: input.components,
-    }));
-  } catch {
-    return [];
-  }
+): AbiFunctionInput[] {
+  return resolveFunctionInputs(abiValue, functionValue).inputs;
 }
 
 export function parseArgsListValue(
@@ -120,8 +94,8 @@ export function ArgsListField({
     return idCounter.current;
   };
 
-  const functionInputs = useMemo(
-    () => parseFunctionInputs(abiValue, functionValue),
+  const { inputs: functionInputs, malformed } = useMemo(
+    () => resolveFunctionInputs(abiValue, functionValue),
     [abiValue, functionValue]
   );
 
@@ -175,6 +149,10 @@ export function ArgsListField({
       return { ...entry, values: newValues };
     });
     updateEntries(updated);
+  }
+
+  if (malformed) {
+    return <MalformedAbiArgsNotice />;
   }
 
   if (paramCount === 0) {

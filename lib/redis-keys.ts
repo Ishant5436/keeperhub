@@ -28,3 +28,13 @@ export function newDeviceNotifyClaimKey(
 export function trustedCountryKey(userId: string, country: string): string {
   return deploymentKey("trust-country", userId, country);
 }
+
+/** Short-lived cache of a holder's native balance in wei, for the gas preflight. */
+export function nativeBalanceKey(chainId: number, address: string): string {
+  return deploymentKey("gas-balance", String(chainId), address.toLowerCase());
+}
+
+/** Short-lived cache of a chain's gas price in wei, for the gas preflight. */
+export function gasPriceKey(chainId: number): string {
+  return deploymentKey("gas-price", String(chainId));
+}

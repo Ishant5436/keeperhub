@@ -43,6 +43,26 @@ KeeperHub has two types of API keys:
 - Only the key prefix is stored for identification
 - Revoke keys immediately if compromised
 
+## Checking a key works
+
+Use `GET /api/keys` as the probe in a health check or first-run script. It is
+organization-scoped, read-only, and returns `keyPrefix` for each key, so a
+diagnostic can name the key it is holding without printing it.
+
+```bash
+curl -sf -H "Authorization: Bearer kh_your_api_key" \
+  https://app.keeperhub.com/api/keys
+```
+
+A `200` means the credential is valid and scoped to an organization. A `401`
+means the key is wrong, revoked, or absent.
+
+`GET /api/chains` serves the chain catalog to anyone, credential or not, because
+the list is public information. It answers `200` for an invalid key as readily
+as a valid one, so it tells you the host is reachable rather than that your
+credential works. Reach for it to check connectivity, and for `GET /api/keys`
+to check authentication.
+
 ## Endpoint scope
 
 Session authentication is accepted everywhere. API keys (`kh_`) are accepted only on **organization-scoped** endpoints, the ones whose action and result depend on the caller's organization rather than on the individual user behind the key. Wallets, billing, and spending caps are all attached to the organization, so a key that authorizes on-chain spend or billable usage is necessarily organization-scoped.
@@ -63,7 +83,9 @@ Endpoints whose semantics are organization-scoped accept `kh_` keys:
   (`/api/execute/{protocol}/{action}`), and
   `GET /api/execute/{executionId}/status`
 - Integrations: `/api/integrations`
-- Projects, tags, public tags, supported chains
+- Projects, tags, public tags, supported chains (`GET /api/chains` serves the
+  chain catalog to anyone, with or without a credential; see
+  [Checking a key works](#checking-a-key-works))
 - Organization-scoped billing and analytics
 - Organization management (e.g. renaming an organization)
 - Organization API keys (`GET /api/keys`, `DELETE /api/keys/{keyId}`); creation requires session

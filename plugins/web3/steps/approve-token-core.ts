@@ -27,6 +27,10 @@ import {
   executeContractCallAsSafe,
 } from "@/lib/safe/execute-as-safe";
 import { resolveSignerForNode, SIGNER_MODE } from "@/lib/safe/signer-resolver";
+import {
+  preflightGasBalance,
+  resolveFundingHolder,
+} from "@/lib/web3/gas-preflight";
 import { getChainAdapter } from "@/lib/web3/chain-adapter";
 import {
   classifyRevert,
@@ -374,6 +378,19 @@ export async function approveTokenCore(
 
   // Fall back to direct signing with nonce management and RPC failover
   const adapter = getChainAdapter(chainId);
+
+  // Answer gas affordability before queueing on the wallet's nonce lock. A
+  // holder that cannot pay would otherwise take the lock, spend a full failover
+  // round discovering that at broadcast, and stall every other execution for
+  // the same wallet behind it.
+  const gasCheck = await preflightGasBalance({
+    rpcManager,
+    chainId,
+    holderAddress: resolveFundingHolder(signerMode, walletAddress),
+  });
+  if (!gasCheck.affordable) {
+    return { success: false, error: gasCheck.message };
+  }
 
   return withNonceSession(txContext, walletAddress, async (session) => {
     // Initialize wallet signer

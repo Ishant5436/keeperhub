@@ -26,19 +26,25 @@ import { TemplateBadgeTextarea } from "@/components/ui/template-badge-textarea";
 import { SaveAddressBookmark } from "@/components/address-book/save-address-bookmark";
 import type { AbiComponent } from "@/components/workflow/config/abi-types";
 import { ArrayInputField } from "@/components/workflow/config/array-input-field";
+import { MalformedAbiArgsNotice } from "@/components/workflow/config/malformed-abi-notice";
 import { TupleInputField } from "@/components/workflow/config/tuple-input-field";
+import {
+  isValidAbiInput,
+  resolveFunctionInputs,
+} from "@/lib/abi/function-inputs";
 import { parseAbiFunctionArgs } from "@/lib/abi/parse-args";
-import { computeSelector, findAbiFunction } from "@/lib/abi/utils";
+import { computeSelector } from "@/lib/abi/utils";
 import { evaluateShowWhen } from "@/lib/workflow/editor/show-when";
 import { parseAddressBookSelection } from "@/lib/address-book-selection";
 import { toChecksumAddress } from "@/lib/address-utils";
+import { parseSchemaFields } from "@/lib/schema-fields";
 import { getCustomFieldRenderer } from "@/lib/workflow/editor/extension-registry";
 import {
   type ActionConfigField,
   type ActionConfigFieldBase,
   isFieldGroup,
 } from "@/plugins/registry";
-import { SchemaBuilder, type SchemaField } from "./schema-builder";
+import { SchemaBuilder } from "./schema-builder";
 
 type FieldProps = {
   field: ActionConfigFieldBase;
@@ -447,7 +453,7 @@ function SchemaBuilderField(props: FieldProps) {
     <SchemaBuilder
       disabled={props.disabled}
       onChange={(schema) => props.onChange(JSON.stringify(schema))}
-      schema={props.value ? (JSON.parse(props.value) as SchemaField[]) : []}
+      schema={parseSchemaFields(props.value)}
     />
   );
 }
@@ -498,15 +504,19 @@ export function AbiFunctionSelectField({
       }
 
       return filtered.map((func) => {
-        const inputs = func.inputs || [];
+        const inputs = Array.isArray(func.inputs) ? func.inputs : [];
+        // A parameter with no type cannot be encoded, so the function is still
+        // listed (selecting it explains the problem) but gets no selector.
+        const complete = inputs.every(isValidAbiInput);
+        const inputTypes = inputs.map((input: { type?: unknown }) =>
+          typeof input?.type === "string" ? input.type : "?"
+        );
         const params = inputs
-          .map(
-            (input: { name: string; type: string }) =>
-              `${input.type} ${input.name}`
+          .map((input: { name?: unknown }, index: number) =>
+            `${inputTypes[index]} ${typeof input?.name === "string" ? input.name : ""}`.trim()
           )
           .join(", ");
-        const inputTypes = inputs.map((input: { type: string }) => input.type);
-        const selector = computeSelector(func.name, inputs);
+        const selector = complete ? computeSelector(func.name, inputs) : null;
         const isOverloaded = (nameCounts.get(func.name) ?? 0) > 1;
         const key = isOverloaded
           ? `${func.name}(${inputTypes.join(",")})`
@@ -544,9 +554,11 @@ export function AbiFunctionSelectField({
             <div className="flex flex-col items-start">
               <span>
                 {func.label}{" "}
-                <code className="text-muted-foreground text-xs">
-                  ({func.selector})
-                </code>
+                {func.selector && (
+                  <code className="text-muted-foreground text-xs">
+                    ({func.selector})
+                  </code>
+                )}
               </span>
               <span className="text-muted-foreground text-xs">
                 {func.stateMutability}
@@ -573,36 +585,10 @@ export function AbiFunctionArgsField({
   functionValue,
 }: AbiFunctionArgsProps) {
   // Parse the function inputs from the ABI
-  const functionInputs = React.useMemo(() => {
-    if (
-      !(abiValue && functionValue) ||
-      abiValue.trim() === "" ||
-      functionValue.trim() === ""
-    ) {
-      return [];
-    }
-
-    try {
-      const abi = JSON.parse(abiValue);
-      if (!Array.isArray(abi)) {
-        return [];
-      }
-
-      const func = findAbiFunction(abi, functionValue);
-
-      if (!func?.inputs) {
-        return [];
-      }
-
-      return func.inputs.map((input) => ({
-        name: input.name || "unnamed",
-        type: input.type,
-        components: input.components,
-      }));
-    } catch {
-      return [];
-    }
-  }, [abiValue, functionValue]);
+  const { inputs: functionInputs, malformed } = React.useMemo(
+    () => resolveFunctionInputs(abiValue, functionValue),
+    [abiValue, functionValue]
+  );
 
   // Use local state to manage arg values - this prevents race conditions on blur
   const [localArgValues, setLocalArgValues] = React.useState<unknown[]>(() =>
@@ -634,6 +620,10 @@ export function AbiFunctionArgsField({
     // Propagate to parent (outside of setState to avoid render-phase updates)
     onChange(JSON.stringify(newArgs));
   };
+
+  if (malformed) {
+    return <MalformedAbiArgsNotice />;
+  }
 
   if (functionInputs.length === 0) {
     return (

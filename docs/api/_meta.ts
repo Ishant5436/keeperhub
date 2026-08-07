@@ -1,6 +1,7 @@
 export default {
   index: "Overview",
   authentication: "Authentication",
+  "headless-onboarding": "Headless Onboarding",
   workflows: "Workflows",
   executions: "Executions",
   "direct-execution": "Direct Execution",

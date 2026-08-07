@@ -344,12 +344,13 @@ describe("classifyExecutionError", () => {
       expect(r.errorType).toBe("system");
     });
 
-    it("Failed to acquire nonce lock: workflow_engine + system", () => {
+    it("wallet saturated: configuration + user, no code", () => {
       const r = classifyExecutionError(
-        "Failed to acquire nonce lock for 0xae36bc35098e24bbaed3dee86ec4653eb88a71a9:1 after 50 attempts"
+        "Wallet is saturated: could not acquire the nonce lock for 0xae36bc35098e24bbaed3dee86ec4653eb88a71a9:1 after 120s. Transactions from one wallet are sent one at a time, so reduce this workflow's trigger rate or spread writes across additional wallets."
       );
-      expect(r.errorCategory).toBe(ErrorCategory.WORKFLOW_ENGINE);
-      expect(r.errorType).toBe("system");
+      expect(r.errorCategory).toBe(ErrorCategory.CONFIGURATION);
+      expect(r.errorType).toBe("user");
+      expect(r.code).toBeNull();
     });
   });
 

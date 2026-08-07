@@ -242,4 +242,96 @@ describe("billOverageForOrg", () => {
     });
     expect(getBillingProvider).not.toHaveBeenCalled();
   });
+
+  it("attaches the charge to the closing invoice when one is given", async () => {
+    mockFindFirstSub.mockResolvedValue({
+      plan: "pro",
+      tier: "25k",
+      status: "active",
+      providerCustomerId: "cus_123",
+    });
+    mockFindFirstOverage.mockResolvedValue(undefined);
+    mockExecutionCount(26_500);
+    mockReturning.mockResolvedValue([{ id: "rec_1" }]);
+
+    const mockCreateInvoiceItem = vi
+      .fn()
+      .mockResolvedValue({ invoiceItemId: "ii_123" });
+    mockBillingProvider({ createInvoiceItem: mockCreateInvoiceItem });
+
+    const result = await billOverageForOrg("org_1", periodStart, periodEnd, {
+      invoiceId: "in_closing",
+    });
+
+    expect(result).toEqual({
+      billed: true,
+      overageCount: 1500,
+      totalChargeCents: 300,
+    });
+    expect(mockCreateInvoiceItem).toHaveBeenCalledTimes(1);
+    expect(mockCreateInvoiceItem).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_closing" })
+    );
+  });
+
+  it("retries unattached when the closing invoice can no longer take the item", async () => {
+    mockFindFirstSub.mockResolvedValue({
+      plan: "pro",
+      tier: "25k",
+      status: "active",
+      providerCustomerId: "cus_123",
+    });
+    mockFindFirstOverage.mockResolvedValue(undefined);
+    mockExecutionCount(26_500);
+    mockReturning.mockResolvedValue([{ id: "rec_1" }]);
+
+    const mockCreateInvoiceItem = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Invoice is no longer editable"))
+      .mockResolvedValueOnce({ invoiceItemId: "ii_pending" });
+    mockBillingProvider({ createInvoiceItem: mockCreateInvoiceItem });
+
+    const result = await billOverageForOrg("org_1", periodStart, periodEnd, {
+      invoiceId: "in_closing",
+    });
+
+    expect(result).toEqual({
+      billed: true,
+      overageCount: 1500,
+      totalChargeCents: 300,
+    });
+    expect(mockCreateInvoiceItem).toHaveBeenCalledTimes(2);
+    expect(mockCreateInvoiceItem).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ invoiceId: expect.anything() })
+    );
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "billed",
+        providerInvoiceItemId: "ii_pending",
+      })
+    );
+  });
+
+  it("leaves the item unattached when no closing invoice is given", async () => {
+    mockFindFirstSub.mockResolvedValue({
+      plan: "pro",
+      tier: "25k",
+      status: "active",
+      providerCustomerId: "cus_123",
+    });
+    mockFindFirstOverage.mockResolvedValue(undefined);
+    mockExecutionCount(26_500);
+    mockReturning.mockResolvedValue([{ id: "rec_1" }]);
+
+    const mockCreateInvoiceItem = vi
+      .fn()
+      .mockResolvedValue({ invoiceItemId: "ii_123" });
+    mockBillingProvider({ createInvoiceItem: mockCreateInvoiceItem });
+
+    await billOverageForOrg("org_1", periodStart, periodEnd);
+
+    expect(mockCreateInvoiceItem).toHaveBeenCalledWith(
+      expect.not.objectContaining({ invoiceId: expect.anything() })
+    );
+  });
 });

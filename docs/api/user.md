@@ -29,6 +29,11 @@ GET /api/user
 }
 ```
 
+`walletAddress` is the **active organization's** wallet, the address that signs
+and funds executions. It is not the address a wallet (`providerId: "siwe"`) user
+signed in with, and the two differ. It is the address to fund before a first
+write.
+
 ## Update User Profile
 
 ```http

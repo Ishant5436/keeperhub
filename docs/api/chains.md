@@ -13,7 +13,10 @@ Access supported blockchain networks and contract information.
 GET /api/chains
 ```
 
-Returns all supported blockchain networks.
+Returns all supported blockchain networks. The catalog is public, so this
+endpoint answers with or without a credential. To confirm an API key is valid,
+call `GET /api/keys` instead. See
+[Checking a key works](/api/authentication#checking-a-key-works).
 
 ### Query Parameters
 

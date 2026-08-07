@@ -25,7 +25,7 @@ const config = {
     link: "https://github.com/KeeperHub/keeperhub",
   },
   docsRepositoryBase:
-    "https://github.com/KeeperHub/keeperhub/edit/main/docs",
+    "https://github.com/KeeperHub/keeperhub/edit/staging/docs",
   footer: {
     content: (
       <span style={{ color: "#7a9ca8", fontSize: "13px" }}>

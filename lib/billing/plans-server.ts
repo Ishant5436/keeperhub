@@ -8,6 +8,7 @@ import {
   countMonthlyExecutionsForAdmission,
   decideExecutionLimit,
   effectiveExecutionLimit,
+  statusAllowsOverage,
 } from "./execution-limit-core";
 import { isBillingEnabled } from "./feature-flag";
 import {
@@ -262,7 +263,7 @@ export async function checkExecutionLimit(
     used,
     debtExecutions,
     overageEnabled: planDef.overage.enabled,
-    subscriptionActive: sub?.status === "active",
+    statusAllowsOverage: statusAllowsOverage(sub?.status),
   });
 
   switch (outcome) {

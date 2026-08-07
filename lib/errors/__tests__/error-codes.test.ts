@@ -80,7 +80,6 @@ describe("classifyExecutionError code contract", () => {
       "Execution timed out: no progress for 30 minutes",
       'Step "x" exceeded max retries (1 retry)',
       "Unknown action type: condition",
-      "Failed to acquire nonce lock for 0xabc:1 after 50 attempts",
       "Workflow terminated by SIGTERM signal",
       "Cannot find module './credential-map'",
       "TURNKEY_API_PUBLIC_KEY and TURNKEY_API_PRIVATE_KEY must be set",

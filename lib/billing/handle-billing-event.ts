@@ -22,6 +22,11 @@ import type { BillingProvider, BillingWebhookEvent } from "./provider";
 
 const LOG_PREFIX = "[Billing Handler]";
 
+// A row still holding the closing period reads as already-ended at the moment
+// the renewal invoice is created, so only clock skew can misread it. The other
+// candidate period ends a full cycle away, well outside this allowance.
+const PERIOD_ROLL_SKEW_MS = 10 * 60 * 1000;
+
 // Numeric ranking used to label plan changes as upgrade/downgrade. Same-plan
 // tier changes (e.g. Pro 25k -> Pro 50k) are labeled "tier_change" since the
 // dashboard tracks them separately from plan-level moves.
@@ -89,6 +94,10 @@ export async function handleBillingEvent(
     }
     case "subscription.deleted": {
       await handleSubscriptionDeleted(data);
+      break;
+    }
+    case "invoice.created": {
+      await handleInvoiceCreated(data);
       break;
     }
     case "invoice.paid": {
@@ -286,6 +295,66 @@ function buildSubscriptionUpdate(
   }
 
   return update;
+}
+
+/**
+ * Put the closing period's overage on the renewal invoice that closes it.
+ *
+ * The provider emits this while the renewal invoice is still a draft, which is
+ * the only window in which an invoice item can be added to it. Billing from
+ * subscription.updated instead is always too late: that event fires once the
+ * invoice already exists, so the item is left pending and lands on the next
+ * cycle's invoice a month later.
+ */
+async function handleInvoiceCreated(
+  data: BillingWebhookEvent["data"]
+): Promise<void> {
+  const { providerSubscriptionId, invoiceId, billingReason } = data;
+
+  // Only a cycle renewal closes a period; one-off and proration invoices do not.
+  if (
+    !(providerSubscriptionId && invoiceId) ||
+    billingReason !== "subscription_cycle"
+  ) {
+    return;
+  }
+
+  const current = await findSubscriptionByProviderId(providerSubscriptionId);
+  if (
+    !(
+      current?.currentPeriodStart instanceof Date &&
+      current.currentPeriodEnd instanceof Date
+    )
+  ) {
+    return;
+  }
+
+  // The row holds the closing period only until subscription.updated advances
+  // it. If that event won the race it already billed this period, so there is
+  // nothing left to attach.
+  if (current.currentPeriodEnd.getTime() > Date.now() + PERIOD_ROLL_SKEW_MS) {
+    logWarn(
+      `${LOG_PREFIX} invoice.created arrived after the period advanced; overage stays on the following invoice`,
+      { org_id: current.organizationId }
+    );
+    return;
+  }
+
+  try {
+    await billOverageForOrg(
+      current.organizationId,
+      current.currentPeriodStart,
+      current.currentPeriodEnd,
+      { invoiceId }
+    );
+  } catch (error) {
+    logSystemWarn(
+      ErrorCategory.BILLING,
+      `${LOG_PREFIX} Failed to bill overage onto the closing invoice (will be retried by scan)`,
+      error,
+      { org_id: current.organizationId }
+    );
+  }
 }
 
 async function handleSubscriptionUpdated(

@@ -34,8 +34,9 @@ you inspected is the transaction you send:
    are both `true`.
 2. Send the intended request with `"simulate": true`. Continue only when the
    response has `success: true` and `wouldRevert: false`.
-3. Remove `simulate`, add a unique `Idempotency-Key` header, and send the
-   request once.
+3. Remove `simulate`, add an `Idempotency-Key` header, and send the request
+   once. The key must identify the work rather than the attempt, so that a
+   retry sends the same one: see [Choosing a stable key](#choosing-a-stable-key).
 4. Save the returned `executionId`, then poll
    `GET /api/execute/{executionId}/status`. Honor the
    `X-Poll-Interval-Hint` response header between polls.
@@ -52,12 +53,12 @@ a transaction.
 
 ## Idempotency
 
-Send an `Idempotency-Key` header to safely retry a request without risking a double-execution. The key is any client-chosen string (for example an agent-side transaction id, ideally a UUID).
+Send an `Idempotency-Key` header to safely retry a request without risking a double-execution. The key is any client-chosen string (for example an agent-side transaction id, ideally a UUID). Every guarantee below depends on the retry sending the **same** key, so a caller that reconstructs a request rather than replaying a buffered one must derive its key deterministically: see [Choosing a stable key](#choosing-a-stable-key).
 
-- **Replay**: a retry with the same key and the same request body returns the original response (same `executionId`, same status) without executing again, plus an `idempotentReplay` marker described below.
-- **Conflict**: reusing a key with a different request body returns `409` with code `idempotency_conflict` and the `originalExecutionId` the key first produced. Use a new key for a different request.
+- **Replay**: a retry with the same key and the same request body returns the original response (same `executionId`, same status) without executing again, plus an `idempotentReplay` marker described below. Replay lasts 24 hours from the original request. Past that the stored response is gone and the same key executes again, silently, so a job that repeats on a cadence of a day or longer needs a time bucket in its key: see [Choosing a stable key](#choosing-a-stable-key).
+- **Conflict**: reusing a key with a different request body returns `409` with code `idempotency_conflict` and the `originalExecutionId` the key first produced. Use a new key for genuinely different work, not for a retry of the same work whose body was reconstructed: see [Choosing a stable key](#choosing-a-stable-key).
 - **In progress**: a duplicate that arrives while the first request is still running returns `409` with code `idempotency_in_progress`; retry shortly.
-- **Scope**: keys are scoped per organization, so the same key is shared across an org's API keys.
+- **Scope**: keys are scoped per organization and per endpoint, so the same key is shared across an org's API keys but does not collide between `/transfer`, `/contract-call`, `/check-and-execute`, and a workflow webhook.
 - **Window**: stored responses are replayable for 24 hours. After that the key is free to reuse.
 
 ### Recognising a replay
@@ -91,6 +92,122 @@ curl -X POST https://app.keeperhub.com/api/execute/transfer \
 ```
 
 Workflow webhooks (`POST /api/workflows/{workflowId}/webhook`) accept the same header, scoped per workflow.
+
+### Choosing a stable key
+
+A UUID generated per attempt does not survive a retry: the second attempt generates a
+different UUID, so the request is treated as new and executes again. A UUID works only
+when it is persisted before the first attempt and recovered afterwards.
+
+A caller that cannot persist a key must derive one that is reproducible from the work
+itself. Derive it from a canonical form of the caller's own stable identifier for the
+piece of work, joined with the fields that determine the onchain effect:
+
+```text
+taskId|chainId|recipientAddress|amount|tokenAddress
+```
+
+The separator is a single ASCII vertical bar, `U+007C`, with no surrounding whitespace.
+
+`taskId` is whatever the caller already uses to name the work: an invoice number, a
+payroll period, a job id. It must be stable across a retry of the same work and
+different for different work.
+
+Work that repeats on a schedule needs the period in the `taskId`, not just the job name.
+A daily job keyed on `nightly-sweep` alone derives the same key on every run, and because
+the replay window is 24 hours it lands near the boundary each time: sometimes inside the
+window, where the run is swallowed as a replay, sometimes outside it, where the run
+executes. Including the period, as in `nightly-sweep-2026-08-06`, makes each run distinct
+work with a full 24 hours of retry protection of its own.
+
+Canonicalize each part before joining:
+
+- **`taskId`**: trim surrounding whitespace, and percent-encode any `%` as `%25` and any
+  `|` as `%7C`. Without this a `taskId` of `8453|0xabc` on chain `1` joins to the same
+  string as a different intent on chain `8453`. Do not case-fold it; task identifiers
+  are opaque to this endpoint.
+- **Resolve the chain to one spelling.** These endpoints accept `chainId` and also the
+  deprecated `network` alias, so `{"network": "base"}` and `{"chainId": 8453}` are the
+  same transfer. Resolve the alias to a numeric chain id first, then use its decimal
+  integer form with no leading zeros, so `8453`, `"8453"` and `"base"` all agree.
+- **Lowercase addresses**, so a checksummed and an unchecksummed address agree.
+- **Canonicalize `amount` as a decimal string**, not a binary float, under all of the
+  following rules, so that two conforming implementations cannot disagree:
+  - trim surrounding whitespace, and reject a leading `+` or `-`
+  - use no exponent notation
+  - require at least one digit before the decimal point, so `.5` becomes `0.5`
+  - strip leading zeros, except the single `0` before a decimal point, so `01.5`
+    becomes `1.5` and `007` becomes `7`
+  - strip trailing zeros after the decimal point, then strip a trailing decimal point,
+    so `0.0010` becomes `0.001` and `1.000` becomes `1`
+  - if the rules above leave an empty string, use `0`, so `0`, `0.0` and `0.000` all
+    agree regardless of the order the rules are applied in
+
+  Specifying the string form rather than a numeric type is deliberate: a caller parsing
+  `"0.1"` as a 64-bit float gets `0.100000000000000006`, and binary floats also collapse
+  distinct 18-decimal amounts onto the same value.
+- **Represent omitted optional fields as an empty string**, so the separator positions
+  stay fixed.
+
+Hash the joined string's UTF-8 bytes with SHA-256 and send the digest as lowercase hex
+in the `Idempotency-Key` header.
+
+#### A stable key does not by itself produce a replay
+
+Deriving a stable key is necessary but not sufficient, and it is worth being precise
+about what it buys, because the difference decides how a caller should handle the
+response.
+
+The stored record is keyed on `(organization, scope, key)`, but the **request body is
+hashed too**, and only a value-equal body replays. The body is hashed after it is parsed,
+so formatting is normalized — whitespace, key order, and the spelling of JSON *numbers*
+all stop mattering, and `{"chainId": 8453}` and `{"chainId": 8.453e3}` are the same body.
+What is not normalized is the value itself, so anything carried as a string keeps its
+exact spelling. `{"network": "base"}` and `{"chainId": 8453}` are different bodies, as are
+the strings `"0.001"` and `"0.0010"`, and so is a `reason`, `memo` or `note` field that
+the caller reworded between attempts.
+
+So a retry that reuses a stable key with a reconstructed, value-different body returns
+`409 idempotency_conflict`, not a replay. **That is the outcome to design for**, and it
+is the safe one: the fail-closed `409` is precisely what stops the reconstructed retry
+from executing a second time. A caller that expects a replay will read it as a bug in
+its key derivation and reach for a fresh key, which is the one response that does cause
+a double-execution.
+
+Handle it as an answer rather than an error. When the `409` body carries a non-null
+`originalExecutionId`, poll `GET /api/execute/{executionId}/status` with it to learn the
+outcome of the work you were retrying.
+
+`originalExecutionId` is nullable, and it is null in the two cases you are most likely to
+hit here: the first attempt reached the broadcast path and failed, and the first attempt
+is still in flight. Neither is a reason to rotate the key. Instead, canonicalize the body
+with the rules above so it matches the original and re-send under the same key. A record
+that has settled — whether it succeeded or failed — replays its stored response, so that
+re-send returns the original outcome rather than executing again; a record still in
+flight returns `409 idempotency_in_progress`, which is the retryable code, so back off
+and re-send.
+
+To get an actual replay instead, the retry must reproduce every value in the body, though
+not its formatting. Canonicalize the body with the same rules used for the key, and omit
+free-text fields whose wording is not reproducible, rather than regenerating them.
+
+A stable key makes a **repeated** submission of the same work safe. It does not help
+with three other cases:
+
+- the caller submits genuinely different work, which needs a different key rather than
+  deduplication
+- the state that justified the request has changed by the time the transaction lands,
+  which needs a check before submission
+- the same work is legitimately repeated but the key cannot tell it apart from a retry
+
+The last case is why `taskId` belongs in the key by default. **Omit it only when
+repeating the transfer would genuinely be a mistake.** Hashing the effect fields alone
+makes every identical transfer the same request, so an agent that legitimately pays the
+same recipient the same amount twice inside the 24 hour window gets the second call
+answered from the first one's cached response: the original `executionId`,
+`status: completed`, and no second transfer. That outcome is flagged only by
+`idempotentReplay: true` in the body, which is easy to miss if the caller does not check
+that field, so the second payment can go missing while the response reads as success.
 
 ## Sponsored Executions
 
@@ -267,7 +384,7 @@ Read a contract value, evaluate a condition, and conditionally execute a write o
 ```json
 {
   "executed": false,
-  "condition": {
+  "conditionResult": {
     "met": false,
     "observedValue": "500000000000000000",
     "targetValue": "1000000000000000000",
@@ -283,7 +400,7 @@ Read a contract value, evaluate a condition, and conditionally execute a write o
   "executed": true,
   "executionId": "direct_123",
   "status": "completed",
-  "condition": {
+  "conditionResult": {
     "met": true,
     "observedValue": "1500000000000000000",
     "targetValue": "1000000000000000000",
@@ -292,11 +409,17 @@ Read a contract value, evaluate a condition, and conditionally execute a write o
 }
 ```
 
+The request field is `condition` and the response field is `conditionResult`, on
+both the broadcast and the `simulate: true` paths. A parser written once against
+this endpoint works for both.
+
 ## Dry-Run Simulation
 
 All three execute endpoints (`/api/execute/transfer`, `/api/execute/contract-call`, `/api/execute/check-and-execute`) accept a `simulate` flag on the body. When set to boolean `true`, the endpoint validates inputs, resolves the org's from-address, encodes the call, and runs `provider.estimateGas` + `provider.call` against the chain — **without** signing or broadcasting a transaction.
 
 No row is inserted into the execution audit table, no funds are reserved against the spending cap, and no transaction hash is produced. Use it to pre-flight a transaction (catch reverts, allowance mismatches, balance shortfalls, ABI mistakes) before spending gas.
+
+A simulation that reports the call would revert answers with HTTP `400` and `wouldRevert: true`. That status describes the transaction, not the request: the simulation itself ran, and the body carries the decoded reason your client wants. Read `wouldRevert` before classifying a `400` from these endpoints, so a generic "non-2xx means the call failed" wrapper does not discard the answer. The distinguishing marker is the `wouldRevert` field, which is present only on simulate responses.
 
 ### Request
 

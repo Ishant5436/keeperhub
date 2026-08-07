@@ -19,6 +19,11 @@ type AbiInput = {
  * and a tuple[] becomes "(uint32,bytes32)[]"
  */
 function canonicalType(input: AbiInput): string {
+  // The ABI is user-supplied, so `type` can be absent at runtime. Fail loudly
+  // rather than fabricating a signature that would encode the wrong call.
+  if (typeof input?.type !== "string") {
+    throw new Error("ABI input is missing a type");
+  }
   if (!(input.type.startsWith("tuple") && input.components)) {
     return input.type;
   }
@@ -90,7 +95,8 @@ export function findAbiFunction(
     if (item == null || item.type !== "function" || item.name !== name) {
       return false;
     }
-    const inputTypes = (item.inputs ?? []).map((i) => i.type);
+    const rawInputs = Array.isArray(item.inputs) ? item.inputs : [];
+    const inputTypes = rawInputs.map((i) => i?.type);
     if (inputTypes.length !== targetTypes.length) {
       return false;
     }

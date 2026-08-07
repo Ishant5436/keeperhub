@@ -14,16 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { type SchemaField, toSchemaFields } from "@/lib/schema-fields";
 
-export type SchemaField = {
-  id?: string;
-  name: string;
-  type: "string" | "number" | "boolean" | "array" | "object";
-  itemType?: "string" | "number" | "boolean" | "object";
-  fields?: SchemaField[];
-  description?: string;
-  required?: boolean;
-};
+export type { SchemaField };
 
 type SchemaBuilderProps = {
   schema: SchemaField[];
@@ -198,7 +191,7 @@ export function SchemaBuilder({
                   disabled={disabled}
                   level={level + 1}
                   onChange={(fields) => updateNestedFields(index, fields)}
-                  schema={field.fields || []}
+                  schema={toSchemaFields(field.fields)}
                 />
               </div>
             )}
@@ -210,7 +203,7 @@ export function SchemaBuilder({
                   disabled={disabled}
                   level={level + 1}
                   onChange={(fields) => updateNestedFields(index, fields)}
-                  schema={field.fields || []}
+                  schema={toSchemaFields(field.fields)}
                 />
               </div>
             )}

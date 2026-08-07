@@ -6,10 +6,15 @@ import {
   organizationSubscriptions,
   overageBillingRecords,
 } from "@/lib/db/schema";
-import { ErrorCategory, logUserError } from "@/lib/logging";
+import { ErrorCategory, logSystemWarn, logUserError } from "@/lib/logging";
 import { getMetricsCollector } from "@/lib/metrics";
 import { MetricNames } from "@/lib/metrics/types";
 import { getPlanLimits, PLANS, parsePlanName, parseTierKey } from "./plans";
+import type {
+  BillingProvider,
+  CreateInvoiceItemParams,
+  CreateInvoiceItemResult,
+} from "./provider";
 import { getBillingProvider } from "./providers";
 
 const LOG_PREFIX = "[Overage Billing]";
@@ -19,15 +24,51 @@ type OverageResult =
   | { billed: true; overageCount: number; totalChargeCents: number };
 
 /**
+ * Create the invoice item on `invoiceId`, retrying unattached if that fails.
+ *
+ * Attaching only works while the invoice is still a draft. If it finalized
+ * first the attached call is rejected, and the retry keeps the charge as a
+ * pending item on the following invoice rather than dropping it.
+ */
+async function createItemWithFallback(
+  provider: BillingProvider,
+  params: Omit<CreateInvoiceItemParams, "invoiceId">,
+  invoiceId: string | undefined,
+  organizationId: string
+): Promise<CreateInvoiceItemResult> {
+  if (!invoiceId) {
+    return await provider.createInvoiceItem(params);
+  }
+
+  try {
+    return await provider.createInvoiceItem({ ...params, invoiceId });
+  } catch (error) {
+    logSystemWarn(
+      ErrorCategory.BILLING,
+      `${LOG_PREFIX} Could not attach to the closing invoice, falling back to the next one`,
+      error,
+      { org_id: organizationId }
+    );
+    return await provider.createInvoiceItem(params);
+  }
+}
+
+/**
  * Bill overage executions for an organization's billing period.
  *
  * Idempotent: if a record already exists for the given org + period, it skips.
- * Creates a Stripe invoice item that attaches to the customer's next invoice.
+ *
+ * Pass `invoiceId` (the still-draft renewal invoice for the cycle that just
+ * closed) to put the charge on that invoice, so the org pays its overage on the
+ * same invoice that closes the period. Without it the item is left pending and
+ * the provider only sweeps it into the following cycle's invoice, a full
+ * billing cycle later.
  */
 export async function billOverageForOrg(
   organizationId: string,
   periodStart: Date,
-  periodEnd: Date
+  periodEnd: Date,
+  options?: { invoiceId?: string }
 ): Promise<OverageResult> {
   const sub = await db.query.organizationSubscriptions.findFirst({
     where: eq(organizationSubscriptions.organizationId, organizationId),
@@ -127,7 +168,7 @@ export async function billOverageForOrg(
 
   try {
     const provider = getBillingProvider();
-    const { invoiceItemId } = await provider.createInvoiceItem({
+    const itemParams = {
       customerId: sub.providerCustomerId,
       amount: totalChargeCents,
       currency: "usd",
@@ -138,7 +179,14 @@ export async function billOverageForOrg(
         periodEnd: periodEnd.toISOString(),
         overageCount: String(overageCount),
       },
-    });
+    };
+
+    const { invoiceItemId } = await createItemWithFallback(
+      provider,
+      itemParams,
+      options?.invoiceId,
+      organizationId
+    );
 
     await db
       .update(overageBillingRecords)

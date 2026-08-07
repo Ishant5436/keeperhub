@@ -167,7 +167,7 @@ shows; it never reveals internal detail.
 | `C-0004` | Common           | no        | Internal authentication / secret-store failure              | auth                  | Internal error (C-0004). Our team has been notified; please contact support if it persists. |
 | `E-0001` | Executor         | yes       | Execution timed out                                         | workflow_engine       | The run timed out (E-0001). Please try again. |
 | `E-0002` | Executor         | yes       | Step exceeded max retries                                   | workflow_engine       | A step failed repeatedly (E-0002). Please try again. |
-| `E-0003` | Executor         | yes       | Engine fault (unknown action, nonce lock, drain timeout)    | workflow_engine       | Internal error (E-0003). Please wait a few minutes and try again. |
+| `E-0003` | Executor         | yes       | Engine fault (unknown action, drain timeout)                | workflow_engine       | Internal error (E-0003). Please wait a few minutes and try again. |
 | `E-0004` | Executor         | yes       | Message processing failed (executor consumer backstop)      | infrastructure        | The run could not be processed (E-0004). Please wait a few minutes and try again. |
 | `N-0001` | Network          | yes       | RPC endpoint unavailable                                    | network_rpc           | A network provider was unavailable (N-0001). Please try again shortly. |
 | `N-0002` | Network          | yes       | Network connectivity error (DNS / reset / timeout)          | network_rpc           | Internal network error (N-0002). Please wait a few minutes and try again. |

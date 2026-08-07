@@ -5,7 +5,7 @@ description: "KeeperHub is the execution and reliability layer for AI agents ope
 
 # Overview
 
-KeeperHub is the execution and reliability layer for AI agents operating onchain. Build visual workflows that monitor onchain state, execute transactions, and send notifications -- without writing code or managing infrastructure. Works with Ethereum, Base, Arbitrum, Polygon, and other EVM-compatible chains.
+KeeperHub is the execution and reliability layer for AI agents operating onchain. Build visual workflows that monitor onchain state, execute transactions, and send notifications -- without writing code or managing infrastructure. Works with Ethereum, Base, Arbitrum, Polygon, and other EVM-compatible chains, and with Solana for native SOL and SPL token transfers.
 
 Whether you are a protocol team automating treasury operations, a security team responding to threats, or an AI agent executing onchain actions, KeeperHub handles gas estimation, transaction ordering, retries, and wallet security so you can focus on what to automate, not how to keep it running.
 
@@ -61,6 +61,10 @@ When a step fails, KeeperHub retries with configurable behavior. Failed runs are
 ### Supported Chains
 
 KeeperHub operates on Ethereum, Base, Arbitrum, Polygon, Sepolia, and additional EVM-compatible networks. Chain-specific gas defaults are applied automatically based on network conditions and trigger type. See [Gas Management](/wallet-management/gas) for details.
+
+Solana mainnet and devnet are supported for native SOL transfers and SPL token transfers. The same Turnkey wallet holds both an EVM and a Solana address. Contract calls, protocol plugins, and dry runs are EVM only today. See [Web3 Plugin](/plugins/web3) for the Solana actions and [Turnkey Wallets](/wallet-management/turnkey) for how the addresses are provisioned.
+
+The live, authoritative chain list is `GET /api/chains`.
 
 ### Turnkey Wallets
 

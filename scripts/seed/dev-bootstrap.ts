@@ -9,9 +9,10 @@
  * Sequence:
  *   1. assertLocalDb()
  *   2. If users table exists AND drizzle.__drizzle_migrations is empty,
- *      run scripts/backfill-drizzle-migrations.ts so db:migrate skips the
- *      already-applied SQL. (db:push-bootstrapped DBs land here.)
- *   3. pnpm db:migrate (applies anything new).
+ *      run scripts/backfill-drizzle-migrations.ts so the migration run skips
+ *      the already-applied SQL. (db:push-bootstrapped DBs land here.)
+ *   3. Apply migrations in-process, recovering from db:push drift if the
+ *      journal still lags the schema (see scripts/lib/migration-drift.ts).
  *   4. seedPersistentTestUsers() for the e2e user/org set.
  *   5. Upsert the dev user (default dev@keeperhub.local) + org + membership.
  *   6. Read the local kh CLI token from ~/.config/kh/hosts.yml and upsert
@@ -30,6 +31,11 @@ import "dotenv/config";
 
 import { createHash, randomBytes, scrypt } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import {
+  assertMigrateSucceeded,
+  queryJournalDriftState,
+  runMigrateWithRecovery,
+} from "../lib/migration-drift";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -140,28 +146,8 @@ async function hashPassword(password: string): Promise<string> {
 async function maybeBackfillJournal(
   client: ReturnType<typeof postgres>
 ): Promise<boolean> {
-  const usersExists = await client<{ exists: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'users'
-    ) AS exists
-  `;
-  if (!usersExists[0]?.exists) {
-    return false;
-  }
-
-  const journalCount = await client<{ c: number }[]>`
-    SELECT COALESCE(
-      (SELECT COUNT(*)::int FROM drizzle.__drizzle_migrations),
-      0
-    ) AS c
-  `.catch(() => [{ c: 0 }]);
-
-  if ((journalCount[0]?.c ?? 0) > 0) {
-    return false;
-  }
-
-  return true;
+  const state = await queryJournalDriftState(client);
+  return state.usersExists && state.journalCount === 0;
 }
 
 function runChildScript(script: string, label: string): void {
@@ -175,15 +161,10 @@ function runChildScript(script: string, label: string): void {
   }
 }
 
-function runMigrate(): void {
-  console.log("> pnpm db:migrate");
-  const result = spawnSync("pnpm", ["db:migrate"], {
-    stdio: "inherit",
-    env: process.env,
-  });
-  if (result.status !== 0) {
-    throw new Error(`pnpm db:migrate exited with status ${result.status ?? "null"}`);
-  }
+async function runMigrate(databaseUrl: string): Promise<void> {
+  console.log("> apply migrations");
+  const result = await runMigrateWithRecovery(databaseUrl, process.env);
+  assertMigrateSucceeded(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +495,7 @@ async function main(): Promise<void> {
     await client.end();
   }
 
-  runMigrate();
+  await runMigrate(url);
 
   console.log("> seedPersistentTestUsers()");
   await seedPersistentTestUsers();

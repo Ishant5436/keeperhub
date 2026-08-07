@@ -40,6 +40,7 @@ const EVENT_TYPE_MAP: Record<string, BillingWebhookEvent["type"] | undefined> =
     "checkout.session.completed": "checkout.completed",
     "customer.subscription.updated": "subscription.updated",
     "customer.subscription.deleted": "subscription.deleted",
+    "invoice.created": "invoice.created",
     "invoice.paid": "invoice.paid",
     "invoice.payment_failed": "invoice.payment_failed",
     "invoice.overdue": "invoice.overdue",
@@ -155,6 +156,7 @@ function normalizeInvoiceEvent(
       providerCustomerId: customerId ?? undefined,
       invoiceId: invoice.id ?? undefined,
       invoiceUrl: invoice.hosted_invoice_url ?? undefined,
+      billingReason: invoice.billing_reason ?? undefined,
     },
   };
 }
@@ -396,6 +398,7 @@ export class StripeBillingProvider implements BillingProvider {
           "subscription.deleted"
         );
 
+      case "invoice.created":
       case "invoice.paid":
       case "invoice.payment_failed":
       case "invoice.overdue":
@@ -569,6 +572,7 @@ export class StripeBillingProvider implements BillingProvider {
       currency: params.currency,
       description: params.description,
       metadata: params.metadata,
+      ...(params.invoiceId && { invoice: params.invoiceId }),
     });
     return { invoiceItemId: item.id };
   }

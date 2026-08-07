@@ -431,11 +431,14 @@ const RULES: readonly Rule[] = [
     errorType: ExecutionErrorType.SYSTEM,
     code: "E-0003",
   },
+  // Writes from one wallet are serialized, so exhausting the lock budget means
+  // the workflow is asking for more throughput than a single wallet has. That
+  // is the author's configuration, not an engine fault: user error, no code.
   {
-    pattern: /^Failed to acquire nonce lock/i,
-    errorCategory: ErrorCategory.WORKFLOW_ENGINE,
-    errorType: ExecutionErrorType.SYSTEM,
-    code: "E-0003",
+    pattern: /^Wallet is saturated: could not acquire the nonce lock/i,
+    errorCategory: ErrorCategory.CONFIGURATION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
   },
 
   // System: deploy bugs / missing modules / missing secrets

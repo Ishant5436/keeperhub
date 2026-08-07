@@ -4,6 +4,7 @@ import {
   countMonthlyExecutionsForAdmission,
   decideExecutionLimit,
   effectiveExecutionLimit,
+  statusAllowsOverage,
 } from "../lib/billing/execution-limit-core";
 import {
   getPlanLimits,
@@ -107,7 +108,7 @@ export async function checkExecutionLimitForExecutor(
     used,
     debtExecutions,
     overageEnabled: planDef.overage.enabled,
-    subscriptionActive: sub?.status === "active",
+    statusAllowsOverage: statusAllowsOverage(sub?.status),
   });
 
   switch (outcome) {

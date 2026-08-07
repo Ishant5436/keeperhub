@@ -9,7 +9,7 @@ description: "Frequently asked questions about KeeperHub - getting started, secu
 
 ### What is KeeperHub?
 
-KeeperHub is a no-code blockchain automation platform. You build visual workflows that monitor onchain state, execute transactions, and send notifications -- without writing code or managing infrastructure. It works with Ethereum, Base, Arbitrum, Polygon, and other EVM-compatible chains.
+KeeperHub is a no-code blockchain automation platform. You build visual workflows that monitor onchain state, execute transactions, and send notifications -- without writing code or managing infrastructure. It works with Ethereum, Base, Arbitrum, Polygon, and other EVM-compatible chains, and with Solana for native SOL and SPL token transfers.
 
 People use it for things like treasury monitoring, DeFi position management, event-driven alerting, and recurring onchain operations (reward distribution, collateral top-ups, that sort of thing).
 
@@ -33,6 +33,8 @@ If you do need custom logic, the [Code Plugin](/plugins/code) runs JavaScript in
 ### What blockchains does KeeperHub support?
 
 KeeperHub supports a range of EVM chains, including Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche, and others, plus their testnets (Sepolia, Base Sepolia, and more). The live, authoritative list is always available from `GET /api/chains`. Gas defaults are applied automatically per chain; L2s like Base and Arbitrum use lower gas multipliers since their estimates tend to be tighter.
+
+Solana mainnet and devnet are also supported, for native SOL transfers and SPL token transfers. Your Turnkey wallet carries a Solana address alongside its EVM address. Contract calls, protocol plugins, and simulation are EVM only today, so a Solana workflow is built from the transfer actions in the [Web3 Plugin](/plugins/web3).
 
 Some protocol plugins only work on certain chains. Ajna is Base-only, Sky converters are Ethereum-only, and so on. Check each plugin's docs for specifics.
 

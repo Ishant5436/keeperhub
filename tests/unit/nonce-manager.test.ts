@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const FAILED_LOCK_REGEX = /Failed to acquire nonce lock/;
+const FAILED_LOCK_REGEX =
+  /Wallet is saturated: could not acquire the nonce lock/;
 
 vi.mock("server-only", () => ({}));
 
@@ -38,18 +39,22 @@ vi.mock("@/lib/db/schema-extensions", () => ({
   },
 }));
 
-const { mockLogSystemError, mockLogSystemWarn, mockLogWarn } = vi.hoisted(
-  () => ({
+const { mockLogSystemError, mockLogSystemWarn, mockLogUserError, mockLogWarn } =
+  vi.hoisted(() => ({
     mockLogSystemError: vi.fn(),
     mockLogSystemWarn: vi.fn(),
+    mockLogUserError: vi.fn(),
     mockLogWarn: vi.fn(),
-  })
-);
+  }));
 
 vi.mock("@/lib/logging", () => ({
-  ErrorCategory: { INFRASTRUCTURE: "infrastructure" },
+  ErrorCategory: {
+    INFRASTRUCTURE: "infrastructure",
+    CONFIGURATION: "configuration",
+  },
   logSystemError: mockLogSystemError,
   logSystemWarn: mockLogSystemWarn,
+  logUserError: mockLogUserError,
   logWarn: mockLogWarn,
 }));
 
@@ -244,10 +249,10 @@ describe("NonceManager", () => {
         )
       ).rejects.toThrow(FAILED_LOCK_REGEX);
 
-      // Observability: failure emits a structured log so ops gets paged
-      // instead of waiting for support tickets (KEEP-344).
-      expect(mockLogSystemError).toHaveBeenCalledWith(
-        "infrastructure",
+      // Saturation is the author's configuration, so it counts a metric
+      // without paging.
+      expect(mockLogUserError).toHaveBeenCalledWith(
+        "configuration",
         expect.stringContaining("acquire_failed"),
         expect.any(Error),
         expect.objectContaining({
@@ -256,6 +261,7 @@ describe("NonceManager", () => {
           execution_id: "exec_123",
         })
       );
+      expect(mockLogSystemError).not.toHaveBeenCalled();
     });
 
     it("warns when taking over an expired lock from a prior holder", async () => {

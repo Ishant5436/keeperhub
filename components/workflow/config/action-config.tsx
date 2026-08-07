@@ -30,6 +30,7 @@ import {
 import { SqlTemplateEditor } from "@/components/ui/sql-template-editor";
 import { TemplateCodeEditor } from "@/components/ui/template-code-editor";
 import { actionRequiresCredentials } from "@/lib/integration-helpers";
+import { parseSchemaFields } from "@/lib/schema-fields";
 import { ConditionQueryBuilder } from "@/components/workflow/condition-query-builder";
 import type { ConditionGroup } from "@/lib/workflow/nodes/condition/builder-types";
 import {
@@ -69,7 +70,7 @@ import {
   getIntegration,
 } from "@/plugins/registry";
 import { ActionConfigRenderer } from "./action-config-renderer";
-import { SchemaBuilder, type SchemaField } from "./schema-builder";
+import { SchemaBuilder } from "./schema-builder";
 import { Web3ConnectionSelect } from "./web3-connection-select";
 
 type ConfigValue = string | boolean | Record<string, unknown> | undefined;
@@ -114,11 +115,7 @@ function DatabaseQueryFields({
           onChange={(schema) =>
             onUpdateConfig("dbSchema", JSON.stringify(schema))
           }
-          schema={
-            config?.dbSchema
-              ? (JSON.parse(config.dbSchema as string) as SchemaField[])
-              : []
-          }
+          schema={parseSchemaFields(config?.dbSchema)}
         />
       </div>
       <div className="space-y-2">

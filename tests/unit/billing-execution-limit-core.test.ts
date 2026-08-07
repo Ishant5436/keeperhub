@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetExecutionCountCacheForTest,
   countMonthlyExecutionsForAdmission,
+  decideExecutionLimit,
+  statusAllowsOverage,
 } from "@/lib/billing/execution-limit-core";
 
 type FakeDb = { execute: ReturnType<typeof vi.fn> };
@@ -349,5 +351,93 @@ describe("countMonthlyExecutionsForAdmission", () => {
       )
     ).toBe(400_000);
     expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("statusAllowsOverage", () => {
+  it("allows an active subscription past the included limit", () => {
+    expect(statusAllowsOverage("active")).toBe(true);
+  });
+
+  it("allows a trial past the included limit so the excess is billed", () => {
+    expect(statusAllowsOverage("trialing")).toBe(true);
+  });
+
+  it.each([
+    "past_due",
+    "canceled",
+    "incomplete",
+    "unpaid",
+    null,
+    undefined,
+  ])("stops %s at the included limit", (status) => {
+    expect(statusAllowsOverage(status)).toBe(false);
+  });
+});
+
+describe("decideExecutionLimit", () => {
+  const AT_LIMIT = {
+    maxExecutionsPerMonth: 25_000,
+    used: 25_000,
+    debtExecutions: 0,
+    overageEnabled: true,
+  };
+
+  it("bills a trial for the excess rather than blocking it", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        statusAllowsOverage: statusAllowsOverage("trialing"),
+      })
+    ).toBe("overage");
+  });
+
+  it("leaves a trial under its included quota alone", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        used: 24_999,
+        statusAllowsOverage: statusAllowsOverage("trialing"),
+      })
+    ).toBe("within_limit");
+  });
+
+  it("bills an active subscription for the excess", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        statusAllowsOverage: statusAllowsOverage("active"),
+      })
+    ).toBe("overage");
+  });
+
+  it("blocks a past_due subscription at the limit", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        statusAllowsOverage: statusAllowsOverage("past_due"),
+      })
+    ).toBe("blocked_limit");
+  });
+
+  it("blocks a plan without overage at the limit", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        overageEnabled: false,
+        statusAllowsOverage: statusAllowsOverage("active"),
+      })
+    ).toBe("blocked_limit");
+  });
+
+  it("blocks on outstanding debt before considering the count", () => {
+    expect(
+      decideExecutionLimit({
+        ...AT_LIMIT,
+        used: 0,
+        debtExecutions: 500,
+        statusAllowsOverage: statusAllowsOverage("trialing"),
+      })
+    ).toBe("blocked_debt");
   });
 });

@@ -30,12 +30,11 @@ test.describe("Analytics Gas Tracking", () => {
       { timeout: 15_000 }
     );
 
-    // Find the Gas Spent KPI card
-    const gasLabel = page.locator('p.text-sm:has-text("Gas Spent")');
-    await expect(gasLabel).toBeVisible({ timeout: 10_000 });
+    // Headline value is wallet-paid plus sponsored gas for the range
+    const gasCard = page.locator('[data-kpi="gas-spent"]');
+    await expect(gasCard).toBeVisible({ timeout: 10_000 });
 
-    // The value is the sibling <p> with text-2xl
-    const gasValue = gasLabel.locator("..").locator("p.text-2xl");
+    const gasValue = gasCard.getByTestId("kpi-value");
     await expect(gasValue).toBeVisible();
     await expect(gasValue).not.toHaveText("0 ETH", { timeout: 10_000 });
   });

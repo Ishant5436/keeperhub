@@ -26,10 +26,11 @@ import {
 } from "@/components/ui/select";
 import { TimezoneSelect } from "@/components/ui/timezone-select";
 import { parseIntervalSeconds } from "@/lib/cron-utils";
+import { parseSchemaFields } from "@/lib/schema-fields";
 import type { ActionConfigField } from "@/plugins/registry";
 import { ActionConfigRenderer } from "./action-config-renderer";
 import { CronScheduleBuilder } from "./cron-schedule-builder";
-import { SchemaBuilder, type SchemaField } from "./schema-builder";
+import { SchemaBuilder } from "./schema-builder";
 
 type TriggerConfigProps = {
   config: Record<string, unknown>;
@@ -150,18 +151,7 @@ export function TriggerConfig({
               onChange={(schema) =>
                 onUpdateConfig("webhookSchema", JSON.stringify(schema))
               }
-              schema={(() => {
-                if (!config?.webhookSchema) {
-                  return [];
-                }
-                try {
-                  return JSON.parse(
-                    config.webhookSchema as string
-                  ) as SchemaField[];
-                } catch {
-                  return [];
-                }
-              })()}
+              schema={parseSchemaFields(config?.webhookSchema)}
             />
             <p className="text-muted-foreground text-xs">
               Define the expected structure of the incoming webhook payload.

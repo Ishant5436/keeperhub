@@ -75,8 +75,13 @@ export type AnalyticsSummary = {
   cancelledCount: number;
   successRate: number;
   avgDurationMs: number | null;
+  /** Gas paid by the org's own wallet over the range, in wei. */
   totalGasWei: string;
-  /** Subset of gas paid by KeeperHub sponsorship over the range, in wei. */
+  /**
+   * Gas paid by KeeperHub sponsorship over the range, in wei, read from the
+   * gas-credit ledger. Disjoint from `totalGasWei`, so the headline figure the
+   * Gas Spent KPI renders is the two added together.
+   */
   sponsoredGasWei: string;
   activeRuns: number;
   previousPeriod: {

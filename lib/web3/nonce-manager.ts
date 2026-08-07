@@ -22,8 +22,8 @@ import { db } from "@/lib/db";
 import { pendingTransactions, walletLocks } from "@/lib/db/schema-extensions";
 import {
   ErrorCategory,
-  logSystemError,
   logSystemWarn,
+  logUserError,
   logWarn,
 } from "@/lib/logging";
 
@@ -482,15 +482,19 @@ export class NonceManager {
       await this.sleep(this.lockRetryDelayMs);
     }
 
-    // Acquire failure after the full retry budget — emit a metric so the
-    // operations team gets paged on repeated failures rather than finding
-    // out via support tickets like in KEEP-344.
-    const failure = new Error(
-      `Failed to acquire nonce lock for ${walletAddress}:${chainId} ` +
-        `after ${this.maxLockRetries} attempts`
+    // Exhausting the budget means the wallet is oversubscribed, not that the
+    // engine faulted: writes from one wallet are serialized by design, and the
+    // lock is the only thing that measures the overload. Reported as a user
+    // error so it carries an actionable message and counts a metric without
+    // paging, and phrased so the author knows which lever to pull.
+    const waitSeconds = Math.round(
+      (this.maxLockRetries * this.lockRetryDelayMs) / 1000
     );
-    logSystemError(
-      ErrorCategory.INFRASTRUCTURE,
+    const failure = new Error(
+      `Wallet is saturated: could not acquire the nonce lock for ${walletAddress}:${chainId} after ${waitSeconds}s. Transactions from one wallet are sent one at a time, so reduce this workflow's trigger rate or spread writes across additional wallets.`
+    );
+    logUserError(
+      ErrorCategory.CONFIGURATION,
       "[NonceManager] acquire_failed",
       failure,
       {

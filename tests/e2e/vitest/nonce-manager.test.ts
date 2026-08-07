@@ -38,7 +38,8 @@ const TEST_WALLET_NORMALIZED = TEST_WALLET.toLowerCase();
 const TEST_CHAIN_ID = 11_155_111; // Sepolia
 
 // Regex patterns for assertions (at top level for performance)
-const FAILED_LOCK_REGEX = /Failed to acquire nonce lock/;
+const FAILED_LOCK_REGEX =
+  /Wallet is saturated: could not acquire the nonce lock/;
 
 // Mock provider that returns controlled nonce values
 function createMockProvider(transactionCount: number) {

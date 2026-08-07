@@ -30,14 +30,54 @@ See [Authentication](/api/authentication) for the full scope.
 
 ## Response Format
 
-All responses are returned as JSON with the following structure:
+All responses are JSON. Successful responses come in three shapes, by resource
+kind. There is no `data` wrapper on any endpoint.
 
-### Success Response
+### Single resource
+
+A read or write of one resource returns that resource as a bare object.
+
 ```json
 {
-  "data": { ... }
+  "id": "wf_123",
+  "name": "Treasury monitor"
 }
 ```
+
+`GET /api/user`, `GET /api/workflows/{workflowId}` and the direct-execution
+endpoints all answer this way.
+
+### Paginated collection
+
+A collection that paginates returns items alongside page metadata and links.
+
+```json
+{
+  "items": [ ... ],
+  "meta": { "total": 42, "page": 1, "pageSize": 20, "totalPages": 3 },
+  "_links": {
+    "self": "...", "first": "...", "prev": null, "next": "...", "last": "..."
+  }
+}
+```
+
+`GET /api/keys`, `GET /api/workflows/{workflowId}/history` and
+`GET /api/security/audit` answer this way. Read `items`, and follow
+`_links.next` until it is `null`.
+
+### Bare array
+
+List endpoints that do not paginate return a plain JSON array with no envelope.
+`GET /api/chains` and `GET /api/workflows` both answer this way.
+
+```json
+[
+  { "chainId": 1, "name": "Ethereum Mainnet" }
+]
+```
+
+When writing a generic client, key the unwrapping on the endpoint rather than
+sniffing the body.
 
 ### Error Response
 
@@ -70,6 +110,15 @@ Clients should:
 - Capture `request_id` (or read the `x-request-id` response header) and include it when reporting issues.
 
 A short list of canonical `error` codes is reused across endpoints: `unauthorized`, `insufficient_scope`, `not_found`, `invalid_input`, `conflict`, `rate_limited`, `internal_error`. Endpoint-specific codes (e.g. `wallet_not_configured`, `web3_integration_exists`) are documented on the page for the resource that raises them.
+
+### Direct Execution errors
+
+The `/api/execute/*` endpoints answer with a human-readable sentence in `error`,
+`field` naming the offending input where one applies, and `details` carrying
+context. Where a machine-readable code exists it is in `code`, for example
+`insufficient_balance` on a simulation that ran out of native currency. Branch
+on the HTTP status and on `code`, and treat `error` there as prose to log or
+show. See [Direct Execution](/api/direct-execution) for the per-endpoint shapes.
 
 The `x-request-id` request header is honored when present: send any value (≤ 128 chars, no control characters) and it is reflected back on both the `request_id` response field and the `x-request-id` response header.
 

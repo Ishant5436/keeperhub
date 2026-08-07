@@ -222,6 +222,21 @@ export type ExecutionLimitOutcome =
   | "blocked_limit";
 
 /**
+ * Whether a subscription status may run past the included limit on overage.
+ *
+ * A trial includes the plan's monthly executions at no charge, but it is not a
+ * licence to run unlimited: past the included quota the excess is billed like
+ * any paid period, and the card collected at checkout covers it. Every other
+ * status (past_due, canceled, incomplete) stops at the limit instead, since
+ * there is no settled payment relationship to bill the excess against.
+ */
+export function statusAllowsOverage(
+  status: string | null | undefined
+): boolean {
+  return status === "active" || status === "trialing";
+}
+
+/**
  * The allow/overage/block decision for a non-unlimited plan. Callers handle the
  * unlimited (maxExecutionsPerMonth === -1) case before reaching here, since it
  * intentionally skips the debt and count queries.
@@ -231,7 +246,7 @@ export function decideExecutionLimit(params: {
   used: number;
   debtExecutions: number;
   overageEnabled: boolean;
-  subscriptionActive: boolean;
+  statusAllowsOverage: boolean;
 }): ExecutionLimitOutcome {
   if (params.debtExecutions > 0 && params.overageEnabled) {
     return "blocked_debt";
@@ -239,7 +254,7 @@ export function decideExecutionLimit(params: {
   if (params.used < params.maxExecutionsPerMonth) {
     return "within_limit";
   }
-  if (params.overageEnabled && params.subscriptionActive) {
+  if (params.overageEnabled && params.statusAllowsOverage) {
     return "overage";
   }
   return "blocked_limit";

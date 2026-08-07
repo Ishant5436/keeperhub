@@ -19,6 +19,7 @@ export type BillingWebhookEvent = {
     | "checkout.completed"
     | "subscription.updated"
     | "subscription.deleted"
+    | "invoice.created"
     | "invoice.paid"
     | "invoice.payment_failed"
     | "invoice.overdue"
@@ -35,6 +36,9 @@ export type BillingWebhookEvent = {
     periodStart?: Date;
     periodEnd?: Date | null;
     invoiceUrl?: string;
+    // Stripe's billing_reason, used to tell a cycle renewal invoice apart from
+    // a one-off or proration invoice.
+    billingReason?: string;
     // Metadata from Stripe used to resolve custom enterprise plans whose price
     // IDs aren't in the env-var map. Subscription metadata takes precedence.
     subscriptionMetadata?: Record<string, string>;
@@ -82,6 +86,9 @@ export type CreateInvoiceItemParams = {
   currency: string;
   description: string;
   metadata?: Record<string, string>;
+  // Attach to this specific draft invoice. Without it the item is left pending
+  // and the provider only sweeps it into whichever invoice is created next.
+  invoiceId?: string;
 };
 
 export type CreateInvoiceItemResult = {

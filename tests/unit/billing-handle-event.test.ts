@@ -244,6 +244,88 @@ describe("handleBillingEvent", () => {
     });
   });
 
+  describe("invoice.created", () => {
+    const closedPeriod = {
+      organizationId: "org_1",
+      providerSubscriptionId: "sub_1",
+      providerPriceId: process.env.STRIPE_PRICE_PRO_25K_MONTHLY,
+      plan: "pro",
+      tier: "25k",
+      status: "active",
+      cancelAtPeriodEnd: false,
+      currentPeriodStart: new Date("2025-01-01"),
+      currentPeriodEnd: new Date("2025-02-01"),
+    };
+
+    it("bills the closed period onto the invoice that closes it", async () => {
+      mockSelectReturning([closedPeriod]);
+
+      const event = makeEvent("invoice.created", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "in_closing",
+        billingReason: "subscription_cycle",
+      });
+
+      await handleBillingEvent(event, createMockProvider());
+
+      expect(mockBillOverageForOrg).toHaveBeenCalledWith(
+        "org_1",
+        new Date("2025-01-01"),
+        new Date("2025-02-01"),
+        { invoiceId: "in_closing" }
+      );
+    });
+
+    it("ignores invoices that do not close a cycle", async () => {
+      mockSelectReturning([closedPeriod]);
+
+      const event = makeEvent("invoice.created", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "in_oneoff",
+        billingReason: "subscription_update",
+      });
+
+      await handleBillingEvent(event, createMockProvider());
+
+      expect(mockBillOverageForOrg).not.toHaveBeenCalled();
+    });
+
+    it("skips when the subscription row already advanced past the closed period", async () => {
+      mockSelectReturning([
+        {
+          ...closedPeriod,
+          currentPeriodStart: new Date("2099-01-01"),
+          currentPeriodEnd: new Date("2099-02-01"),
+        },
+      ]);
+
+      const event = makeEvent("invoice.created", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "in_closing",
+        billingReason: "subscription_cycle",
+      });
+
+      await handleBillingEvent(event, createMockProvider());
+
+      expect(mockBillOverageForOrg).not.toHaveBeenCalled();
+    });
+
+    it("does not throw when billing the closing invoice fails", async () => {
+      mockSelectReturning([closedPeriod]);
+      mockBillOverageForOrg.mockRejectedValue(new Error("Stripe down"));
+
+      const event = makeEvent("invoice.created", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "in_closing",
+        billingReason: "subscription_cycle",
+      });
+
+      await expect(
+        handleBillingEvent(event, createMockProvider())
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe("subscription.updated", () => {
     it("updates plan when price changes", async () => {
       mockSelectReturning([
