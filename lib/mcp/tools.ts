@@ -1190,6 +1190,7 @@ export function registerTools(
           "3. Repeat the same arguments with simulate omitted and a unique idempotency_key",
           "4. Poll get_direct_execution_status with bounded backoff until completed or failed",
           "5. Save the terminal transactionLink as the onchain proof",
+          "- status unconfirmed means the transaction was broadcast but the chain has not confirmed it yet; it is NOT a failure. Keep polling. Never re-send an unconfirmed execution: the transaction may still land and re-sending moves the funds twice",
           "- simulate must be a JSON boolean, not a string",
           "- simulation is EVM-only; Solana chain IDs 101/103 and their aliases are rejected before the API call",
           "- view/pure calls and unmet conditions return their normal read/no-action result",
@@ -1409,7 +1410,7 @@ export function registerTools(
 
   server.tool(
     "get_direct_execution_status",
-    "Get the status of a direct execution (transfer or contract call). Returns transaction hash, status, and result when complete.",
+    "Get the status of a direct execution (transfer or contract call). Returns transaction hash, status, and result when complete. Status is one of pending, running, unconfirmed, completed, failed; only completed and failed are terminal. unconfirmed means the transaction is on chain but not yet confirmed, so keep polling rather than re-sending.",
     {
       execution_id: z
         .string()

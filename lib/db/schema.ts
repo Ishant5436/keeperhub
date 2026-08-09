@@ -655,17 +655,18 @@ export const workflowExecutions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id),
-    status: text("status")
-      .notNull()
-      .$type<
-        | "pending"
-        | "running"
-        | "success"
-        | "error"
-        | "cancelled"
-        | "phantom"
-        | "system_error"
-      >(),
+    status: text("status").notNull().$type<
+      | "pending"
+      | "running"
+      // A run whose claimed transaction hashes could not be read on chain.
+      // Non-terminal: settled to success or error by the reconciler.
+      | "unconfirmed"
+      | "success"
+      | "error"
+      | "cancelled"
+      | "phantom"
+      | "system_error"
+    >(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
     input: jsonb("input").$type<Record<string, any>>(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
