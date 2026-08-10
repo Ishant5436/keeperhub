@@ -41,7 +41,8 @@ jobs:
   # receiving docs. So "does the branch exist" would have passed throughout the
   # outage and is not the property worth asserting. What matters is whether the
   # configured branch actually carries the docs the links point into, which is
-  # checked here by resolving the base branch's docs paths against it.
+  # checked here by resolving the base branch's docs paths - minus the ones
+  # this merge deletes - against it.
   #
   # Uses git rather than the contents API: no rate limit, no token, and one
   # fetch instead of one request per page.
@@ -90,6 +91,13 @@ jobs:
           missing=0
           checked=0
           while read -r file; do
+            # `actions/checkout` checks out refs/pull/N/merge, so the working
+            # tree is the post-merge result. Files this merge deletes are never
+            # deployed and their edit links never render, so they are not the
+            # configured branch's job to carry. Without this skip, a docs
+            # restructure on the configured branch fails every release PR into
+            # prod - including the one that would bring prod back in line.
+            [ -f "$file" ] || continue
             checked=$((checked + 1))
             if ! git cat-file -e "refs/remotes/editlink/configured:$file" 2>/dev/null; then
               missing=$((missing + 1))

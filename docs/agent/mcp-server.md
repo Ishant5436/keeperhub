@@ -28,7 +28,7 @@ claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com
 
 ### Via Claude Code Plugin
 
-Install the [Claude Code Plugin](/ai-tools/claude-code-plugin) for additional skills and slash commands on top of the MCP tools. The plugin connects to the same remote endpoint.
+Install the [Claude Code Plugin](/agent/claude-code-plugin) for additional skills and slash commands on top of the MCP tools. The plugin connects to the same remote endpoint.
 
 ### Local via kh CLI (deprecated)
 
@@ -59,7 +59,7 @@ Any valid bearer can call any listed workflow regardless of which organization o
 
 ### Paid workflows
 
-Paid listings return an HTTP 402 with an x402 challenge. The MCP transport surfaces this as a tool error with the full challenge body in the response text. To autopay, install the [agentic wallet](/ai-tools/agentic-wallet) — its PreToolUse safety hook intercepts the 402, evaluates the price against your safety thresholds, signs the payment, and retries.
+Paid listings return an HTTP 402 with an x402 challenge. The MCP transport surfaces this as a tool error with the full challenge body in the response text. To autopay, install the [agentic wallet](/agent/agentic-wallet) — its PreToolUse safety hook intercepts the 402, evaluates the price against your safety thresholds, signs the payment, and retries.
 
 ### Compared to the aggregate server
 

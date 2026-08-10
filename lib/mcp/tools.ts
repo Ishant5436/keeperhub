@@ -257,11 +257,24 @@ function buildPaymentRequiredHint(
 // Optional idempotency key shared by the mutating tools. Forwarded to the REST
 // layer as the `Idempotency-Key` header so a retry with the same key and
 // arguments replays the original result instead of executing again.
+//
+// The description spells out which 409 to retry because an agent cannot tell
+// from the status: conflict and in-progress share it and mean opposite things,
+// and rotating the key on the in-progress one can broadcast a second
+// transaction for an action the first request is still completing. It also has
+// to say what `retryable` does NOT mean, since `false` on a conflict is neither
+// "stop" nor an unconditional "rotate".
+//
+// The rotate case needs its precondition stated here more than anywhere else.
+// This text is read by an LLM, which is the caller most likely to rebuild a body
+// from memory and re-serialize the same intent differently -- "0.1" against
+// "0.10" -- and an unqualified "use a NEW key" would tell it to resend a
+// transfer that is already in flight.
 const IDEMPOTENCY_KEY_ARG = z
   .string()
   .optional()
   .describe(
-    "Optional Idempotency-Key (e.g. an agent-side transaction id). Retrying with the same key and arguments returns the original result instead of executing again, within a 24h window. Reusing a key with different arguments returns a 409 conflict."
+    "Optional Idempotency-Key (e.g. an agent-side transaction id). Retrying with the same key and arguments returns the original result instead of executing again, within a 24h window. Two 409s are possible, and the body's `retryable` field says only whether it is safe to send the request again under the SAME key. `idempotency_in_progress` (retryable true): the first request is still running, so retry shortly with the same key. `idempotency_conflict` (retryable false): this body is not the body the key was bound to. Rotate to a NEW key ONLY if this is genuinely different work. If it is the same intent you already sent, the body drifted rather than the intent - re-serializing `0.1` as `0.10`, or `network` for `chainId`, produces this - so rebuild the body to match the original and keep the key. Rotating there escapes the in-flight guard and can broadcast a second transaction. False does not mean give up. Keep the same key whenever the previous attempt's outcome is unknown, such as after a timeout, because rotating it then escapes the in-flight guard. The field appears on these two codes only; other statuses keep their usual meaning, so a 429 is still worth retrying after a back-off even though it carries no `retryable`."
   );
 
 // The direct-execution REST routes support a dry-run path that estimates gas
@@ -280,6 +293,17 @@ const SOLANA_DIRECT_EXECUTION_CHAIN_IDS = new Set<number>([
   SUPPORTED_CHAIN_IDS.SOLANA_DEVNET,
 ]);
 
+export function buildSimulationUnsupportedChainError(chainId: number): Error {
+  return new Error(
+    JSON.stringify({
+      error: "simulation_unsupported_chain",
+      message: "Direct-execution simulation is not supported on this chain.",
+      chain_id: chainId,
+      hint: "Direct-execution simulation is EVM-only. Preflight with a Solana-aware client before broadcasting.",
+    })
+  );
+}
+
 function assertSimulationSupported(chainId: string, simulate?: boolean): void {
   if (!simulate) {
     return;
@@ -296,9 +320,7 @@ function assertSimulationSupported(chainId: string, simulate?: boolean): void {
     return;
   }
   if (SOLANA_DIRECT_EXECUTION_CHAIN_IDS.has(normalizedChainId)) {
-    throw new Error(
-      `Direct-execution simulation is currently EVM-only; Solana chain ${normalizedChainId} cannot be simulated. Do not broadcast unless you can preflight the transaction through a Solana-aware client.`
-    );
+    throw buildSimulationUnsupportedChainError(normalizedChainId);
   }
 }
 

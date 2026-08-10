@@ -1,3 +1,4 @@
+import { simulationHttpStatus } from "@/app/api/execute/_lib/simulation-response";
 import { HttpStatus } from "@/lib/http-status";
 import "server-only";
 
@@ -156,7 +157,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         decimals: typeof body.decimals === "number" ? body.decimals : undefined,
       });
       return NextResponse.json(result, {
-        status: result.wouldRevert ? HttpStatus.BAD_REQUEST : HttpStatus.OK,
+        status: simulationHttpStatus(result),
       });
     }
     const nativeResult = await simulateNativeTransfer({
@@ -166,7 +167,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       amount,
     });
     return NextResponse.json(nativeResult, {
-      status: nativeResult.wouldRevert ? HttpStatus.BAD_REQUEST : HttpStatus.OK,
+      status: simulationHttpStatus(nativeResult),
     });
   }
 

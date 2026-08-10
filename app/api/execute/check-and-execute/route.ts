@@ -1,3 +1,4 @@
+import { simulationHttpStatus } from "@/app/api/execute/_lib/simulation-response";
 import { HttpStatus } from "@/lib/http-status";
 import "server-only";
 
@@ -132,8 +133,8 @@ async function simulateConditionalWrite(
   // than "we reached the action step". A reverted simulate means a real
   // broadcast would have reverted too, so executed is false.
   return NextResponse.json(
-    { ...result, executed: !result.wouldRevert, conditionResult },
-    { status: result.wouldRevert ? HttpStatus.BAD_REQUEST : HttpStatus.OK }
+    { ...result, executed: result.success, conditionResult },
+    { status: simulationHttpStatus(result) }
   );
 }
 

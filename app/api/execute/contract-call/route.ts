@@ -1,3 +1,4 @@
+import { simulationHttpStatus } from "@/app/api/execute/_lib/simulation-response";
 import { HttpStatus } from "@/lib/http-status";
 import "server-only";
 
@@ -129,7 +130,7 @@ async function handleSimulateCall(
   });
 
   return NextResponse.json(result, {
-    status: result.wouldRevert ? HttpStatus.BAD_REQUEST : HttpStatus.OK,
+    status: simulationHttpStatus(result),
   });
 }
 

@@ -49,7 +49,7 @@ claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com
   --header "Authorization: Bearer kh_your_key_here"
 ```
 
-See [MCP Server](/ai-tools/mcp-server) for OAuth and per-workflow servers.
+See [MCP Server](/agent/mcp-server) for OAuth and per-workflow servers.
 
 A non-destructive way to confirm the connection works is `list_integrations`, which
 reads and changes nothing. If it returns `401`, the key or header is wrong; a `403` on a
