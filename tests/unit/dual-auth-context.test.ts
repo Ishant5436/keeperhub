@@ -295,6 +295,7 @@ describe("getDualAuthContext", () => {
 
         expect(result).toEqual({
           error: "Organization not found",
+          code: "not_found",
           status: 404,
         });
       });
@@ -308,6 +309,7 @@ describe("getDualAuthContext", () => {
 
         expect(result).toEqual({
           error: "Organization not found",
+          code: "not_found",
           status: 404,
         });
       });
@@ -338,6 +340,7 @@ describe("getDualAuthContext", () => {
 
         expect(result).toEqual({
           error: "Organization not found",
+          code: "not_found",
           status: 404,
         });
         expect(mockOrgLookup).not.toHaveBeenCalled();
@@ -354,7 +357,11 @@ describe("getDualAuthContext", () => {
     it("returns 401 error when required (default)", async () => {
       const result = await getDualAuthContext(makeRequest());
 
-      expect(result).toEqual({ error: "Unauthorized", status: 401 });
+      expect(result).toEqual({
+        error: "Unauthorized",
+        code: "unauthorized",
+        status: 401,
+      });
     });
 
     it("returns null values when not required", async () => {
@@ -480,7 +487,11 @@ describe("getDualAuthContext", () => {
         )
       );
 
-      expect(result).toEqual({ error: "Invalid origin", status: 403 });
+      expect(result).toEqual({
+        error: "Invalid origin",
+        code: "unauthorized",
+        status: 403,
+      });
     });
 
     it("rejects state-changing request with cookie and no origin/referer", async () => {
@@ -491,7 +502,11 @@ describe("getDualAuthContext", () => {
         )
       );
 
-      expect(result).toEqual({ error: "Invalid origin", status: 403 });
+      expect(result).toEqual({
+        error: "Invalid origin",
+        code: "unauthorized",
+        status: 403,
+      });
     });
 
     it("falls back to Referer when Origin is missing", async () => {
@@ -640,7 +655,11 @@ describe("resolveOrganizationId — origin check wiring", () => {
         { method: "POST" }
       )
     );
-    expect(result).toEqual({ error: "Invalid origin", status: 403 });
+    expect(result).toEqual({
+      error: "Invalid origin",
+      code: "unauthorized",
+      status: 403,
+    });
   });
 
   it("allows trusted origin on cookie POST", async () => {
@@ -683,7 +702,11 @@ describe("resolveCreatorContext — origin check wiring", () => {
         { method: "POST" }
       )
     );
-    expect(result).toEqual({ error: "Invalid origin", status: 403 });
+    expect(result).toEqual({
+      error: "Invalid origin",
+      code: "unauthorized",
+      status: 403,
+    });
   });
 
   it("allows trusted origin on cookie POST", async () => {

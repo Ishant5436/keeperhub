@@ -3,11 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { workflows } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
-import {
-  type DualAuthContext,
-  auditFromAuth,
-  getDualAuthContext,
-} from "@/lib/middleware/auth-helpers";
+import { type DualAuthContext, auditFromAuth, authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { getWorkflowAccess } from "@/lib/workflow/access";
 import { generateWorkflowSDKCode } from "@/lib/workflow/codegen/sdk";
 
@@ -21,10 +17,7 @@ export async function GET(
 
     authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
     const { userId, organizationId } = authContext;
 

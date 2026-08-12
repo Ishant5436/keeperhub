@@ -10,8 +10,9 @@
  *   PINATA_JWT - Pinata API JWT (https://app.pinata.cloud/developers/api-keys)
  *
  * Optional env:
- *   AGENT_ID                       - default 31875
- *   IDENTITY_REGISTRY_ADDRESS      - default 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+ *   AGENT_ID                       - defaults to KEEPERHUB_ERC_8004_AGENT_ID
+ *   IDENTITY_REGISTRY_ADDRESS      - defaults to ERC_8004_IDENTITY_REGISTRY_ADDRESS
+ *                                    (both from lib/agentic-wallet/constants.ts)
  *   CHAIN_ETH_MAINNET_PRIMARY_RPC  - if set, used as the only RPC; otherwise
  *                                    the script tries a list of public RPCs
  *                                    in sequence and uses the first that works
@@ -22,10 +23,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ethers } from "ethers";
+import {
+  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  KEEPERHUB_ERC_8004_AGENT_ID,
+} from "../lib/agentic-wallet/constants";
 import { formatSanitizedRpcError } from "../lib/rpc/sanitize-rpc-error";
 
-const DEFAULT_AGENT_ID = "31875";
-const DEFAULT_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+const DEFAULT_AGENT_ID = String(KEEPERHUB_ERC_8004_AGENT_ID);
+const DEFAULT_REGISTRY = ERC_8004_IDENTITY_REGISTRY_ADDRESS;
 
 // Public mainnet RPCs tried in order. CDN-fronted endpoints regularly serve
 // Cloudflare challenge pages to GHA runner IPs, so we try a list and accept

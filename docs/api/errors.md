@@ -54,6 +54,7 @@ The API uses a short set of stable, lowercase codes in the `error` field. Some r
 | `conflict` | 409 | Request conflicts with the current state | Reconcile and retry |
 | `rate_limited` | 429 | Too many requests | Back off and retry (see rate-limit headers below) |
 | `internal_error` | 500 | Unexpected server error | Retry with backoff; contact support if it persists |
+| `mfa_required` | 403 | The session is flagged and must re-prove its second factor | Complete the step-up prompt, then retry |
 
 ### Idempotency Errors
 

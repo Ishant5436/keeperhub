@@ -46,6 +46,7 @@ type Dual402Params = {
   inputSchema?: Record<string, unknown> | null;
   category?: string | null;
   tagName?: string | null;
+  workflowType?: string | null;
 };
 
 type PaymentRequiredV2 = {
@@ -74,6 +75,16 @@ const WORKFLOW_OUTPUT_EXAMPLE = {
   status: "running",
 } as const;
 
+// A paid write listing returns unsigned calldata for the caller to submit --
+// it starts no execution, so advertising the executionId shape above would
+// tell Bazaar / x402scan / agentcash to expect a poll target that never comes.
+const CALLDATA_OUTPUT_EXAMPLE = {
+  type: "calldata",
+  to: "0x0000000000000000000000000000000000000000",
+  data: "0xa9059cbb",
+  value: "0",
+} as const;
+
 /**
  * Builds the spec-compliant x402 v2 PaymentRequired payload (matches the
  * `PaymentRequired` type from `@x402/core/types`). Discovery scanners like
@@ -88,6 +99,7 @@ function buildPaymentRequired(params: Dual402Params): PaymentRequiredV2 {
     inputSchema,
     category,
     tagName,
+    workflowType,
   } = params;
   const amountSmallestUnit = String(
     Math.round(Number(price) * 10 ** USDC_DECIMALS)
@@ -138,7 +150,14 @@ function buildPaymentRequired(params: Dual402Params): PaymentRequiredV2 {
           body: inputSchema ?? { type: "object" },
         },
       },
-      output: { properties: { example: WORKFLOW_OUTPUT_EXAMPLE } },
+      output: {
+        properties: {
+          example:
+            workflowType === "write"
+              ? CALLDATA_OUTPUT_EXAMPLE
+              : WORKFLOW_OUTPUT_EXAMPLE,
+        },
+      },
     },
   };
   payload.extensions = { bazaar };
@@ -198,6 +217,12 @@ export type PaymentMeta = {
   protocol: PaymentProtocol;
   chain: "base" | "tempo";
   payerAddress: string | null;
+  // Hash of the payment credential, computed once here where the credential is
+  // already in hand. Handlers must use this rather than re-deriving it from the
+  // request: a re-derivation that falls back to some other value on a missing
+  // header silently defeats the DB-level idempotency guarantee on
+  // workflow_payments.payment_hash.
+  paymentHash: string | null;
 };
 
 export function detectProtocol(
@@ -228,13 +253,26 @@ async function checkIdempotency(
   paymentHash: string
 ): Promise<NextResponse | null> {
   const existing = await findExistingPayment(paymentHash);
-  if (existing) {
+  if (!existing) {
+    return null;
+  }
+  if (existing.kind === "calldata") {
+    if (existing.deliverable) {
+      // Serve the exact artifact this credential already bought. Never
+      // regenerate it from the replayed body: the payment hash covers the
+      // credential alone and is not bound to the body, so regenerating would
+      // let one signature buy calldata for any recipient or amount.
+      return NextResponse.json(existing.deliverable, { headers: CORS_HEADERS });
+    }
     return NextResponse.json(
-      { executionId: existing.executionId },
-      { headers: CORS_HEADERS }
+      { error: "Payment already used", code: "PAYMENT_ALREADY_SETTLED" },
+      { status: 409, headers: CORS_HEADERS }
     );
   }
-  return null;
+  return NextResponse.json(
+    { executionId: existing.executionId },
+    { headers: CORS_HEADERS }
+  );
 }
 
 async function handleX402(
@@ -244,9 +282,9 @@ async function handleX402(
   createHandler: HandlerFactory
 ): Promise<NextResponse> {
   const paymentSig = request.headers.get("PAYMENT-SIGNATURE");
-  if (paymentSig) {
-    const hash = hashPaymentSignature(paymentSig);
-    const idempotent = await checkIdempotency(hash);
+  const paymentHash = paymentSig ? hashPaymentSignature(paymentSig) : null;
+  if (paymentHash) {
+    const idempotent = await checkIdempotency(paymentHash);
     if (idempotent) {
       return idempotent;
     }
@@ -259,6 +297,7 @@ async function handleX402(
     protocol: "x402",
     chain: "base",
     payerAddress,
+    paymentHash,
   });
 
   const gatedHandler = withX402(innerHandler, paymentConfig, server);
@@ -276,9 +315,8 @@ async function handleX402(
           nonce,
         });
         if (confirmed) {
-          if (paymentSig) {
-            const hash = hashPaymentSignature(paymentSig);
-            const idempotent = await checkIdempotency(hash);
+          if (paymentHash) {
+            const idempotent = await checkIdempotency(paymentHash);
             if (idempotent) {
               return idempotent;
             }
@@ -298,10 +336,11 @@ async function handleMpp(
   createHandler: HandlerFactory
 ): Promise<NextResponse> {
   const authHeader = request.headers.get("authorization");
-  if (authHeader) {
-    const credentialValue = authHeader.slice("Payment ".length);
-    const hash = hashMppCredential(credentialValue);
-    const idempotent = await checkIdempotency(hash);
+  const paymentHash = authHeader
+    ? hashMppCredential(authHeader.slice("Payment ".length))
+    : null;
+  if (paymentHash) {
+    const idempotent = await checkIdempotency(paymentHash);
     if (idempotent) {
       return idempotent;
     }
@@ -352,6 +391,7 @@ async function handleMpp(
     protocol: "mpp",
     chain: "tempo",
     payerAddress,
+    paymentHash,
   });
 
   const response = await innerHandler(request as NextRequest);
@@ -404,6 +444,7 @@ export function gatePayment(
       inputSchema: workflow.inputSchema,
       category: workflow.category,
       tagName: workflow.tagName,
+      workflowType: workflow.workflowType,
     }) as NextResponse
   );
 }

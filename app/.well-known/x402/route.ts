@@ -17,11 +17,10 @@ export async function GET(): Promise<Response> {
 
   const resources: string[] = [];
   for (const row of rows) {
-    if (
-      row.listedSlug &&
-      row.workflowType === "read" &&
-      Number(row.priceUsdcPerCall ?? "0") > 0
-    ) {
+    // Both read and write listings can be paid -- a priced write listing
+    // charges for the calldata it returns, so it belongs in the resource
+    // index alongside read listings.
+    if (row.listedSlug && Number(row.priceUsdcPerCall ?? "0") > 0) {
       resources.push(`POST /api/mcp/workflows/${row.listedSlug}/call`);
     }
   }

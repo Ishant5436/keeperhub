@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
-import { getDualAuthContext } from "@/lib/middleware/auth-helpers";
+import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { db } from "@/lib/db";
 import { workflowExecutions, workflowHistory, workflows } from "@/lib/db/schema";
@@ -25,10 +25,7 @@ export async function GET(
 
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
     const { userId, organizationId } = authContext;
 
@@ -154,10 +151,7 @@ export async function DELETE(
 
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);

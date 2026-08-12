@@ -1,9 +1,9 @@
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users, workflowHistory, workflows } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
-import { getDualAuthContext } from "@/lib/middleware/auth-helpers";
+import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { buildPage, parsePageRequest } from "@/lib/pagination";
 import { getWorkflowAccess } from "@/lib/workflow/access";
 
@@ -15,6 +15,43 @@ import { getWorkflowAccess } from "@/lib/workflow/access";
  * snapshot is fetched on demand via GET /api/workflows/[id]?version=N.
  * `changedBy` is enriched with the actor's name/email so the UI can show "who".
  */
+/**
+ * Restrict the timeline to versions that touched one node.
+ *
+ * Mirrors `versionTouchesNode` in the History panel: a node matches by id on
+ * the three node buckets, and a connection matches by endpoint id, falling
+ * back to the endpoint label for diffs recorded before ids were stored.
+ * Keeping the predicate here rather than in the client is what makes the
+ * paging honest, since `total` has to count the same rows the page returns.
+ */
+function nodeScopeFilter(nodeId: string, nodeLabel: string | null): SQL {
+  const node = JSON.stringify([{ id: nodeId }]);
+  const from = JSON.stringify([{ fromId: nodeId }]);
+  const to = JSON.stringify([{ toId: nodeId }]);
+  const clauses = [
+    sql`${workflowHistory.change}->'nodesAdded' @> ${node}::jsonb`,
+    sql`${workflowHistory.change}->'nodesRemoved' @> ${node}::jsonb`,
+    sql`${workflowHistory.change}->'nodesChanged' @> ${node}::jsonb`,
+    sql`${workflowHistory.change}->'connectionsAdded' @> ${from}::jsonb`,
+    sql`${workflowHistory.change}->'connectionsAdded' @> ${to}::jsonb`,
+    sql`${workflowHistory.change}->'connectionsRemoved' @> ${from}::jsonb`,
+    sql`${workflowHistory.change}->'connectionsRemoved' @> ${to}::jsonb`,
+  ];
+  if (nodeLabel) {
+    // Legacy diffs carry endpoint labels only. Matching those by label is the
+    // reason a renamed node does not lose its older connection changes.
+    const labelFrom = JSON.stringify([{ from: nodeLabel }]);
+    const labelTo = JSON.stringify([{ to: nodeLabel }]);
+    clauses.push(
+      sql`${workflowHistory.change}->'connectionsAdded' @> ${labelFrom}::jsonb`,
+      sql`${workflowHistory.change}->'connectionsAdded' @> ${labelTo}::jsonb`,
+      sql`${workflowHistory.change}->'connectionsRemoved' @> ${labelFrom}::jsonb`,
+      sql`${workflowHistory.change}->'connectionsRemoved' @> ${labelTo}::jsonb`
+    );
+  }
+  return sql`(${sql.join(clauses, sql` OR `)})`;
+}
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ workflowId: string }> }
@@ -23,10 +60,7 @@ export async function GET(
     const { workflowId } = await context.params;
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
     const { userId, organizationId } = authContext;
 
@@ -51,7 +85,14 @@ export async function GET(
 
     const url = new URL(request.url);
     const req = parsePageRequest(url);
-    const where = eq(workflowHistory.workflowId, workflowId);
+    const nodeId = url.searchParams.get("nodeId");
+    const nodeLabel = url.searchParams.get("nodeLabel");
+    const where = nodeId
+      ? and(
+          eq(workflowHistory.workflowId, workflowId),
+          nodeScopeFilter(nodeId, nodeLabel)
+        )
+      : eq(workflowHistory.workflowId, workflowId);
 
     const [{ total }] = await db
       .select({ total: count() })
@@ -60,8 +101,10 @@ export async function GET(
 
     // Workflows created before versioning have no rows. Synthesize the current
     // state as version 1 so the timeline isn't empty -- the live workflow IS
-    // that version, so it reads as the current/initial entry.
-    if (total === 0) {
+    // that version, so it reads as the current/initial entry. Skipped when
+    // scoped to a node: an empty result there means the node has no recorded
+    // changes, and inventing an entry would misreport that.
+    if (total === 0 && !nodeId) {
       const [creator] = workflow.userId
         ? await db
             .select({ id: users.id, name: users.name, email: users.email })

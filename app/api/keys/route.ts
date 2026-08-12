@@ -6,7 +6,10 @@ import { member, organizationApiKeys, users } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { parseScopeInput } from "@/lib/mcp/oauth-scopes";
 import { STEP_UP_ACTIONS } from "@/lib/mfa/step-up-policy";
-import { resolveOrganizationId } from "@/lib/middleware/auth-helpers";
+import {
+  authFailureResponse,
+  resolveOrganizationId,
+} from "@/lib/middleware/auth-helpers";
 import { authorizeAction } from "@/lib/middleware/authorize-action";
 import { getOrgContext } from "@/lib/middleware/org-context";
 import { generateOrganizationApiKey } from "@/lib/organization-api-key";
@@ -24,10 +27,7 @@ export async function GET(request: Request) {
   try {
     const authCtx = await resolveOrganizationId(request);
     if ("error" in authCtx) {
-      return NextResponse.json(
-        { error: authCtx.error },
-        { status: authCtx.status }
-      );
+      return authFailureResponse(authCtx, request.headers);
     }
     const { organizationId: activeOrgId } = authCtx;
 

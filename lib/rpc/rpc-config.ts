@@ -71,6 +71,21 @@ export const PUBLIC_RPCS = {
   ZERO_G_MAINNET_FALLBACK: "https://0g.drpc.org",
   ZERO_G_GALILEO: "https://evmrpc-testnet.0g.ai",
   ZERO_G_GALILEO_FALLBACK: "https://16602.rpc.thirdweb.com",
+  // Robinhood Chain. Both of these rate-limit by returning empty result sets
+  // rather than erroring, so under load an eth_getLogs reads as "no activity"
+  // instead of as a failure. That is survivable for a last-resort default and
+  // not for real traffic: every deployed environment gets a keyed endpoint
+  // through CHAIN_RPC_CONFIG, which takes priority over everything here.
+  ROBINHOOD_MAINNET: "https://rpc.mainnet.chain.robinhood.com",
+  ROBINHOOD_MAINNET_FALLBACK: "https://robinhood.drpc.org",
+  ROBINHOOD_TESTNET: "https://rpc.testnet.chain.robinhood.com",
+  ROBINHOOD_TESTNET_FALLBACK: "https://robinhood-testnet.drpc.org",
+  // No publicWssDefault for either chain, deliberately. Robinhood publishes
+  // wss://feed.mainnet.chain.robinhood.com, but it is not a JSON-RPC socket --
+  // it streams raw Arbitrum sequencer-feed messages and cannot serve
+  // eth_subscribe -- and dRPC's free tier rejects eth_subscribe outright. There
+  // is no public WSS endpoint for this chain to fall back to, so event and
+  // block triggers depend on the WSS URLs in CHAIN_RPC_CONFIG.
   SOLANA_MAINNET: "https://api.mainnet-beta.solana.com",
   SOLANA_DEVNET: "https://api.devnet.solana.com",
 } as const;
@@ -248,6 +263,22 @@ export const CHAIN_CONFIG: Record<number, ChainConfigEntry> = {
     fallbackEnvKey: "CHAIN_ZERO_G_GALILEO_FALLBACK_RPC",
     publicDefault: PUBLIC_RPCS.ZERO_G_GALILEO,
     publicFallback: PUBLIC_RPCS.ZERO_G_GALILEO_FALLBACK,
+  },
+  // Robinhood Chain Mainnet (Arbitrum Orbit L2)
+  4663: {
+    jsonKey: "robinhood-mainnet",
+    envKey: "CHAIN_ROBINHOOD_MAINNET_PRIMARY_RPC",
+    fallbackEnvKey: "CHAIN_ROBINHOOD_MAINNET_FALLBACK_RPC",
+    publicDefault: PUBLIC_RPCS.ROBINHOOD_MAINNET,
+    publicFallback: PUBLIC_RPCS.ROBINHOOD_MAINNET_FALLBACK,
+  },
+  // Robinhood Chain Testnet
+  46630: {
+    jsonKey: "robinhood-testnet",
+    envKey: "CHAIN_ROBINHOOD_TESTNET_PRIMARY_RPC",
+    fallbackEnvKey: "CHAIN_ROBINHOOD_TESTNET_FALLBACK_RPC",
+    publicDefault: PUBLIC_RPCS.ROBINHOOD_TESTNET,
+    publicFallback: PUBLIC_RPCS.ROBINHOOD_TESTNET_FALLBACK,
   },
   // Solana Mainnet
   101: {

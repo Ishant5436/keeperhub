@@ -38,7 +38,11 @@ const oauthCtx: DualAuthContext = {
   isAnonymous: false,
 };
 
-const errorCtx: DualAuthContext = { error: "Unauthorized", status: 401 };
+const errorCtx: DualAuthContext = {
+  error: "Unauthorized",
+  code: "unauthorized",
+  status: 401,
+};
 
 describe("auditFromAuth", () => {
   it("emits authMethod=session and omits apiKeyId for session auth", () => {

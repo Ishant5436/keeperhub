@@ -5,6 +5,14 @@ import { GET as agentGET } from "@/app/agent/route";
 
 const REQ_URL = "https://app.keeperhub.com/.well-known/test";
 const EIP55_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
+
+// Canonical ERC-8004 Ethereum mainnet deployments, pinned as literals rather
+// than imported from lib/agentic-wallet/constants.ts on purpose: importing the
+// same source the route uses would make these assertions tautological and let a
+// wrong address pass. Source: github.com/erc-8004/erc-8004-contracts.
+const MAINNET_IDENTITY_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+const MAINNET_REPUTATION_REGISTRY =
+  "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63";
 const ORIGINAL_APP_URL = process.env.NEXT_PUBLIC_APP_URL;
 const ORIGINAL_AUTH_URL = process.env.BETTER_AUTH_URL;
 
@@ -41,7 +49,14 @@ describe("/.well-known/erc8004.json (KEEP-475)", () => {
     expect(body.chain).toBe("ethereum");
     expect(body.chain_id).toBe(1);
     expect(body.registry).toMatch(EIP55_ADDRESS);
-    expect(body.reputation.registry).toBe(body.registry);
+    expect(body.registry).toBe(MAINNET_IDENTITY_REGISTRY);
+    expect(body.reputation.registry).toMatch(EIP55_ADDRESS);
+    expect(body.reputation.registry).toBe(MAINNET_REPUTATION_REGISTRY);
+    // Identity and reputation are separate contracts. Publishing the identity
+    // address under `reputation` sends every reputation reader to a contract
+    // that holds no feedback -- the KEEP-475 regression this pins shut.
+    expect(body.reputation.registry).not.toBe(body.registry);
+    expect(body.reputation.chain_id).toBe(1);
     expect(body.reputation.type).toBe("erc-8004");
     expect(body.cards.mcp).toBe(
       "https://app.keeperhub.com/.well-known/mcp.json"

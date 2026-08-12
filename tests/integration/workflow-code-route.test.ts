@@ -17,6 +17,17 @@ const { mockGetDualAuthContext, mockMemberLimit, mockWorkflowsFindFirst } =
 
 vi.mock("@/lib/middleware/auth-helpers", () => ({
   getDualAuthContext: mockGetDualAuthContext,
+  // Mirrors the real helper's envelope shape; importing the module itself
+  // would pull in lib/auth, which this suite deliberately does not load.
+  authFailureResponse: (failure: {
+    error: string;
+    code: string;
+    status: number;
+  }): Response =>
+    Response.json(
+      { error: failure.code, detail: failure.error, request_id: "test" },
+      { status: failure.status }
+    ),
   UNAUTHENTICATED_AUDIT: { authMethod: "unknown" },
   auditFromAuth: (ctx: unknown): Record<string, string> => {
     if (ctx && typeof ctx === "object" && "error" in ctx) {

@@ -32,7 +32,7 @@ export function WorkflowTemplateList({
   }
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: matches the marketplace table — UI-SPEC §5 mandates a CSS grid layout (grid-cols-[48px_1fr_220px_96px_96px_80px]); a native <table> cannot drive grid tracks. The role="table"/"row"/"columnheader" hierarchy preserves screen-reader semantics.
+    // biome-ignore lint/a11y/useSemanticElements: matches the marketplace table — UI-SPEC §5 mandates a CSS grid layout (grid-cols-[48px_1fr_220px_96px_96px_136px]); a native <table> cannot drive grid tracks. The role="table"/"row"/"columnheader" hierarchy preserves screen-reader semantics.
     <div
       aria-label="Workflow templates"
       className="overflow-hidden rounded-xl border border-border/20 bg-[var(--color-hub-card)]"
@@ -41,7 +41,7 @@ export function WorkflowTemplateList({
       {/* biome-ignore lint/a11y/useSemanticElements: see role="table" justification above. */}
       {/* biome-ignore lint/a11y/useFocusableInteractive: header row is a label container, not a tab stop. */}
       <div
-        className="grid grid-cols-[48px_1fr_220px_96px_96px_80px] items-center gap-x-3 border-border/30 border-b bg-[var(--color-hub-overlay)] px-4 py-3 font-normal text-muted-foreground text-xs uppercase tracking-widest"
+        className="grid grid-cols-[48px_1fr_220px_96px_96px_136px] items-center gap-x-3 border-border/30 border-b bg-[var(--color-hub-overlay)] px-4 py-3 font-normal text-muted-foreground text-xs uppercase tracking-widest"
         role="row"
       >
         {/* biome-ignore lint/a11y/useSemanticElements: see role="table" justification above. */}

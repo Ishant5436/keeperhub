@@ -12,8 +12,9 @@ import type { ChainRegistration } from "./registrations";
 /**
  * Reconciler: one BlockIngestor per Solana chain, keyed by chainId. Mirrors the
  * block-dispatcher's converge loop - remove stale chains, add new ones, and on
- * a config change either refresh the trigger set in place (endpoints unchanged)
- * or restart the ingestor (endpoints changed).
+ * a config change either refresh the trigger set in place or restart the
+ * ingestor, depending on whether the change reaches inputs the running
+ * BlockSource baked in at construction (see `canUpdateInPlace`).
  */
 
 const registry = new Map<number, BlockIngestor>();
@@ -56,11 +57,11 @@ async function reconcile(registrations: ChainRegistration[]): Promise<void> {
       if (!existing) {
         await startIngestor(registration);
       } else if (existing.hasConfigChanged(registration)) {
-        if (existing.sameEndpoints(registration)) {
+        if (existing.canUpdateInPlace(registration)) {
           existing.updateRegistration(registration);
         } else {
           logger.log(
-            `[Reconciler] chain ${registration.chainId} endpoints changed; restarting`,
+            `[Reconciler] chain ${registration.chainId} source inputs changed; restarting`,
           );
           await existing.stop();
           registry.delete(registration.chainId);

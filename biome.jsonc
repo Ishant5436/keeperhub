@@ -5,6 +5,10 @@
     "includes": [
       "**/*",
       "!.worktrees",
+      // Agent scratch and local tooling output. Biome has no `vcs` config so
+      // it does not honour .gitignore, and would otherwise lint throwaway
+      // scripts that no one intends to ship.
+      "!.claude",
       "!components/ui",
       "!components/ai-elements",
       "!lib/utils.ts",
@@ -118,10 +122,18 @@
       //    parity with the async code they stand in for, without awaiting.
       //  - noMisplacedAssertion: false positives from custom expect() wrappers
       //    (fixtures, table-driven helpers) that the rule does not recognise.
+      //  - noDelete: every occurrence in this repo is `delete process.env.X`
+      //    in test cleanup, where delete is the ONLY correct form. The rule's
+      //    suggested replacement is actively wrong here: process.env coerces
+      //    values to strings, so `process.env.X = undefined` leaves the key
+      //    present with the literal string "undefined" rather than unsetting
+      //    it, and a test asserting the variable is absent would silently
+      //    start seeing a truthy value. It is also a performance rule, and
+      //    per-test env teardown has no production cost.
       "includes": ["tests/**", "**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
-          "performance": { "useTopLevelRegex": "off" },
+          "performance": { "useTopLevelRegex": "off", "noDelete": "off" },
           "suspicious": { "useAwait": "off", "noMisplacedAssertion": "off" }
         }
       }

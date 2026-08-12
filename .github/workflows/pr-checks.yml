@@ -35,9 +35,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CHANGED=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
-            --paginate --per-page 100 -q '.[].filename' | grep -E '^(drizzle/|lib/db/schema)' || true | head -1)
-          if [ -n "$CHANGED" ]; then
+          # set -e matters here: this step decides whether every migration check
+          # below runs at all, so a failure to list the PR's files must fail the
+          # job rather than silently resolve to "no migrations changed".
+          set -euo pipefail
+          # per_page is a query parameter, not a gh flag. `gh api --per-page`
+          # exits with "unknown flag", which the old `|| true` swallowed into
+          # relevant=false -- skipping the fresh-database migration and the
+          # drift check while still reporting success.
+          FILES=$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100" \
+            --paginate -q '.[].filename')
+          # grep -q inside `if` does not trip set -e when it finds no match.
+          if printf '%s\n' "$FILES" | grep -qE '^(drizzle/|lib/db/schema)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"

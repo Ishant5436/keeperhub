@@ -26,6 +26,11 @@ import { isUserDeactivated } from "@/lib/auth-deactivation-guard";
 import { isDisposableEmailDomain } from "@/lib/auth-disposable-emails";
 import { DISPOSABLE_EMAIL_REJECTION_MESSAGE } from "@/lib/auth-disposable-emails-message";
 import { isFreshSignup } from "@/lib/auth-notification-guard";
+import {
+  claimSignupNotification,
+  resolveSignupMethod,
+  type SignupMethod,
+} from "@/lib/auth-signup-notification";
 import { sendInvitationEmail, sendVerificationOTP } from "@/lib/email";
 import { hasValidLoadTestBypass } from "@/lib/load-test-bypass";
 import {
@@ -588,11 +593,13 @@ async function subscribeToMailerLite(user: {
     });
 }
 
-async function notifyDiscordSignup(user: {
-  name?: string | null;
-  email?: string | null;
-  image?: string | null;
-}): Promise<void> {
+async function notifyDiscordSignup(
+  user: {
+    name?: string | null;
+    email?: string | null;
+  },
+  method: SignupMethod
+): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_SIGNUPS;
   if (!webhookUrl) {
     return;
@@ -610,11 +617,7 @@ async function notifyDiscordSignup(user: {
           fields: [
             { name: "Name", value: user.name ?? "N/A", inline: true },
             { name: "Email", value: user.email ?? "N/A", inline: true },
-            {
-              name: "Method",
-              value: user.image ? "OAuth" : "Email",
-              inline: true,
-            },
+            { name: "Method", value: method, inline: true },
           ],
           timestamp: new Date().toISOString(),
         },
@@ -895,8 +898,13 @@ export const auth = betterAuth({
           // belt-and-suspenders against any future adapter or hook reroute
           // that delivers an already-existing user into this path. Real
           // OAuth signups have createdAt = now and pass it trivially.
-          if (user.emailVerified && isFreshSignup(user)) {
-            await notifyDiscordSignup(user);
+          if (
+            user.emailVerified &&
+            isFreshSignup(user) &&
+            (await claimSignupNotification(user.id))
+          ) {
+            const method = await resolveSignupMethod(user.id, "OAuth");
+            await notifyDiscordSignup(user, method);
             await subscribeToMailerLite(user);
           }
 
@@ -1207,14 +1215,18 @@ export const auth = betterAuth({
   },
   emailVerification: {
     afterEmailVerification: async (user) => {
-      // Only fire signup-channel notifications on first-time verification of a
-      // freshly-created user. Re-verification flows (and any provider that
-      // re-asserts emailVerified for an existing user) must not page the
-      // signup channel.
+      // This fires on every verifyEmail, not only the first, so freshness
+      // alone let a user who re-verified inside the window announce themselves
+      // once per attempt. The claim is what makes it once per account; the
+      // freshness check stays as the cheaper first guard.
       if (!isFreshSignup(user)) {
         return;
       }
-      await notifyDiscordSignup(user);
+      if (!(await claimSignupNotification(user.id))) {
+        return;
+      }
+      const method = await resolveSignupMethod(user.id, "Email");
+      await notifyDiscordSignup(user, method);
       await subscribeToMailerLite(user);
     },
   },

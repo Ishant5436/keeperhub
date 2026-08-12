@@ -3,7 +3,7 @@ import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { ErrorCategory, logSystemError, logSystemWarn } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
-import { getDualAuthContext } from "@/lib/middleware/auth-helpers";
+import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { db } from "@/lib/db";
 import { validateWorkflowIntegrations } from "@/lib/db/integrations";
@@ -94,10 +94,7 @@ export async function GET(
 
     const authContext = await getDualAuthContext(request, { required: false });
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
     const { userId, organizationId } = authContext;
 
@@ -361,10 +358,7 @@ export async function PATCH(
 
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);
@@ -922,10 +916,7 @@ export async function DELETE(
 
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);

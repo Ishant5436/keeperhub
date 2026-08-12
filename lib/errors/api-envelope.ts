@@ -202,3 +202,6 @@ export const ApiErrorCodes = {
   RATE_LIMITED: "rate_limited",
   INTERNAL_ERROR: "internal_error",
 } as const;
+
+/** One of the documented codes above. */
+export type ApiErrorCode = (typeof ApiErrorCodes)[keyof typeof ApiErrorCodes];

@@ -566,6 +566,25 @@ export class AdaptiveGasStrategy {
         minPriorityFeeGwei: 30,
         maxPriorityFeeGwei: 1000,
       },
+      // Robinhood Chain (Arbitrum Orbit L2) and its testnet. Priority fees are
+      // inert here: the sequencer orders first-come-first-served, so a tip buys
+      // no inclusion advantage. Measured on 4663 (2026-08-12): eth_feeHistory
+      // returned 0 reward at the 25th, 50th, 75th and 99th percentiles across
+      // 10 consecutive blocks, eth_maxPriorityFeePerGas returned 0, and
+      // eth_gasPrice (0.0423 gwei) matched the base fee (0.0428 gwei).
+      // The 0.1 gwei default floor would therefore add roughly 2.3x the base
+      // fee as a tip nothing consumes, so the floor is dropped to 0. The cap
+      // stays low to bound a bad percentile read rather than to price anything.
+      4663: {
+        gasLimitMultiplier: 1.5, // Orbit L2, same estimate accuracy as Arbitrum
+        minPriorityFeeGwei: 0,
+        maxPriorityFeeGwei: 1,
+      },
+      46630: {
+        gasLimitMultiplier: 1.5,
+        minPriorityFeeGwei: 0,
+        maxPriorityFeeGwei: 1,
+      },
       // 0G Galileo testnet. The mempool admits tips at 2 gwei (matching the
       // node's "needed 2 gwei" floor) but validators only include txs paying
       // >= ~4 gwei. Validated 2026-05-01: sampled 10k recent blocks (400 txs);

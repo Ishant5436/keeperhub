@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
 import { recordWorkflowCreatedFromSource } from "@/lib/metrics/collectors/prometheus";
-import { getDualAuthContext } from "@/lib/middleware/auth-helpers";
+import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
 import { recordWorkflowSnapshot } from "@/lib/workflow/history";
@@ -91,10 +91,7 @@ export async function POST(request: Request) {
   try {
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);

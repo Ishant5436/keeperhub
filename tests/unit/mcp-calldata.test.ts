@@ -21,6 +21,12 @@ vi.mock("ethers", () => {
     ethers: {
       Interface: MockInterface,
       parseEther: mockParseEther,
+      // Faithful enough to exercise the contract-address guard: the real
+      // ethers.isAddress rejects anything that is not 20 hex bytes, and the
+      // guard is the thing standing between a malformed node and a paid-for
+      // unusable response.
+      isAddress: (value: unknown): boolean =>
+        typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value),
     },
   };
 });
@@ -46,7 +52,7 @@ function makeWriteNode(overrides: Record<string, unknown> = {}): unknown {
     data: {
       actionType: "web3/write-contract",
       config: {
-        contractAddress: "0xContractAddress",
+        contractAddress: "0x1111111111111111111111111111111111111111",
         network: "base",
         abi: SAMPLE_ABI,
         abiFunction: "transfer",
@@ -73,7 +79,7 @@ function makeCanonicalWriteNode(
       status: "idle",
       config: {
         actionType: "web3/write-contract",
-        contractAddress: "0xContractAddress",
+        contractAddress: "0x1111111111111111111111111111111111111111",
         network: "base",
         abi: SAMPLE_ABI,
         abiFunction: "transfer",
@@ -98,7 +104,7 @@ describe("generateCalldataForWorkflow", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.to).toBe("0xContractAddress");
+      expect(result.to).toBe("0x1111111111111111111111111111111111111111");
       expect(result.data).toBe("0xencodeddata");
       expect(result.value).toBe("0");
     }
@@ -113,7 +119,7 @@ describe("generateCalldataForWorkflow", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.to).toBe("0xContractAddress");
+      expect(result.to).toBe("0x1111111111111111111111111111111111111111");
       expect(result.data).toBe("0xencodeddata");
       expect(result.value).toBe("0");
     }
@@ -196,6 +202,27 @@ describe("generateCalldataForWorkflow", () => {
     }
   });
 
+  // A write node with a missing or templated contractAddress used to produce
+  // a "successful" response whose `to` key was simply absent. Now that a paid
+  // write listing charges for this artifact and there is no refund path, an
+  // unusable address must fail before any money can move.
+  it.each([
+    ["missing", undefined],
+    ["an unresolved template", "{{@trigger:Trigger.contract}}"],
+    ["a short hex string", "0x1234"],
+    ["a non-string", 42],
+  ])("rejects a contract address that is %s", (_label, contractAddress) => {
+    const nodes = [
+      makeWriteNode({ contractAddress } as Record<string, unknown>),
+    ];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("Invalid or missing contract address");
+    }
+  });
+
   it("returns error when ABI JSON is invalid", () => {
     const nodes = [makeWriteNode({ abi: "not valid json {{" })];
     const result = generateCalldataForWorkflow(nodes, {});
@@ -262,7 +289,7 @@ describe("generateCalldataForWorkflow", () => {
         data: {
           actionType: "protocol/protocol-write",
           config: {
-            contractAddress: "0xProtocolContract",
+            contractAddress: "0x2222222222222222222222222222222222222222",
             network: "base",
             abi: SAMPLE_ABI,
             abiFunction: "transfer",
@@ -274,7 +301,7 @@ describe("generateCalldataForWorkflow", () => {
     const result = generateCalldataForWorkflow(nodes, {});
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.to).toBe("0xProtocolContract");
+      expect(result.to).toBe("0x2222222222222222222222222222222222222222");
     }
   });
 
@@ -284,14 +311,18 @@ describe("generateCalldataForWorkflow", () => {
         id: "read-1",
         data: { actionType: "web3/read-contract", config: {} },
       },
-      makeWriteNode({ contractAddress: "0xFirstWriteContract" }),
-      makeWriteNode({ contractAddress: "0xSecondWriteContract" }),
+      makeWriteNode({
+        contractAddress: "0x3333333333333333333333333333333333333333",
+      }),
+      makeWriteNode({
+        contractAddress: "0x4444444444444444444444444444444444444444",
+      }),
     ];
     const result = generateCalldataForWorkflow(nodes, {});
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.to).toBe("0xFirstWriteContract");
+      expect(result.to).toBe("0x3333333333333333333333333333333333333333");
     }
   });
 });

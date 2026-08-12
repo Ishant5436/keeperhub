@@ -21,6 +21,17 @@ export function planMeetsRequirement(
   return PLAN_RANK[plan] >= PLAN_RANK[requiredPlan];
 }
 
+/** Highest plan tier among a set of required plans (for multi-feature violations). */
+export function highestRequiredPlan(plans: readonly PlanName[]): PlanName {
+  let highest: PlanName = plans[0] ?? "free";
+  for (const plan of plans) {
+    if (PLAN_RANK[plan] > PLAN_RANK[highest]) {
+      highest = plan;
+    }
+  }
+  return highest;
+}
+
 export function isFeatureEnabled(
   featureId: FeatureId,
   plan: PlanName

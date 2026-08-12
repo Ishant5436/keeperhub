@@ -22,8 +22,8 @@ import type { BlockSource, ConnectionHealth, Endpoint } from "./block-source";
 import { createBlockSource } from "./source-factory";
 
 /**
- * Per-chain ingestor. Owns a BlockSource (getBlock polling by default, Geyser
- * when configured) and, for every block it produces, runs both matchers and
+ * Per-chain ingestor. Owns a BlockSource (selected per chain by the mapper -
+ * see `defaultSourceMode`) and, for every block it produces, runs both matchers and
  * fans out to phantom + SQS. The source-vs-match split keeps ingestion swappable
  * without touching matching/decode/enqueue.
  */
@@ -32,6 +32,25 @@ export interface BlockIngestorDeps {
   sqs: SQSClient;
   sqsQueueUrl: string;
   dedup: DedupStore;
+}
+
+/**
+ * The distinct programs a chain watches, as a stable key. Distinct, because the
+ * signatures source issues one RPC round trip per entry: two workflows on the
+ * same program are one program to watch, not two.
+ */
+function watchedProgramIds(registration: ChainRegistration): string[] {
+  return [
+    ...new Set(registration.eventTriggers.map((t) => t.programId)),
+  ].sort();
+}
+
+function watchedProgramKey(registration: ChainRegistration): string {
+  return watchedProgramIds(registration).join(",");
+}
+
+function hasBlockTriggers(registration: ChainRegistration): boolean {
+  return registration.blockTriggers.length > 0;
 }
 
 export class BlockIngestor {
@@ -56,9 +75,7 @@ export class BlockIngestor {
         chainId: this.registration.chainId,
         endpoints: this.endpoints(),
         commitment: this.registration.commitment,
-        watchedProgramIds: this.registration.eventTriggers.map(
-          (t) => t.programId,
-        ),
+        watchedProgramIds: watchedProgramIds(this.registration),
         onBlock: (block) => this.processBlock(block),
       },
       {
@@ -69,7 +86,7 @@ export class BlockIngestor {
             }
           : undefined,
         sourceMode: this.registration.sourceMode,
-        hasBlockTriggers: this.registration.blockTriggers.length > 0,
+        hasBlockTriggers: hasBlockTriggers(this.registration),
       },
     );
     await this.source.start();
@@ -88,7 +105,11 @@ export class BlockIngestor {
     logger.log(`[ingestor] chain ${this.registration.chainId} stopped`);
   }
 
-  /** In-place refresh when only the trigger set changed (endpoints unchanged). */
+  /**
+   * Refreshes what the matchers read per block. Only valid when
+   * `canUpdateInPlace` holds - it cannot reach inputs the running source
+   * captured at construction.
+   */
   updateRegistration(registration: ChainRegistration): void {
     this.registration = registration;
     this.rebuildDecoders();
@@ -98,7 +119,28 @@ export class BlockIngestor {
     return registration.configHash !== this.registration.configHash;
   }
 
-  sameEndpoints(registration: ChainRegistration): boolean {
+  /**
+   * Whether a changed registration can be absorbed by `updateRegistration`
+   * instead of a source restart.
+   *
+   * `updateRegistration` can only refresh what the matchers read on every block.
+   * Anything baked into the BlockSource at construction - the endpoints, the
+   * watched program set, and whether block triggers exist - is unreachable once
+   * the source is running, so a change there needs a new source. Absorbing it in
+   * place instead leaves the source serving the previous trigger set with no
+   * error: a program added to a `signatures` chain is never queried, and a block
+   * trigger added to one is never served at all.
+   */
+  canUpdateInPlace(registration: ChainRegistration): boolean {
+    return (
+      this.sameEndpoints(registration) &&
+      watchedProgramKey(registration) ===
+        watchedProgramKey(this.registration) &&
+      hasBlockTriggers(registration) === hasBlockTriggers(this.registration)
+    );
+  }
+
+  private sameEndpoints(registration: ChainRegistration): boolean {
     return (
       registration.rpcUrl === this.registration.rpcUrl &&
       registration.fallbackRpcUrl === this.registration.fallbackRpcUrl &&

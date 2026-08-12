@@ -12,8 +12,9 @@
  *   NEW_AGENT_URI             - The new agentURI, e.g. ipfs://bafy...
  *
  * Optional env:
- *   AGENT_ID                       - default 31875
- *   IDENTITY_REGISTRY_ADDRESS      - default 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+ *   AGENT_ID                       - defaults to KEEPERHUB_ERC_8004_AGENT_ID
+ *   IDENTITY_REGISTRY_ADDRESS      - defaults to ERC_8004_IDENTITY_REGISTRY_ADDRESS
+ *                                    (both from lib/agentic-wallet/constants.ts)
  *   CHAIN_ETH_MAINNET_PRIMARY_RPC  - default https://chain.techops.services/eth-mainnet
  *
  * Run: pnpm tsx scripts/update-agent-uri.ts
@@ -21,10 +22,14 @@
 
 import "dotenv/config";
 import { ethers } from "ethers";
+import {
+  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  KEEPERHUB_ERC_8004_AGENT_ID,
+} from "../lib/agentic-wallet/constants";
 import { formatSanitizedRpcError } from "../lib/rpc/sanitize-rpc-error";
 
-const DEFAULT_AGENT_ID = "31875";
-const DEFAULT_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+const DEFAULT_AGENT_ID = String(KEEPERHUB_ERC_8004_AGENT_ID);
+const DEFAULT_REGISTRY = ERC_8004_IDENTITY_REGISTRY_ADDRESS;
 const DEFAULT_RPC = "https://eth.llamarpc.com";
 
 // Conservative floor for setAgentURI gas. The call is a single SSTORE plus a

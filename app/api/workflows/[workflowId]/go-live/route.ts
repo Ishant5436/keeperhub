@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { publicTags, workflowPublicTags, workflows } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
-import { getDualAuthContext } from "@/lib/middleware/auth-helpers";
+import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import {
   buildActor,
@@ -26,10 +26,7 @@ export async function PUT(
     // session directly. That admits `kh_` keys.
     const authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);

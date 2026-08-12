@@ -13,6 +13,7 @@ import {
   workflowExecutions,
   workflows,
 } from "@/lib/db/schema";
+import type { PaymentDeliverable } from "@/lib/db/schema-payments";
 import { classifyExecutionError } from "@/lib/errors/classify";
 import { recordExecutionErrorFinalized } from "@/lib/errors/finalize-error";
 import { extractActionTypeNodes } from "@/lib/features";
@@ -24,7 +25,6 @@ import {
   getClientIp,
   type RateLimitResult,
 } from "@/lib/mcp/rate-limit";
-import { hashMppCredential } from "@/lib/payments/mpp/server";
 import {
   detectProtocol,
   gatePayment,
@@ -32,7 +32,6 @@ import {
 } from "@/lib/payments/router";
 import { buildCallCompletionResponse } from "@/lib/payments/x402/execution-wait";
 import {
-  hashPaymentSignature,
   recordPayment,
   resolveCreatorWallet,
 } from "@/lib/payments/x402/payment-gate";
@@ -343,10 +342,134 @@ async function parseJsonBody(
   }
 }
 
+function calldataResponse(deliverable: PaymentDeliverable): NextResponse {
+  return NextResponse.json(deliverable, { headers: corsHeaders });
+}
+
+/**
+ * Payment gate for the write branch.
+ *
+ * Deliberately not the read branch's handler: there is no execution to
+ * prepare, no billable flip to make, and no execution row to finalize on
+ * error. The only statement after the gate is a single insert, and the
+ * `deliverable` is already computed before we get here -- so the gated
+ * handler is structurally incapable of failing to produce what was paid for.
+ */
+async function gateWriteCall(
+  request: Request,
+  workflow: CallRouteWorkflow,
+  deliverable: PaymentDeliverable | null
+): Promise<NextResponse> {
+  const creatorWalletAddress = await resolveCreatorWallet(
+    workflow.organizationId
+  );
+  if (!creatorWalletAddress) {
+    return NextResponse.json(
+      {
+        error: "No payment wallet found for this organization",
+        message:
+          "The workflow owner must create a wallet in Settings > Wallet before listing paid workflows.",
+      },
+      { status: HttpStatus.SERVICE_UNAVAILABLE, headers: corsHeaders }
+    );
+  }
+
+  return gatePayment(
+    request,
+    workflow,
+    creatorWalletAddress,
+    (meta: PaymentMeta) => {
+      return async (_req: NextRequest): Promise<NextResponse> => {
+        if (!(deliverable && meta.paymentHash)) {
+          // Unreachable: a null deliverable only occurs on the headerless
+          // scanner path, where gatePayment short-circuits to the 402 and
+          // never invokes this factory, and a gated handler always has a
+          // verified credential. Fail closed so a future refactor cannot
+          // turn this into a settled-but-undelivered call.
+          logSystemError(
+            ErrorCategory.WORKFLOW_ENGINE,
+            "[x402/call] Write gate reached handler without calldata",
+            undefined,
+            { workflowId: workflow.id }
+          );
+          return NextResponse.json(
+            { error: "Payment could not be processed" },
+            { status: HttpStatus.SERVICE_UNAVAILABLE, headers: corsHeaders }
+          );
+        }
+
+        try {
+          await recordPayment({
+            workflowId: workflow.id,
+            paymentHash: meta.paymentHash,
+            executionId: null,
+            kind: "calldata",
+            deliverable,
+            amountUsdc: workflow.priceUsdcPerCall ?? "0",
+            payerAddress: meta.payerAddress,
+            creatorWalletAddress,
+            protocol: meta.protocol,
+            chain: meta.chain,
+          });
+        } catch (err) {
+          if (meta.protocol === "mpp") {
+            // MPP settles BEFORE this handler runs, and there is no refund
+            // path. The caller's funds have already moved, so failing here
+            // would take money and deliver nothing. Deliver, and log loudly:
+            // a missing earnings row can be reconciled by hand, a stolen
+            // payment cannot.
+            logSystemError(
+              ErrorCategory.DATABASE,
+              "[x402/call] Calldata payment row lost after MPP settlement",
+              err,
+              { workflowId: workflow.id, paymentHash: meta.paymentHash }
+            );
+            return calldataResponse(deliverable);
+          }
+          // x402 settles AFTER this handler returns and skips settlement
+          // entirely for any >=400 response, so a 503 here means no funds
+          // move and the same signature can simply be retried.
+          logSystemError(
+            ErrorCategory.DATABASE,
+            "[x402/call] Failed to record calldata payment, settlement cancelled",
+            err,
+            { workflowId: workflow.id }
+          );
+          return NextResponse.json(
+            {
+              error:
+                "Payment could not be recorded. No funds were taken -- retry the same request.",
+            },
+            { status: HttpStatus.SERVICE_UNAVAILABLE, headers: corsHeaders }
+          );
+        }
+
+        return calldataResponse(deliverable);
+      };
+    }
+  );
+}
+
 async function handleWriteWorkflow(
   request: Request,
   workflow: CallRouteWorkflow
 ): Promise<NextResponse> {
+  const price = Number(workflow.priceUsdcPerCall ?? "0");
+  const isPaid = price > 0;
+  const protocol = isPaid ? detectProtocol(request) : null;
+
+  // Scanner discoverability, mirroring handleReadWorkflow: on a paid listing
+  // with no (or a conflicting) payment header, emit the 402 challenge before
+  // the body is read at all. Scanners probe with an empty body and must see
+  // 402, never the 400 that calldata generation would produce.
+  if (isPaid && protocol !== "x402" && protocol !== "mpp") {
+    return await gateWriteCall(request, workflow, null);
+  }
+
+  // Everything that can fail runs here, before any money can move. This is
+  // the money-safety invariant: on MPP settlement is already final by the
+  // time the gated handler runs, so a fallible step after the gate would be
+  // an unrefundable charge for a call that delivered nothing.
   const parsed = await parseJsonBody(request);
   if ("error" in parsed) {
     return parsed.error;
@@ -364,15 +487,19 @@ async function handleWriteWorkflow(
       { status: HttpStatus.BAD_REQUEST, headers: corsHeaders }
     );
   }
-  return NextResponse.json(
-    {
-      type: "calldata",
-      to: result.to,
-      data: result.data,
-      value: result.value,
-    },
-    { headers: corsHeaders }
-  );
+
+  const deliverable: PaymentDeliverable = {
+    type: "calldata",
+    to: result.to,
+    data: result.data,
+    value: result.value,
+  };
+
+  if (!isPaid) {
+    return calldataResponse(deliverable);
+  }
+
+  return await gateWriteCall(request, workflow, deliverable);
 }
 
 async function handlePaidWorkflow(
@@ -406,16 +533,11 @@ async function handlePaidWorkflow(
         }
         const { executionId } = prepared;
 
-        let paymentHash: string;
-        if (meta.protocol === "x402") {
-          const sig = request.headers.get("PAYMENT-SIGNATURE");
-          paymentHash = sig ? hashPaymentSignature(sig) : executionId;
-        } else {
-          const auth = request.headers.get("authorization");
-          paymentHash = auth
-            ? hashMppCredential(auth.slice("Payment ".length))
-            : executionId;
-        }
+        // The router computed this once from the credential it verified. Do
+        // not re-derive it here: a fallback to executionId on a missing header
+        // would mint a unique hash per call and silently defeat the DB-level
+        // idempotency guarantee on workflow_payments.payment_hash.
+        const paymentHash = meta.paymentHash ?? executionId;
 
         // recordPayment + the KEEP-449 billable flip run in one transaction
         // so the workflow_payments row and the workflow_executions.billable

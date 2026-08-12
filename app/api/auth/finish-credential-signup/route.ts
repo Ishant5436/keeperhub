@@ -137,8 +137,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
     .limit(1);
   if (!credentialAccount?.password) {
+    // No credential row means the address belongs to an OAuth-only account, so
+    // no password will ever satisfy this route. Say so instead of returning the
+    // generic invalid_state the caller can only retry into forever. The dialog
+    // routes around this before ever reaching here; this is the backstop for a
+    // direct caller, which discloses no more than /api/auth/signup-conflict.
     return NextResponse.json(
-      { error: "Invalid sign-up state", code: "invalid_state" },
+      {
+        error: "This email is registered with a social login. Sign in with it.",
+        code: "oauth_account",
+      },
       { status: 401 }
     );
   }

@@ -25,9 +25,11 @@ const {
   mockAuthorizeAction: vi.fn(),
 }));
 
-vi.mock("@/lib/middleware/auth-helpers", () => ({
-  resolveOrganizationId: mockResolveOrganizationId,
-}));
+vi.mock("@/lib/middleware/auth-helpers", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/middleware/auth-helpers")>();
+  return { ...actual, resolveOrganizationId: mockResolveOrganizationId };
+});
 
 vi.mock("@/lib/auth", () => ({
   auth: {
@@ -144,23 +146,30 @@ describe("GET /api/keys", () => {
   it("should return 401 when not authenticated", async () => {
     mockResolveOrganizationId.mockResolvedValue({
       error: "Unauthorized",
+      code: "unauthorized",
       status: 401,
     });
 
     const response = await GET(createRequest("GET"));
     expect(response.status).toBe(401);
+    const data = await response.json();
+    expect(data.error).toBe("unauthorized");
+    expect(data.detail).toBe("Unauthorized");
+    expect(response.headers.get("x-request-id")).toBe(data.request_id);
   });
 
   it("should return 400 when no active organization", async () => {
     mockResolveOrganizationId.mockResolvedValue({
       error: "No active organization",
+      code: "invalid_input",
       status: 400,
     });
 
     const response = await GET(createRequest("GET"));
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toBe("No active organization");
+    expect(data.error).toBe("invalid_input");
+    expect(data.detail).toBe("No active organization");
   });
 
   it("should return org keys with creator names", async () => {
@@ -379,6 +388,7 @@ describe("DELETE /api/keys/:keyId (revoke)", () => {
   it("should return 401 when not authenticated", async () => {
     mockResolveOrganizationId.mockResolvedValue({
       error: "Unauthorized",
+      code: "unauthorized",
       status: 401,
     });
 

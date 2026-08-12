@@ -18,13 +18,16 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { ethers } from "ethers";
 import postgres from "postgres";
+import {
+  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  ETHEREUM_MAINNET_CHAIN_ID,
+} from "../lib/agentic-wallet/constants";
 import { getDatabaseUrl } from "../lib/db/connection-utils";
 import { agentRegistrations } from "../lib/db/schema";
 import { getRpcUrlByChainId } from "../lib/rpc/rpc-config";
 import { formatSanitizedRpcError } from "../lib/rpc/sanitize-rpc-error";
 
-export const IDENTITY_REGISTRY_ADDRESS =
-  "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+export const IDENTITY_REGISTRY_ADDRESS = ERC_8004_IDENTITY_REGISTRY_ADDRESS;
 export const AGENT_URI = "https://app.keeperhub.com/api/agent-registry";
 export const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -75,7 +78,7 @@ type DbLike = {
   insert: (table: unknown) => { values: (data: unknown) => Promise<void> };
 };
 
-const TARGET_CHAIN_ID = 1;
+const TARGET_CHAIN_ID = ETHEREUM_MAINNET_CHAIN_ID;
 
 export type RegisterDeps = {
   db: DbLike;

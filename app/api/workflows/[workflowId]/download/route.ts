@@ -5,11 +5,7 @@ import { workflows } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { getMetricsCollector } from "@/lib/metrics";
 import { MetricNames } from "@/lib/metrics/types";
-import {
-  type DualAuthContext,
-  auditFromAuth,
-  getDualAuthContext,
-} from "@/lib/middleware/auth-helpers";
+import { type DualAuthContext, auditFromAuth, authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { getWorkflowAccess } from "@/lib/workflow/access";
 import { buildWorkflowExportV1 } from "@/lib/workflow/export-schema";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
@@ -35,10 +31,7 @@ export async function GET(
 
     authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
     const { userId, organizationId } = authContext;
 

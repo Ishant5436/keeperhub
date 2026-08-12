@@ -32,7 +32,52 @@ type View =
 
 type Item = { key: string; node: React.ReactNode };
 
+type SocialProvider = "github" | "google";
+
 const EXISTING_ACCOUNT = /already|exists|duplicate/i;
+
+const PROVIDER_LABELS: Record<SocialProvider, string> = {
+  github: "GitHub",
+  google: "Google",
+};
+
+function isSocialProvider(value: string): value is SocialProvider {
+  return value === "github" || value === "google";
+}
+
+/**
+ * Asks the server whether a duplicate-email signup collided with an OAuth-only
+ * account. Those users have no credential password, so the email verification
+ * flow can never complete for them and they need their original provider
+ * instead. An empty list means "carry on as before": either the address has a
+ * credential account, or the lookup failed and the verification flow is still
+ * the better guess.
+ */
+async function resolveOauthOnlyProviders(
+  email: string
+): Promise<SocialProvider[]> {
+  try {
+    const response = await fetch("/api/auth/signup-conflict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const body = (await response.json()) as {
+      oauthOnly?: boolean;
+      providers?: string[];
+    };
+    if (!body.oauthOnly) {
+      return [];
+    }
+    return (body.providers ?? []).filter(isSocialProvider);
+  } catch (err) {
+    console.error("[ConnectAuthPanel] signup conflict lookup failed:", err);
+    return [];
+  }
+}
 
 const GitHubIcon = (): React.ReactElement => (
   <svg
@@ -120,7 +165,10 @@ export function ConnectAuthPanel({
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [social, setSocial] = useState<"github" | "google" | null>(null);
+  const [social, setSocial] = useState<SocialProvider | null>(null);
+  const [oauthOnlyProviders, setOauthOnlyProviders] = useState<
+    SocialProvider[]
+  >([]);
   const [captchaToken, setCaptchaToken] = useState("");
   const captchaRef = useRef<TurnstileInstance | null>(null);
 
@@ -145,7 +193,7 @@ export function ConnectAuthPanel({
     return () => observer.disconnect();
   }, []);
 
-  const handleSocial = async (provider: "github" | "google"): Promise<void> => {
+  const handleSocial = async (provider: SocialProvider): Promise<void> => {
     setSocial(provider);
     try {
       // Always land on "/" so the onboarding gate runs: social can be a new
@@ -194,6 +242,7 @@ export function ConnectAuthPanel({
   const handleSignUp = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setError("");
+    setOauthOnlyProviders([]);
     setLoading(true);
     try {
       const result = await signUp.email({
@@ -209,18 +258,35 @@ export function ConnectAuthPanel({
         if (msg === DISPOSABLE_EMAIL_REJECTION_MESSAGE) {
           setError(DISPOSABLE_EMAIL_REJECTION_MESSAGE);
         } else if (EXISTING_ACCOUNT.test(msg)) {
-          await authClient.emailOtp.sendVerificationOtp({
-            email,
-            type: "email-verification",
-          });
-          setOtp("");
-          setView("verify");
-          toast.info("This email already exists. Verify it to continue.");
+          // An OAuth-only address cannot be unblocked by verifying email, so
+          // send it to its provider instead of into the verification flow.
+          const oauthProviders = await resolveOauthOnlyProviders(email);
+          if (oauthProviders.length > 0) {
+            setOauthOnlyProviders(oauthProviders);
+          } else {
+            await authClient.emailOtp.sendVerificationOtp({
+              email,
+              type: "email-verification",
+            });
+            setOtp("");
+            setView("verify");
+            toast.info("This email already exists. Verify it to continue.");
+          }
         } else {
           setError(msg);
         }
         captchaRef.current?.reset();
         setCaptchaToken("");
+        return;
+      }
+      // A duplicate address does not reach the error branch above: with
+      // requireEmailVerification set, Better Auth answers a signup for an
+      // existing email with a generic success against a synthetic user, so
+      // this is the only place a collision can be spotted before the user is
+      // sent off to type a code that cannot help them.
+      const oauthProviders = await resolveOauthOnlyProviders(email);
+      if (oauthProviders.length > 0) {
+        setOauthOnlyProviders(oauthProviders);
         return;
       }
       setOtp("");
@@ -254,9 +320,22 @@ export function ConnectAuthPanel({
       });
       const finishBody = (await finish.json().catch(() => ({}))) as {
         error?: string;
+        code?: string;
         redirect?: string;
       };
       if (!finish.ok) {
+        // Reached by anyone already part-way through the old loop: the address
+        // is OAuth-only, so hand them back to the signup view with their
+        // provider offered rather than leaving them on a dead-end error.
+        if (finishBody.code === "oauth_account") {
+          const oauthProviders = await resolveOauthOnlyProviders(email);
+          if (oauthProviders.length > 0) {
+            setOauthOnlyProviders(oauthProviders);
+            setOtp("");
+            setView("signup");
+            return;
+          }
+        }
         setError(finishBody.error ?? "Could not finish signup");
         return;
       }
@@ -499,7 +578,10 @@ export function ConnectAuthPanel({
       <Input
         autoComplete={autoComplete}
         id="auth-email"
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(e) => {
+          setEmail(e.target.value);
+          setOauthOnlyProviders([]);
+        }}
         placeholder="you@example.com"
         required
         type="email"
@@ -508,35 +590,30 @@ export function ConnectAuthPanel({
     </div>
   );
 
+  const socialButton = (provider: SocialProvider): React.ReactElement => {
+    const icon = provider === "github" ? <GitHubIcon /> : <GoogleIcon />;
+    return (
+      <Button
+        className="min-w-0 flex-1 justify-center"
+        disabled={social !== null}
+        key={provider}
+        onClick={() => handleSocial(provider)}
+        type="button"
+        variant="outline"
+      >
+        {social === provider ? <Spinner /> : icon}
+        {PROVIDER_LABELS[provider]}
+      </Button>
+    );
+  };
+
   if (view === "main") {
     items.push({
       key: "socials",
       node: (
         <div className="flex gap-2">
-          {providers.google ? (
-            <Button
-              className="min-w-0 flex-1 justify-center"
-              disabled={social !== null}
-              onClick={() => handleSocial("google")}
-              type="button"
-              variant="outline"
-            >
-              {social === "google" ? <Spinner /> : <GoogleIcon />}
-              Google
-            </Button>
-          ) : null}
-          {providers.github ? (
-            <Button
-              className="min-w-0 flex-1 justify-center"
-              disabled={social !== null}
-              onClick={() => handleSocial("github")}
-              type="button"
-              variant="outline"
-            >
-              {social === "github" ? <Spinner /> : <GitHubIcon />}
-              GitHub
-            </Button>
-          ) : null}
+          {providers.google ? socialButton("google") : null}
+          {providers.github ? socialButton("github") : null}
           {onWalletClick ? (
             <Button
               className="min-w-0 flex-1 justify-center"
@@ -622,6 +699,30 @@ export function ConnectAuthPanel({
 
   if (view === "signup") {
     items.push({ key: "email", node: emailField("email") });
+    if (oauthOnlyProviders.length > 0) {
+      // Name the provider even when it is disabled in this deployment, but only
+      // offer a button for one the user can actually complete.
+      const names = oauthOnlyProviders
+        .map((provider) => PROVIDER_LABELS[provider])
+        .join(" or ");
+      const usable = oauthOnlyProviders.filter(
+        (provider) => providers[provider]
+      );
+      items.push({
+        key: "oauth-conflict",
+        node: (
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-muted p-3">
+            <p className="text-sm">
+              This email is already registered with {names}.
+              {usable.length > 0 ? " Sign in below to continue." : null}
+            </p>
+            {usable.length > 0 ? (
+              <div className="flex gap-2">{usable.map(socialButton)}</div>
+            ) : null}
+          </div>
+        ),
+      });
+    }
     items.push({
       key: "password",
       node: (

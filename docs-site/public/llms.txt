@@ -55,7 +55,7 @@ This site. Canonical reference for concepts, node configuration, plugins, API, C
 - [Marketplace](https://docs.keeperhub.com/workflows/marketplace): Listing and monetising workflows
 - [Hub](https://docs.keeperhub.com/workflows/hub): Discover and import community workflows
 - [Keeper Runs](https://docs.keeperhub.com/keeper-runs): Execution status, logs, performance, troubleshooting
-- [Wallet Management](https://docs.keeperhub.com/wallet-management): Turnkey wallets, gas and sponsorship, address book
+- [Wallet Management](https://docs.keeperhub.com/wallet-management): Turnkey wallets, Safe smart accounts, gas and sponsorship, address book
 - [Notifications](https://docs.keeperhub.com/notifications): Connections and message templates
 - [Best Practices](https://docs.keeperhub.com/practices): Security and reliability
 - [Users and Organizations](https://docs.keeperhub.com/users-teams-orgs): Team and org model
@@ -70,7 +70,7 @@ This site. Canonical reference for concepts, node configuration, plugins, API, C
 - [MCP Server](https://docs.keeperhub.com/agent/mcp-server): OAuth-authenticated MCP server exposing workflow catalog, schema introspection, and execution
 - [MCP Trigger Inputs](https://docs.keeperhub.com/agent/mcp-trigger-inputs): Input schema per trigger type
 - [Claude Code Plugin](https://docs.keeperhub.com/agent/claude-code-plugin): Marketplace install and skill set
-- [Agentic Wallets](https://docs.keeperhub.com/agent/agentic-wallet): x402 and MPP wallets so an agent can pay for workflows
+- [Agentic Wallets](https://docs.keeperhub.com/agent/agentic-wallet): x402 and MPP wallets so an agent can pay for workflows, custody server-side in a per-wallet Turnkey sub-organisation
 
 ## Plugins
 

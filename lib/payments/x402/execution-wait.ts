@@ -1,6 +1,10 @@
 import "server-only";
 
 import { and, desc, eq } from "drizzle-orm";
+import {
+  ETHEREUM_MAINNET_CHAIN_ID,
+  KEEPERHUB_ERC_8004_AGENT_ID,
+} from "@/lib/agentic-wallet/constants";
 import { db } from "@/lib/db";
 import { workflowExecutionLogs, workflowExecutions } from "@/lib/db/schema";
 import { isErrorStatus } from "@/lib/errors/execution-status";
@@ -202,9 +206,9 @@ function buildFeedbackCta(executionId: string): FeedbackCta {
       executionId,
       agent: {
         registry: "erc-8004",
-        chainId: 1,
-        id: "31875",
-        explorerUrl: "https://8004scan.io/agents/ethereum/31875",
+        chainId: ETHEREUM_MAINNET_CHAIN_ID,
+        id: String(KEEPERHUB_ERC_8004_AGENT_ID),
+        explorerUrl: `https://8004scan.io/agents/ethereum/${KEEPERHUB_ERC_8004_AGENT_ID}`,
       },
     },
   };

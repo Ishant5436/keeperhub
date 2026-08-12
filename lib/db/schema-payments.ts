@@ -1,5 +1,6 @@
 import {
   index,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -8,6 +9,21 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { generateId } from "@/lib/utils/id";
+
+/**
+ * The artifact a payment bought. Populated only for `kind: "calldata"` sales,
+ * where the caller pays for unsigned transaction data rather than an
+ * execution. Storing it is what makes an idempotent replay honest: the payment
+ * hash covers the credential alone, not the request body, so a replay must be
+ * answered with the bytes originally sold rather than regenerated from a body
+ * that could since have changed.
+ */
+export type PaymentDeliverable = {
+  type: "calldata";
+  to: string;
+  data: string;
+  value: string;
+};
 
 /**
  * Workflow Payments table
@@ -27,7 +43,12 @@ export const workflowPayments = pgTable(
       .$defaultFn(() => generateId()),
     workflowId: text("workflow_id").notNull(),
     paymentHash: text("payment_hash").notNull(),
-    executionId: text("execution_id").notNull(),
+    // NULL for calldata-only sales: a paid write workflow returns unsigned
+    // calldata and runs no executor, so there is no workflow_executions row
+    // to point at.
+    executionId: text("execution_id"),
+    kind: varchar("kind", { length: 16 }).notNull().default("execution"),
+    deliverable: jsonb("deliverable").$type<PaymentDeliverable | null>(),
     amountUsdc: numeric("amount_usdc").notNull(),
     payerAddress: text("payer_address"),
     creatorWalletAddress: text("creator_wallet_address").notNull(),

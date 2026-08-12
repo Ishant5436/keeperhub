@@ -301,3 +301,28 @@ describe("buildDual402Response", () => {
     expect(body.extensions.bazaar.tags).toEqual(["defi"]);
   });
 });
+
+describe("402 challenge output example", () => {
+  it("advertises the calldata shape for a write listing", async () => {
+    const { buildDual402Response } = await import("@/lib/payments/router");
+    const response = buildDual402Response({
+      price: "0.05",
+      creatorWalletAddress: "0xCreator",
+      workflowName: "Priced Write Workflow",
+      resourceUrl: "https://example.com/api/mcp/workflows/priced-write/call",
+      workflowType: "write",
+    });
+    const body = await response.json();
+
+    // A write listing starts no execution, so advertising the executionId
+    // shape would point Bazaar / x402scan at a poll target that never comes.
+    expect(
+      body.extensions.bazaar.schema.properties.output.properties.example
+    ).toEqual({
+      type: "calldata",
+      to: "0x0000000000000000000000000000000000000000",
+      data: "0xa9059cbb",
+      value: "0",
+    });
+  });
+});

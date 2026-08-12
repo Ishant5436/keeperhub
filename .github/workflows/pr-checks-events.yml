@@ -44,7 +44,10 @@ jobs:
       - uses: ./.github/actions/setup-events-deps
       - name: Run unit tests
         working-directory: keeperhub-events
-        run: pnpm --filter @techops/events-tracker test:unit
+        # -r, not a single --filter: the workspace holds event-tracker AND
+        # solana-tracker, and filtering to the former left every solana-tracker
+        # unit test unenforced.
+        run: pnpm -r test:unit
 
   test-integration:
     runs-on: ubuntu-latest

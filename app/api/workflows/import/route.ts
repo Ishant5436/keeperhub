@@ -11,11 +11,7 @@ import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
 import { getMetricsCollector } from "@/lib/metrics";
 import { MetricNames } from "@/lib/metrics/types";
-import {
-  type DualAuthContext,
-  auditFromAuth,
-  getDualAuthContext,
-} from "@/lib/middleware/auth-helpers";
+import { type DualAuthContext, auditFromAuth, authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -57,10 +53,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     authContext = await getDualAuthContext(request);
     if ("error" in authContext) {
-      return NextResponse.json(
-        { error: authContext.error },
-        { status: authContext.status }
-      );
+      return authFailureResponse(authContext, request.headers);
     }
 
     const scopeError = requireScope(authContext.scope, SCOPE_MCP_WRITE);

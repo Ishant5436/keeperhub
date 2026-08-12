@@ -10,7 +10,11 @@
  * without an explicit change.
  */
 
-type UnknownRecord = Record<string, unknown>;
+import {
+  asRecord,
+  normalizeActionType,
+  readNodeConfigField,
+} from "@/lib/workflow/node-config-read";
 
 /**
  * The exact node shape the anonymous feed emits. Deliberately narrow: `config`
@@ -38,45 +42,12 @@ export type PublicFeedEdge = {
   target: string | undefined;
 };
 
-function asRecord(value: unknown): UnknownRecord | null {
-  return typeof value === "object" && value !== null
-    ? (value as UnknownRecord)
-    : null;
-}
-
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
 function asNumber(value: unknown): number {
   return typeof value === "number" ? value : 0;
-}
-
-/**
- * Read a node-config field, preferring `data.config.<field>` but falling back
- * to the legacy top-level `data.<field>`. The rest of the codebase
- * (lib/mcp/calldata.ts, lib/mcp/listing-validators.ts) accepts both shapes for
- * actionType, and legacy / in-flight workflows still carry the top-level form;
- * the feed must read the same way or those nodes project a blank type and the
- * marketplace icon falls back to a generic box.
- */
-function readNodeConfigField(
-  data: UnknownRecord | null,
-  config: UnknownRecord | null,
-  field: string
-): unknown {
-  const fromConfig = config?.[field];
-  return fromConfig === undefined ? data?.[field] : fromConfig;
-}
-
-/**
- * Normalize colon-separated action types (`code:run-code`) to the slash form
- * (`code/run-code`). sanitize-nodes does this on the write path, but legacy /
- * in-flight nodes may still carry the colon form, and the icon lookup
- * (WorkflowNodeIcons) splits on "/" to resolve the brand.
- */
-function normalizeActionType(value: unknown): string | undefined {
-  return typeof value === "string" ? value.replace(":", "/") : undefined;
 }
 
 /**

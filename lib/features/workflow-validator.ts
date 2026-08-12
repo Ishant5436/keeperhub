@@ -11,6 +11,11 @@
 // dispatchable egress action is classified and gated.
 
 import type { PlanName } from "@/lib/billing/plans";
+import {
+  asRecord,
+  normalizeActionType,
+  readNodeConfigField,
+} from "@/lib/workflow/node-config-read";
 import { resolveActionFeature } from "./action-egress";
 import { isFeatureEnabled } from "./check";
 import type {
@@ -56,12 +61,13 @@ export function validateWorkflowFeatures(
 // Tolerant of unknown shapes — unknown nodes are simply ignored.
 type UnknownNode = {
   id?: unknown;
-  data?: { config?: { actionType?: unknown } };
+  data?: unknown;
 };
 
-export function extractActionTypeNodes(
-  nodes: readonly unknown[]
-): WorkflowNodeRef[] {
+export function extractActionTypeNodes(nodes: unknown): WorkflowNodeRef[] {
+  if (!Array.isArray(nodes)) {
+    return [];
+  }
   const refs: WorkflowNodeRef[] = [];
   for (const raw of nodes) {
     if (typeof raw !== "object" || raw === null) {
@@ -69,8 +75,12 @@ export function extractActionTypeNodes(
     }
     const node = raw as UnknownNode;
     const id = typeof node.id === "string" ? node.id : null;
-    const actionType = node.data?.config?.actionType;
-    if (!id || typeof actionType !== "string") {
+    const data = asRecord(node.data);
+    const config = data ? asRecord(data.config) : null;
+    const actionType = normalizeActionType(
+      readNodeConfigField(data, config, "actionType")
+    );
+    if (!(id && actionType)) {
       continue;
     }
     refs.push({ id, actionType });

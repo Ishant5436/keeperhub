@@ -176,7 +176,7 @@ Nothing stops you installing multiple wallets side by side; they do not conflict
 Whichever wallet you install, the agent calls KeeperHub through two meta-tools (described in its OpenAPI at `/openapi.json`):
 
 - `search_workflows` — find workflows by category, tag, or free text. Returns slug, description, inputSchema, and price for each match.
-- `call_workflow` — execute a listed workflow by slug. For read workflows the call executes and returns the result; for write workflows it returns unsigned calldata `{to, data, value}` for the caller to submit.
+- `call_workflow` — execute a listed workflow by slug. For read workflows the call executes and returns the result; for write workflows it returns unsigned calldata `{to, data, value}` for the caller to submit. A priced write listing returns a 402 payment challenge first, exactly like a priced read listing; the price buys the calldata, and on-chain gas is separate.
 
 The meta-tool pattern keeps the agent's tool list small regardless of how many workflows are listed: the agent discovers available workflows at runtime instead of registering one tool per workflow.
 

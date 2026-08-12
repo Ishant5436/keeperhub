@@ -65,7 +65,7 @@ responses:
     description: Payment Required
 ```
 
-**Write workflows**: Included in the doc with `x-workflow-type: "write"`. Different response schema (`{ type, to, data, value }`). Never include `x-payment-info` or 402 response, even if `priceUsdcPerCall` is set -- the call route does not enforce payment for write workflows.
+**Write workflows**: Included in the doc with `x-workflow-type: "write"`. Different response schema (`{ type, to, data, value }`). A priced write listing DOES advertise `x-payment-info` and a 402 response: the caller pays for the unsigned calldata, then signs and broadcasts it themselves (on-chain gas is separate and paid by the caller). Free write listings keep `security: []` and emit no 402.
 
 Caching: `Cache-Control: public, max-age=300, stale-while-revalidate=600`. Rate limited at 60/min per IP (matches catalog).
 
@@ -270,7 +270,9 @@ If `recordPayment` fails for MPP: same behavior as x402 -- execution row is mark
 
 ### Write workflows
 
-Unchanged. `workflowType === "write"` continues to bypass payment entirely and return calldata. MPP does not change this.
+A priced write listing is gated on both rails. Everything fallible -- body parse, schema validation, calldata generation -- runs BEFORE `gatePayment`, so the gated handler only records the payment and returns an artifact it already holds. That ordering is load-bearing: MPP settles before the handler runs and there is no refund path, so any fallible step after the gate would be an unrefundable charge for a call that delivered nothing. On a record-payment failure the branch is protocol-conditional: x402 fails closed with 503 (settlement is skipped for any >=400, so no funds move and the signature stays retryable), MPP fails open and still delivers (the money already moved).
+
+Free write listings are unchanged and never touch the payment path.
 
 ---
 

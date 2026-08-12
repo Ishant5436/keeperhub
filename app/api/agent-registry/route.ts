@@ -1,16 +1,22 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import {
+  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  ETHEREUM_MAINNET_CHAIN_ID,
+} from "@/lib/agentic-wallet/constants";
 import { db } from "@/lib/db";
 import { agentRegistrations } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { getAuthenticatedToolsForDiscovery } from "@/lib/mcp/mcp-tool-catalog";
 
-// Must match TARGET_CHAIN_ID and IDENTITY_REGISTRY_ADDRESS in
-// scripts/register-agent.ts. The endpoint serves the public ERC-8004
-// discovery payload and must return the canonical mainnet registration
-// regardless of how many other (chain, registry) rows exist in the table.
-const MAINNET_CHAIN_ID = 1;
-const IDENTITY_REGISTRY_ADDRESS = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+// Shares its chain id and registry address with scripts/register-agent.ts via
+// lib/agentic-wallet/constants.ts, so the row this endpoint looks up cannot
+// drift from the row the registration script writes. The endpoint serves the
+// public ERC-8004 discovery payload and must return the canonical mainnet
+// registration regardless of how many other (chain, registry) rows exist in
+// the table.
+const MAINNET_CHAIN_ID = ETHEREUM_MAINNET_CHAIN_ID;
+const IDENTITY_REGISTRY_ADDRESS = ERC_8004_IDENTITY_REGISTRY_ADDRESS;
 
 export async function GET(_request: Request): Promise<NextResponse> {
   try {

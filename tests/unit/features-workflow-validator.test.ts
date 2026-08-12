@@ -92,4 +92,25 @@ describe("extractActionTypeNodes", () => {
     ];
     expect(extractActionTypeNodes(raw)).toEqual([]);
   });
+
+  it("returns empty array for non-array nodes input", () => {
+    expect(extractActionTypeNodes({})).toEqual([]);
+    expect(extractActionTypeNodes(null)).toEqual([]);
+  });
+
+  it("reads legacy top-level data.actionType", () => {
+    const raw = [{ id: "n1", data: { actionType: "Database Query" } }];
+    expect(extractActionTypeNodes(raw)).toEqual([
+      { id: "n1", actionType: "Database Query" },
+    ]);
+  });
+
+  it("normalizes colon-separated action types", () => {
+    const raw = [
+      { id: "n1", data: { config: { actionType: "code:run-code" } } },
+    ];
+    expect(extractActionTypeNodes(raw)).toEqual([
+      { id: "n1", actionType: "code/run-code" },
+    ]);
+  });
 });

@@ -1,9 +1,15 @@
 import { and, eq, isNull, or } from "drizzle-orm";
+import type { NextResponse } from "next/server";
 import { authenticateApiKey } from "@/lib/api-key-auth";
 import { auth } from "@/lib/auth";
 import { isAnonymousUserShape } from "@/lib/auth-anonymous-guard";
 import { db } from "@/lib/db";
 import { member, organization } from "@/lib/db/schema";
+import {
+  type ApiErrorCode,
+  ApiErrorCodes,
+  apiError,
+} from "@/lib/errors/api-envelope";
 import { authenticateOAuthToken } from "@/lib/mcp/oauth-auth";
 import { getOrgContext } from "@/lib/middleware/org-context";
 import {
@@ -11,6 +17,23 @@ import {
   isTrustedOrigin,
   normaliseOrigin,
 } from "@/lib/trusted-origins";
+
+/**
+ * An auth rejection, carrying both halves the documented error envelope needs.
+ *
+ * `code` is the stable value an integrator branches on; `error` stays the human
+ * sentence and becomes `detail` once a route emits the envelope via `apiError`.
+ * Routes not yet migrated keep returning `error` as-is, so adopting the code is
+ * incremental rather than a flag day.
+ */
+export type AuthFailure = {
+  error: string;
+  // `mfa_required` sits outside the documented set on purpose: the dialog
+  // branches on it to route into step-up rather than showing a dead error, and
+  // the docs already allow a route to raise a more specific code.
+  code: ApiErrorCode | "mfa_required";
+  status: number;
+};
 
 const STATE_CHANGING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
@@ -23,9 +46,7 @@ const STATE_CHANGING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
  * Skipped for OAuth Bearer and API-key callers because those auth methods are
  * intentionally cross-origin and not vulnerable to cookie CSRF.
  */
-function checkSessionOrigin(
-  request: Request
-): { error: string; status: 403 } | null {
+function checkSessionOrigin(request: Request): AuthFailure | null {
   const method = request.method.toUpperCase();
   if (!STATE_CHANGING_METHODS.has(method)) {
     return null;
@@ -49,7 +70,11 @@ function checkSessionOrigin(
 
   if (!origin) {
     console.info("[csrf] blocked: missing origin (session)", { method, path });
-    return { error: "Invalid origin", status: 403 };
+    return {
+      error: "Invalid origin",
+      code: ApiErrorCodes.UNAUTHORIZED,
+      status: 403,
+    };
   }
   if (!isTrustedOrigin(origin)) {
     console.info("[csrf] blocked: untrusted origin (session)", {
@@ -57,7 +82,11 @@ function checkSessionOrigin(
       path,
       origin,
     });
-    return { error: "Invalid origin", status: 403 };
+    return {
+      error: "Invalid origin",
+      code: ApiErrorCodes.UNAUTHORIZED,
+      status: 403,
+    };
   }
   return null;
 }
@@ -83,9 +112,7 @@ async function resolveSessionOrg(
   request: Request,
   userId: string,
   defaultOrgId: string | null
-): Promise<
-  { organizationId: string | null } | { error: string; status: number }
-> {
+): Promise<{ organizationId: string | null } | AuthFailure> {
   const raw = request.headers.get(ORG_HEADER)?.trim();
   if (!raw) {
     if (!defaultOrgId) {
@@ -114,7 +141,11 @@ async function resolveSessionOrg(
       .where(eq(organization.id, defaultOrgId))
       .limit(1);
     if (!defaultOrg || defaultOrg.deactivatedAt) {
-      return { error: "Organization not found", status: 404 };
+      return {
+        error: "Organization not found",
+        code: ApiErrorCodes.NOT_FOUND,
+        status: 404,
+      };
     }
     return { organizationId: defaultOrgId };
   }
@@ -141,7 +172,11 @@ async function resolveSessionOrg(
 
   const targetOrgId = match[0]?.id;
   if (!targetOrgId) {
-    return { error: "Organization not found", status: 404 };
+    return {
+      error: "Organization not found",
+      code: ApiErrorCodes.NOT_FOUND,
+      status: 404,
+    };
   }
 
   return { organizationId: targetOrgId };
@@ -156,7 +191,7 @@ export type DualAuthContext =
       scope?: string;
       isAnonymous: boolean;
     }
-  | { error: string; status: number; code?: "mfa_required" };
+  | AuthFailure;
 
 export type ResolvedAuthContext = Exclude<DualAuthContext, { error: string }>;
 
@@ -193,7 +228,7 @@ export const MFA_REQUIRED_ERROR = {
   error: "MFA verification required",
   status: 403,
   code: "mfa_required",
-} as const satisfies { error: string; status: number; code: "mfa_required" };
+} as const satisfies AuthFailure;
 
 /**
  * Stable label set to attach to log entries on dual-auth routes so we can
@@ -301,7 +336,11 @@ export async function getDualAuthContext(
 
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user && required) {
-    return { error: "Unauthorized", status: 401 };
+    return {
+      error: "Unauthorized",
+      code: ApiErrorCodes.UNAUTHORIZED,
+      status: 401,
+    };
   }
   if (!session?.user) {
     return {
@@ -369,7 +408,7 @@ export type OrganizationAuthContext =
       // treats as full access.
       scope?: string;
     }
-  | { error: string; status: number };
+  | AuthFailure;
 
 /**
  * Resolves the organization ID and audit context from OAuth, API key, or
@@ -394,7 +433,11 @@ export async function resolveOrganizationId(
   if (apiKeyAuth.authenticated) {
     const organizationId = apiKeyAuth.organizationId;
     if (!organizationId) {
-      return { error: "No active organization", status: 400 };
+      return {
+        error: "No active organization",
+        code: ApiErrorCodes.INVALID_INPUT,
+        status: 400,
+      };
     }
     return {
       organizationId,
@@ -411,7 +454,11 @@ export async function resolveOrganizationId(
 
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user) {
-    return { error: "Unauthorized", status: 401 };
+    return {
+      error: "Unauthorized",
+      code: ApiErrorCodes.UNAUTHORIZED,
+      status: 401,
+    };
   }
 
   const orgContext = await getOrgContext();
@@ -424,7 +471,11 @@ export async function resolveOrganizationId(
     return orgResult;
   }
   if (!orgResult.organizationId) {
-    return { error: "No active organization", status: 400 };
+    return {
+      error: "No active organization",
+      code: ApiErrorCodes.INVALID_INPUT,
+      status: 400,
+    };
   }
   return {
     organizationId: orgResult.organizationId,
@@ -448,7 +499,7 @@ export async function resolveCreatorContext(request: Request): Promise<
       // treats as full access for backwards compatibility.
       scope?: string;
     }
-  | { error: string; status: number }
+  | AuthFailure
 > {
   const oauthAuth = await resolveOAuthToken(request);
   if (oauthAuth) {
@@ -479,7 +530,11 @@ export async function resolveCreatorContext(request: Request): Promise<
 
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user) {
-    return { error: "Unauthorized", status: 401 };
+    return {
+      error: "Unauthorized",
+      code: ApiErrorCodes.UNAUTHORIZED,
+      status: 401,
+    };
   }
 
   const context = await getOrgContext();
@@ -492,7 +547,11 @@ export async function resolveCreatorContext(request: Request): Promise<
     return orgResult;
   }
   if (!orgResult.organizationId) {
-    return { error: "No active organization", status: 400 };
+    return {
+      error: "No active organization",
+      code: ApiErrorCodes.INVALID_INPUT,
+      status: 400,
+    };
   }
   return {
     organizationId: orgResult.organizationId,
@@ -516,15 +575,40 @@ function validateCreatorFields(
       apiKeyId: string | null;
       scope?: string;
     }
-  | { error: string; status: number } {
+  | AuthFailure {
   if (!organizationId) {
-    return { error: "No active organization", status: 400 };
+    return {
+      error: "No active organization",
+      code: ApiErrorCodes.INVALID_INPUT,
+      status: 400,
+    };
   }
   if (!userId) {
     return {
       error: "Auth context missing user. Please recreate the API key.",
+      code: ApiErrorCodes.UNAUTHORIZED,
       status: 400,
     };
   }
   return { organizationId, userId, authMethod, apiKeyId, scope };
+}
+
+/**
+ * Render an auth rejection as the documented error envelope.
+ *
+ * Routes that resolve auth through this module reject in the same shape, so
+ * this is the one-liner that turns that rejection into `{error, detail,
+ * request_id}` plus the `x-request-id` response header. Migrating a route is
+ * swapping its `NextResponse.json({ error: ctx.error }, ...)` for this.
+ */
+export function authFailureResponse(
+  failure: AuthFailure,
+  requestHeaders: Headers
+): NextResponse {
+  return apiError({
+    status: failure.status,
+    code: failure.code,
+    detail: failure.error,
+    requestHeaders,
+  });
 }

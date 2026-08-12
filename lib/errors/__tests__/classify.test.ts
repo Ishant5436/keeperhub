@@ -240,26 +240,23 @@ describe("classifyExecutionError", () => {
       expect(r.errorType).toBe("user");
     });
 
-    it.each(["URL is required", "HTTP request failed: URL is required"])(
-      "keeps %s as validation + user (config fault, not transport)",
-      (input) => {
-        const r = classifyExecutionError(input);
-        expect(r.errorCategory).toBe(ErrorCategory.VALIDATION);
-        expect(r.errorType).toBe("user");
-      }
-    );
+    it.each([
+      "URL is required",
+      "HTTP request failed: URL is required",
+    ])("keeps %s as validation + user (config fault, not transport)", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.VALIDATION);
+      expect(r.errorType).toBe("user");
+    });
 
     it.each([
       "Failed to send webhook: fetch failed: getaddrinfo EAI_AGAIN events.pagerduty.com",
       "HTTP request failed: fetch failed: getaddrinfo ENOTFOUND api.example.com",
-    ])(
-      "keeps DNS-resolution failure %s as user (configured host does not resolve)",
-      (input) => {
-        const r = classifyExecutionError(input);
-        expect(r.errorCategory).toBe(ErrorCategory.EXTERNAL_SERVICE);
-        expect(r.errorType).toBe("user");
-      }
-    );
+    ])("keeps DNS-resolution failure %s as user (configured host does not resolve)", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.EXTERNAL_SERVICE);
+      expect(r.errorType).toBe("user");
+    });
   });
 
   describe("external: third-party dependency failures", () => {

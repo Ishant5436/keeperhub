@@ -56,6 +56,7 @@ const mockAuth = (orgId = "org-abc") =>
 const mockNoAuth = () =>
   vi.mocked(getDualAuthContext).mockResolvedValue({
     error: "Unauthorized",
+    code: "unauthorized",
     status: 401,
   });
 

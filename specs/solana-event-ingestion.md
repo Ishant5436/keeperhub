@@ -171,13 +171,29 @@ Rather than commit to one method, `solana-tracker` puts ingestion behind a `Bloc
 block metadata + `NormalizedTx[]`, where `programIds` come from the `Program <id> invoke` log lines), so the
 **matcher → Anchor decode → dedup → phantom → SQS** pipeline is entirely source-agnostic.
 
-- `GetBlockSource` — Option 1 (default; events + blocks). **Live-verified.**
+- `GetBlockSource` — Option 1 (events + blocks; testnet default). **Live-verified.**
 - `SignaturesSource` — Option 2 (filtered; events only, emits one-tx blocks). **Live-verified.**
+- `CompositeSource` — runs two of the above for one chain (see below).
 - `GeyserSource` — Option 4 (seam in place; provider-gated follow-up).
 
-Selection is per chain (a `chains`-config `sourceMode` + optional `geyserEndpoint`; currently a
-`SOLANA_SOURCE_MODE` env lever). The factory falls back to `getBlock` if `signatures` is chosen but the chain has
-block triggers.
+Selection is per chain, derived from the chain's own shape: a **mainnet** chain with event triggers defaults to
+`signatures`, everything else to `getBlock`. `SOLANA_SOURCE_MODE` (`signatures` | `getblock`) overrides the
+default on every chain, for incident response and for chains the default gets wrong (e.g. so many watched
+programs that per-program queries cost more than one whole-block pull).
+
+The default is mainnet-aware because `getBlock` on mainnet is not merely expensive, it is lossy: the source caps
+catch-up at `MAX_BACKFILL_SLOTS` and skips the remainder, so a source that cannot keep up silently stops firing
+triggers. Enabling the first mainnet event trigger on the previously idle prod pod (2026-08-11) drove exactly
+this, alerting on >2x CPU request.
+
+Because `signatures` cannot serve block triggers, a chain needing both runs a `CompositeSource`: the signatures
+source for event triggers plus a header-only `getBlock` (`transactionDetails: "none"`) for block triggers. The
+members serve disjoint trigger sets, so no workflow double-fires. Reverting the whole chain to `getBlock`
+instead — the earlier behaviour — would put event matching back on the full-block firehose.
+
+`SignaturesSource` polling is floored by `SOLANA_SIGNATURES_POLL_INTERVAL_MS` (default 2000). The slot tick is
+only a wake-up; honouring every tick issues one query per program roughly as fast as RPC latency allows, which
+at the metering below is a large sustained bill for latency that SQS and the executor dwarf anyway.
 
 ## Recommendation matrix
 

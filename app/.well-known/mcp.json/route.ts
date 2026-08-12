@@ -5,6 +5,11 @@
 // authenticated, org-scoped surface is advertised separately under
 // `authenticatedEndpoint` (OAuth-gated /mcp).
 
+import {
+  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  ETHEREUM_MAINNET_CHAIN_ID,
+  KEEPERHUB_ERC_8004_AGENT_ID,
+} from "@/lib/agentic-wallet/constants";
 import { getAuthenticatedToolsForDiscovery } from "@/lib/mcp/mcp-tool-catalog";
 import { PUBLIC_TOOLS } from "@/lib/mcp/oauth-scopes";
 
@@ -64,10 +69,10 @@ export function GET(request: Request): Response {
       },
     },
     erc8004: {
-      agent_id: 31_875,
+      agent_id: KEEPERHUB_ERC_8004_AGENT_ID,
       chain: "ethereum",
-      chain_id: 1,
-      registry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      chain_id: ETHEREUM_MAINNET_CHAIN_ID,
+      registry: ERC_8004_IDENTITY_REGISTRY_ADDRESS,
     },
   };
 

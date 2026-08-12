@@ -121,6 +121,20 @@ export function generateCalldataForWorkflow(
   const { contractAddress, abi, abiFunction, functionArgs, ethValue } =
     writeNode.config;
 
+  // A write node with a missing, templated, or malformed contractAddress used
+  // to serialise to a 200 whose `to` key was simply absent. Now that the write
+  // branch can charge, that would be a paid-for unusable response with no
+  // refund path -- reject it before any money can move.
+  if (
+    typeof contractAddress !== "string" ||
+    !ethers.isAddress(contractAddress)
+  ) {
+    return {
+      success: false,
+      error: `Invalid or missing contract address in workflow node: ${String(contractAddress)}`,
+    };
+  }
+
   let parsedAbi: unknown[];
   try {
     parsedAbi = JSON.parse(abi) as unknown[];

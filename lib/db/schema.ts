@@ -72,6 +72,11 @@ export const users = pgTable("users", {
   // Only written after the user confirms it with a code; presence = verified.
   // Distinct from `email` (the synthetic SIWE login identity).
   stepUpEmail: text("step_up_email"),
+  // Set the first time the signup channels (Discord webhook, MailerLite) were
+  // told about this account. Claimed with a conditional update so the send
+  // happens once per account no matter how many times a verification hook
+  // re-fires for the same row.
+  signupNotifiedAt: timestamp("signup_notified_at"),
 });
 
 export const sessions = pgTable(

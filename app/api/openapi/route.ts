@@ -42,9 +42,7 @@ type DiscoveryWorkflow = {
 };
 
 function buildPathEntry(workflow: DiscoveryWorkflow): Record<string, unknown> {
-  const isPaid =
-    workflow.workflowType === "read" &&
-    Number(workflow.priceUsdcPerCall ?? "0") > 0;
+  const isPaid = Number(workflow.priceUsdcPerCall ?? "0") > 0;
   const isWrite = workflow.workflowType === "write";
 
   const operation: Record<string, unknown> = {
@@ -60,9 +58,9 @@ function buildPathEntry(workflow: DiscoveryWorkflow): Record<string, unknown> {
   // declare `security: []` which OpenAPI defines as "no authentication
   // required". Discovery scanners (agentcash, x402scan, CDP Bazaar) read
   // the standard fields, not custom x-auth-mode extensions.
-  // Note: write workflows are never paid at the HTTP layer — they always
-  // return unsigned calldata that the caller signs+broadcasts (see
-  // app/api/mcp/workflows/[slug]/call/route.ts handleWriteWorkflow).
+  // Both read and write listings can be paid: a priced write listing charges
+  // for the unsigned calldata it returns, so it must not advertise
+  // `security: []` on an endpoint that answers 402.
   if (!isPaid) {
     operation.security = [];
   }

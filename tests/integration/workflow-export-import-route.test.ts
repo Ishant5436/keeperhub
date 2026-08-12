@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -155,6 +156,14 @@ vi.mock("@/lib/middleware/auth-helpers", () => ({
     isAnonymous: false,
   }),
   auditFromAuth: vi.fn().mockReturnValue({ authMethod: "session" }),
+  authFailureResponse: (
+    failure: { error: string; code: string; status: number },
+    _headers: Headers
+  ) =>
+    NextResponse.json(
+      { error: failure.code, detail: failure.error, request_id: "test" },
+      { status: failure.status }
+    ),
   UNAUTHENTICATED_AUDIT: { authMethod: "unknown" },
 }));
 
@@ -274,6 +283,7 @@ describe("GET /api/workflows/[workflowId]/download", () => {
     );
     vi.mocked(getDualAuthContext).mockResolvedValueOnce({
       error: "Unauthorized",
+      code: "unauthorized",
       status: 401,
     });
 

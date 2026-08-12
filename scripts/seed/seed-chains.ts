@@ -532,6 +532,59 @@ const DEFAULT_CHAINS: NewChain[] = [
     usePrivateMempoolRpc: getUsePrivateMempoolRpc({ rpcConfig, jsonKey: "0g-galileo" }),
     defaultPrivateRpcUrl: getPrivateRpcUrl({ rpcConfig, jsonKey: "0g-galileo" }),
   },
+  {
+    chainId: getChainConfigValue("robinhood-mainnet", "chainId", 4663),
+    name: "Robinhood Chain",
+    symbol: getChainConfigValue("robinhood-mainnet", "symbol", "ETH"),
+    chainType: "evm",
+    defaultPrimaryRpc: getRpcUrlByChainId(4663, "primary"),
+    defaultFallbackRpc: getRpcUrlByChainId(4663, "fallback"),
+    defaultPrimaryWss: getWssUrl({
+      rpcConfig,
+      jsonKey: CHAIN_CONFIG[4663].jsonKey,
+      type: "primary",
+    }),
+    defaultFallbackWss: getWssUrl({
+      rpcConfig,
+      jsonKey: CHAIN_CONFIG[4663].jsonKey,
+      type: "fallback",
+    }),
+    isTestnet: getChainConfigValue("robinhood-mainnet", "isTestnet", false),
+    // Unlike every other chain here, the hardcoded default is false rather than
+    // true. production.json disables this chain explicitly, so the default is
+    // only reached where CHAIN_RPC_CONFIG is absent or fails to parse -- and on
+    // a parse failure the seed falls back to hardcoded defaults throughout,
+    // which with a `true` default would silently enable mainnet in production.
+    // Flip this to true alongside the production.json entry, not before.
+    isEnabled: getChainConfigValue("robinhood-mainnet", "isEnabled", false),
+    status: "experimental",
+    usePrivateMempoolRpc: getUsePrivateMempoolRpc({ rpcConfig, jsonKey: "robinhood-mainnet" }),
+    defaultPrivateRpcUrl: getPrivateRpcUrl({ rpcConfig, jsonKey: "robinhood-mainnet" }),
+    aliases: ["robinhood"],
+  },
+  {
+    chainId: getChainConfigValue("robinhood-testnet", "chainId", 46_630),
+    name: "Robinhood Chain Testnet",
+    symbol: getChainConfigValue("robinhood-testnet", "symbol", "ETH"),
+    chainType: "evm",
+    defaultPrimaryRpc: getRpcUrlByChainId(46_630, "primary"),
+    defaultFallbackRpc: getRpcUrlByChainId(46_630, "fallback"),
+    defaultPrimaryWss: getWssUrl({
+      rpcConfig,
+      jsonKey: CHAIN_CONFIG[46_630].jsonKey,
+      type: "primary",
+    }),
+    defaultFallbackWss: getWssUrl({
+      rpcConfig,
+      jsonKey: CHAIN_CONFIG[46_630].jsonKey,
+      type: "fallback",
+    }),
+    isTestnet: getChainConfigValue("robinhood-testnet", "isTestnet", true),
+    isEnabled: getChainConfigValue("robinhood-testnet", "isEnabled", true),
+    status: "experimental",
+    usePrivateMempoolRpc: getUsePrivateMempoolRpc({ rpcConfig, jsonKey: "robinhood-testnet" }),
+    defaultPrivateRpcUrl: getPrivateRpcUrl({ rpcConfig, jsonKey: "robinhood-testnet" }),
+  },
   // Solana chains (non-EVM - uses SolanaProviderManager)
   {
     chainId: getChainConfigValue("solana-mainnet", "chainId", 101),
@@ -787,6 +840,26 @@ const EXPLORER_CONFIG_TEMPLATES: Record<
     explorerAddressPath: "/address/{address}",
     explorerContractPath: "/address/{address}?tab=contract-viewer",
   },
+  // Robinhood Chain Mainnet - hosted Blockscout
+  4663: {
+    chainType: "evm",
+    explorerUrl: "https://robinhoodchain.blockscout.com",
+    explorerApiType: "blockscout",
+    explorerApiUrl: "https://robinhoodchain.blockscout.com/api",
+    explorerTxPath: "/tx/{hash}",
+    explorerAddressPath: "/address/{address}",
+    explorerContractPath: "/address/{address}?tab=contract",
+  },
+  // Robinhood Chain Testnet - Blockscout
+  46630: {
+    chainType: "evm",
+    explorerUrl: "https://explorer.testnet.chain.robinhood.com",
+    explorerApiType: "blockscout",
+    explorerApiUrl: "https://explorer.testnet.chain.robinhood.com/api",
+    explorerTxPath: "/tx/{hash}",
+    explorerAddressPath: "/address/{address}",
+    explorerContractPath: "/address/{address}?tab=contract",
+  },
   // Solana Mainnet - Solscan
   101: {
     chainType: "solana",
@@ -922,6 +995,8 @@ async function seedChains() {
     "Plasma Testnet": 9746,
     "0G": 16_661,
     "0G Galileo": 16_602,
+    "Robinhood Chain": 4663,
+    "Robinhood Chain Testnet": 46_630,
     Solana: 101,
     "Solana Devnet": 103,
   };

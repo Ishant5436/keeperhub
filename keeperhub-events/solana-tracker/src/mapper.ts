@@ -76,6 +76,58 @@ function toBlockTrigger(
   };
 }
 
+type SourceMode = "getblock" | "signatures";
+
+/**
+ * Explicit operator override applied to every chain, for incident response and
+ * for chains whose shape the default below gets wrong (e.g. a mainnet chain
+ * watching so many programs that per-program signature queries cost more than
+ * one whole-block pull). Any other value leaves selection to the default.
+ */
+function sourceModeOverride(): SourceMode | undefined {
+  const raw = process.env.SOLANA_SOURCE_MODE?.trim().toLowerCase();
+  if (!raw) {
+    return undefined;
+  }
+  if (raw === "signatures" || raw === "getblock") {
+    return raw;
+  }
+  // Unrecognised values fall through to the per-chain default, which is
+  // `signatures` on mainnet - the opposite of what an operator typing
+  // "getBlock" during an incident intends. Say so rather than silently
+  // running the mode they were trying to leave.
+  logger.warn(
+    `[mapper] SOLANA_SOURCE_MODE="${process.env.SOLANA_SOURCE_MODE}" is not "signatures" or "getblock"; ignoring it and using the per-chain default`,
+  );
+  return undefined;
+}
+
+/**
+ * Default ingestion strategy for a chain, from the chain's own shape.
+ *
+ * Mainnet event ingestion defaults to the server-side filtered `signatures`
+ * source: `getBlock` pulls every produced block with full transaction detail,
+ * which on mainnet is a firehose (see specs/solana-event-ingestion.md) that no
+ * CPU request can absorb, and which silently skips slots - and so misses
+ * triggers - once it falls behind. Testnets keep `getBlock`, where whole-block
+ * pulls are cheap and one source serves event and block triggers together.
+ *
+ * `undefined` means the `getblock` default, matching the factory.
+ */
+function defaultSourceMode(
+  network: NetworkConfig,
+  hasEventTriggers: boolean,
+): SourceMode | undefined {
+  // Explicit `!== false` rather than a truthiness test: discovery payloads are
+  // not runtime-validated and `chains.is_testnet` is nullable, so a null would
+  // otherwise read as mainnet and pull a testnet onto the mainnet path.
+  const isMainnet = network.isTestnet === false;
+  if (!hasEventTriggers || !isMainnet) {
+    return undefined;
+  }
+  return "signatures";
+}
+
 interface ChainEndpoints {
   rpcUrl: string;
   fallbackRpcUrl?: string;
@@ -156,18 +208,13 @@ export function buildRegistrations(data: DiscoveryData): ChainRegistration[] {
     ...eventsByChain.keys(),
     ...blocksByChain.keys(),
   ]);
-  // Ingestion strategy lever. Global env override for now; a future per-chain
-  // chains-config field replaces this. "signatures" runs the eth_getLogs-style
-  // filtered-query source for event triggers.
-  const sourceMode =
-    process.env.SOLANA_SOURCE_MODE === "signatures"
-      ? ("signatures" as const)
-      : undefined;
+  const override = sourceModeOverride();
   const registrations: ChainRegistration[] = [];
 
   for (const chainId of chainIds) {
-    const endpoints = resolveEndpoints(data.networks[chainId], chainId);
-    if (!endpoints) {
+    const network = data.networks[chainId];
+    const endpoints = resolveEndpoints(network, chainId);
+    if (!endpoints || !network) {
       continue;
     }
     const eventTriggers: SolanaEventTrigger[] = (
@@ -176,6 +223,8 @@ export function buildRegistrations(data: DiscoveryData): ChainRegistration[] {
     const blockTriggers: SolanaBlockTrigger[] = (
       blocksByChain.get(chainId) ?? []
     ).map((t) => ({ ...t, configHash: sha256(t) }));
+    const sourceMode =
+      override ?? defaultSourceMode(network, eventTriggers.length > 0);
 
     const configHash = sha256({
       endpoints,

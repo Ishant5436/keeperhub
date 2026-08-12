@@ -9,6 +9,7 @@ import {
 import type { KeyboardEvent, MouseEvent } from "react";
 import type { SavedWorkflow } from "@/lib/api-client";
 import type { VoteDirection } from "@/lib/workflow/editor/votes";
+import { PlanRequiredBadge } from "./plan-required-badge";
 
 type WorkflowTemplateRowProps = {
   workflow: SavedWorkflow;
@@ -60,7 +61,7 @@ export function WorkflowTemplateRow({
     // biome-ignore lint/a11y/useSemanticElements: row uses an <article> with the row A11y role per UI-SPEC §2 to act as a click target with the ::before overlay; nested vote buttons forbid wrapping <a>.
     <article
       aria-label={`Open ${workflow.name} preview`}
-      className="group relative grid min-h-[3rem] cursor-pointer grid-cols-[48px_1fr_220px_96px_96px_80px] items-center gap-x-3 border-border/20 border-b bg-[var(--color-hub-card)] px-4 py-3 transition-colors duration-100 ease before:absolute before:inset-0 before:z-[1] before:cursor-pointer before:content-[''] last:border-b-0 even:bg-[var(--color-hub-overlay)] hover:bg-[var(--color-hub-icon-bg)] motion-reduce:transition-none"
+      className="group relative grid min-h-[3rem] cursor-pointer grid-cols-[48px_1fr_220px_96px_96px_136px] items-center gap-x-3 border-border/20 border-b bg-[var(--color-hub-card)] px-4 py-3 transition-colors duration-100 ease before:absolute before:inset-0 before:z-[1] before:cursor-pointer before:content-[''] last:border-b-0 even:bg-[var(--color-hub-overlay)] hover:bg-[var(--color-hub-icon-bg)] motion-reduce:transition-none"
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: UI-SPEC §2 mandates an <article> with the row A11y role for rowgroup/row semantics; the row is interactive via the ::before overlay and onKeyDown handler.
@@ -153,13 +154,23 @@ export function WorkflowTemplateRow({
         </span>
       )}
 
-      {isFeatured ? (
-        <span className="pointer-events-none relative z-[2] hidden items-center justify-center justify-self-end gap-1 rounded-full bg-[var(--color-bg-accent)] px-2 py-0.5 font-semibold text-[0.625rem] text-[var(--color-text-accent)] md:inline-flex">
-          <Star className="size-2.5 fill-[var(--color-text-accent)] text-[var(--color-text-accent)]" />
-          Featured
-        </span>
+      {workflow.requiredPlan || isFeatured ? (
+        <div className="pointer-events-auto relative z-[2] flex flex-wrap items-center justify-end justify-self-end gap-1.5">
+          {workflow.requiredPlan ? (
+            <PlanRequiredBadge
+              className="inline-flex h-[20px] shrink-0 items-center gap-1 rounded-full bg-[var(--color-bg-accent)] px-2 py-0.5 font-semibold"
+              plan={workflow.requiredPlan}
+            />
+          ) : null}
+          {isFeatured ? (
+            <span className="inline-flex h-[20px] shrink-0 items-center gap-1 rounded-full bg-[var(--color-bg-accent)] px-2 py-0.5 font-semibold text-[0.625rem] text-[var(--color-text-accent)]">
+              <Star className="size-2.5 fill-[var(--color-text-accent)] text-[var(--color-text-accent)]" />
+              Featured
+            </span>
+          ) : null}
+        </div>
       ) : (
-        <span className="hidden md:inline" />
+        <span />
       )}
     </article>
   );

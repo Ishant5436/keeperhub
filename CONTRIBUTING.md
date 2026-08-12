@@ -1,6 +1,16 @@
 # Contributing to KeeperHub
 
-Internal contribution guide for the KeeperHub workflow automation platform.
+Contribution guide for the KeeperHub workflow automation platform.
+
+## Start with an issue
+
+Anything that changes behaviour needs an issue first, accepted by a maintainer,
+before the pull request. **[ISSUES.md](ISSUES.md) is the policy** - what needs an
+issue, what goes straight to a pull request, and what happens after you file one.
+
+The short version: open an issue, wait for the `accepted` label, then reference
+it in your pull request title (`fix: #1978 description`). Typos, broken links,
+formatting, and docs corrected to match existing behaviour skip all of that.
 
 ## Table of Contents
 
@@ -96,6 +106,8 @@ make hybrid-down      # Teardown
 
 ### Before Submitting
 
+- The backing issue carries the `accepted` label, or the change is on the
+  no-issue-required list in [ISSUES.md](ISSUES.md)
 - All tests pass
 - Code passes lint (`pnpm check`) and type check (`pnpm type-check`)
 - Changes are tested thoroughly
@@ -103,10 +115,11 @@ make hybrid-down      # Teardown
 
 ### PR Guidelines
 
-1. **Title**: Must follow conventional commit format (`feat: description` or `feat(scope): description`). This is enforced by the `pr-title-check` workflow
+1. **Title**: Conventional commit format carrying the reference, `<type>: #<issue> <description>` or `<type>(scope): #<issue> <description>`. Internal work uses its Linear code in the same position (`feat: KEEP-1234 description`); outside contributions use the GitHub issue number (`fix: #1978 description`). Enforced by the `pr-title-check` and `pr-issue-link` workflows
 2. **Base branch**: Always target `staging`
 3. **Description**: Explain what and why, not just how
-4. **Screenshots**: Include for UI changes
+4. **Scope**: One change per pull request. If a part of it could ship and be correct with the rest reverted, split it
+5. **Screenshots**: Include for UI changes - before and after, and each state the change touches
 
 ### Deploy Verification
 

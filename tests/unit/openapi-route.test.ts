@@ -179,7 +179,7 @@ describe("GET /api/openapi", () => {
     expect(op.requestBody).toBeUndefined();
   });
 
-  it("write workflows: also declare `security: []` (writes never paid at HTTP layer) + fallback requestBody", async () => {
+  it("priced write workflows: advertise payment (402 + x-payment-info) + fallback requestBody", async () => {
     mockDbSelect.mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([
@@ -204,15 +204,48 @@ describe("GET /api/openapi", () => {
     const body = await response.json();
     const op = body.paths["/api/mcp/workflows/priced-write/call"].post;
 
-    // Write workflows with priceUsdcPerCall > 0 are still NOT paid at the
-    // HTTP layer — handleWriteWorkflow returns calldata for the caller to
-    // sign+broadcast (gas paid on-chain). No 402 ever fires. Security must
-    // be `[]`, not unset, so the auth scanner doesn't think these are paid.
+    // A priced write listing charges for the calldata it returns, so it must
+    // advertise payment like any other paid resource: `security` unset (auth
+    // comes via the 402 challenge), x-payment-info present, and a documented
+    // 402 response. Declaring `security: []` here would tell scanners the
+    // endpoint is free and index it as broken the moment it answers 402.
+    expect(op.security).toBeUndefined();
+    expect(op["x-payment-info"]).toBeDefined();
+    expect(op.responses["402"]).toBeDefined();
+    // The 200 shape is unchanged: writes still return unsigned calldata.
+    expect(op["x-workflow-type"]).toBe("write");
+    expect(op.requestBody).toBeDefined();
+  });
+
+  it("free write workflows still declare `security: []` and no 402", async () => {
+    mockDbSelect.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([
+          {
+            id: "wf-write-free",
+            name: "Free Write Workflow",
+            description: null,
+            listedSlug: "free-write",
+            inputSchema: null,
+            priceUsdcPerCall: null,
+            workflowType: "write",
+            category: null,
+            chain: null,
+          },
+        ]),
+      }),
+    });
+
+    const { GET } = await import("@/app/api/openapi/route");
+    const request = new Request("https://app.keeperhub.com/api/openapi");
+    const response = await GET(request);
+    const body = await response.json();
+    const op = body.paths["/api/mcp/workflows/free-write/call"].post;
+
     expect(op.security).toEqual([]);
     expect(op["x-payment-info"]).toBeUndefined();
     expect(op.responses["402"]).toBeUndefined();
     expect(op["x-workflow-type"]).toBe("write");
-    expect(op.requestBody).toBeDefined();
   });
 
   it("DB-backed inputSchema takes precedence over the open-object fallback", async () => {
@@ -323,8 +356,8 @@ describe("GET /api/openapi", () => {
     const body = await response.json();
     const path = body.paths["/api/mcp/workflows/write-workflow/call"];
 
-    expect(path.post["x-payment-info"]).toBeUndefined();
+    expect(path.post["x-payment-info"]).toBeDefined();
     expect(path.post["x-workflow-type"]).toBe("write");
-    expect(path.post.responses["402"]).toBeUndefined();
+    expect(path.post.responses["402"]).toBeDefined();
   });
 });

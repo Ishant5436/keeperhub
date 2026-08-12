@@ -493,23 +493,6 @@ function filterDiffToNode(
   };
 }
 
-function versionTouchesNode(
-  change: unknown,
-  nodeId: string,
-  nodeLabel: string | null
-): boolean {
-  if (!isVersionDiff(change)) {
-    return false;
-  }
-  const scoped = filterDiffToNode(change, nodeId, nodeLabel);
-  return (
-    scoped.nodesAdded.length > 0 ||
-    scoped.nodesRemoved.length > 0 ||
-    scoped.nodesChanged.length > 0 ||
-    scoped.connectionsAdded.length > 0 ||
-    scoped.connectionsRemoved.length > 0
-  );
-}
 
 function VersionRow({
   version,
@@ -722,8 +705,10 @@ export function VersionHistoryContent({
       api.workflow.getHistory(workflowId ?? "", {
         page: p,
         limit: WORKFLOW_HISTORY_PAGE_SIZE,
+        nodeId,
+        nodeLabel,
       }),
-    `${workflowId}`,
+    `${workflowId}:${nodeId ?? ""}:${nodeLabel ?? ""}`,
     { enabled: active && !!workflowId, refetchIntervalMs: 30_000 }
   );
 
@@ -814,13 +799,10 @@ export function VersionHistoryContent({
       : Number.isNaN(parsedVersionParam)
         ? null
         : parsedVersionParam;
-  // Per-node scope: show only the versions that touched this node.
-  const shown = nodeId
-    ? versions.filter((v) =>
-        versionTouchesNode(v.change, nodeId, nodeLabel ?? null)
-      )
-    : versions;
-  const groups = groupByDate(shown, (v) => v.createdAt);
+  // Node scope is applied by the query, not here: filtering the fetched page
+  // dropped every version on it whenever the node's changes lived on another
+  // page, and left the pager counting versions it would not show.
+  const groups = groupByDate(versions, (v) => v.createdAt);
   const emptyMessage = nodeId
     ? "No changes recorded for this node yet."
     : "No versions recorded yet.";
@@ -841,7 +823,7 @@ export function VersionHistoryContent({
             ))}
           </div>
         )}
-        {!loading && shown.length === 0 && (
+        {!loading && versions.length === 0 && (
           <p className="p-2 text-muted-foreground text-sm">{emptyMessage}</p>
         )}
         {groups.map((group) => (
