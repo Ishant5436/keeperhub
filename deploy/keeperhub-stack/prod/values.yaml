@@ -58,11 +58,62 @@ app:
       type: kv
       value: "http://keeperhub-sandbox-common.keeperhub.svc.cluster.local:8787"
 
-  replicaCount: 2
+  # Four replicas, not two. Work arrives in bursts that allocate roughly 1GB of
+  # off-heap RSS on the pod that receives them. With two replicas a pair of
+  # concurrent bursts stacks on one pod and crosses the memory limit, and the
+  # kernel OOM-kills it. More standing replicas spread the bursts immediately.
+  # An HPA cannot help here: the burst completes in about 90 seconds, which is
+  # shorter than the detect-schedule-boot cycle.
+  replicaCount: 4
 
   podDisruptionBudget:
     enabled: true
-    minAvailable: 1
+    # 3 of 4, so a Karpenter consolidation or a node roll can take one pod at a
+    # time. minAvailable 1 would let a drain remove three pods at once and
+    # concentrate every burst on the survivor.
+    minAvailable: 3
+
+  # One replica per node, on nodes large enough to honour the memory limit
+  # below. Both rules are required, and that is deliberate.
+  #
+  # The node affinity is required because the scheduler places pods by REQUEST,
+  # not by limit. The Karpenter default-private NodePool admits every instance
+  # size above `medium`, so a 4Gi request alone still fits on an 8GB node that
+  # can never deliver the 6Gi limit. Gating on instance-memory keeps these pods
+  # on nodes with real headroom.
+  #
+  # The pod anti-affinity is required rather than preferred because a preferred
+  # rule buys nothing here. Four pods at a 4Gi request fit on the two nodes
+  # that satisfy the gate today, so Karpenter would never add a node and the
+  # best available spread would be two per node. Two co-located pods can each
+  # reach 6Gi, and the nodes peak near 10GiB of 15.25GiB already, so that turns
+  # a single cgroup kill into node memory pressure - which is worse, because
+  # the kubelet then evicts neighbouring pods too. Concurrent bursts across
+  # replicas are observed, not hypothetical.
+  #
+  # If Karpenter cannot provision a qualifying node, the extra replicas stay
+  # Pending. That is the intended failure mode: Pending is visible and leaves
+  # the surviving replicas alone, while silent co-location is neither.
+  #
+  # Both selectors use app.kubernetes.io/serviceName, the only selector label
+  # unique per component - every component in this umbrella release shares
+  # name=common and instance=keeperhub, so selecting on those would push these
+  # pods away from the executor and dispatcher pods as well.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.k8s.aws/instance-memory
+                operator: Gt
+                values:
+                  - "12000"
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/serviceName: keeperhub-common
 
   service:
     enabled: true
@@ -173,13 +224,24 @@ app:
 
   resources:
     limits:
-      # Must exceed NODE_OPTIONS --max-old-space-size by ~1 GiB to leave headroom
-      # for off-heap RSS (Buffers, source maps, native addons, worker threads).
-      # Setting these equal causes the kernel OOM-killer to fire before V8 GCs.
-      memory: 4Gi
+      # 6Gi against a 3072MB V8 ceiling, so the off-heap side gets 3GiB rather
+      # than the 1GiB the earlier 4Gi limit left it. The kills that drove this
+      # are off-heap: no container logged a V8 "heap out of memory" or FATAL
+      # line, so V8 never reached its ceiling and RSS crossed the cgroup limit
+      # on its own. Raising --max-old-space-size would take headroom away from
+      # the side that actually overflows, so leave it at 3072.
+      memory: 6Gi
     requests:
-      cpu: 100m
-      memory: 2Gi
+      # Requests, not limits, decide where a pod lands and how large a node
+      # Karpenter provisions for it. A 2Gi request let a replica schedule onto
+      # a node that could never supply the limit above. Keep this in step with
+      # the nodeAffinity gate on instance-memory.
+      #
+      # cpu 250m reflects measured use: p95 sits near 0.12 cores and the daily
+      # max near 0.22, so the previous 100m understated the pod on every node
+      # it ran on.
+      cpu: 250m
+      memory: 4Gi
 
   env:
     <<: *shared_env

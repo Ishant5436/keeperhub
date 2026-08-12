@@ -7,7 +7,13 @@
 
 import "server-only";
 
-import { Counter, Gauge, Histogram, Registry } from "prom-client";
+import {
+  Counter,
+  collectDefaultMetrics,
+  Gauge,
+  Histogram,
+  Registry,
+} from "prom-client";
 import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import type { ErrorStatus } from "@/lib/errors/execution-status";
 import { ErrorCategory, logSystemWarn, logWarn } from "@/lib/logging";
@@ -1150,6 +1156,123 @@ const dbPoolUtilization = getOrCreateGauge(
   POOL_LABELS
 );
 
+// Process memory gauges (API-process, per-pod). No labels: each value belongs
+// to one process, and the pod identity arrives with the scrape.
+//
+// The _peak_ variants carry the high-water mark of the window between scrapes,
+// sampled every second by lib/metrics/instrumentation/process-memory.ts. They
+// exist because the container-level metrics cannot resolve the spike that
+// causes an OOM kill: cadvisor samples once per 60s, and a 30s scrape of an
+// instantaneous gauge has the same blind spot.
+const processMemoryRss = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_rss_bytes",
+  "Resident set size of the Node.js process in bytes",
+  []
+);
+
+const processMemoryHeapUsed = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_heap_used_bytes",
+  "V8 heap in use by the Node.js process in bytes",
+  []
+);
+
+const processMemoryExternal = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_external_bytes",
+  "Memory held by C++ objects bound to JavaScript, in bytes",
+  []
+);
+
+const processMemoryArrayBuffers = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_array_buffers_bytes",
+  "Memory held by ArrayBuffers and Buffers, in bytes (a subset of external)",
+  []
+);
+
+const processMemoryRssPeak = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_rss_peak_bytes",
+  "Highest resident set size seen since the previous scrape, in bytes",
+  []
+);
+
+const processMemoryHeapUsedPeak = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_heap_used_peak_bytes",
+  "Highest V8 heap in use seen since the previous scrape, in bytes",
+  []
+);
+
+const processMemoryExternalPeak = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_external_peak_bytes",
+  "Highest external memory seen since the previous scrape, in bytes",
+  []
+);
+
+const processMemoryArrayBuffersPeak = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_process_memory_array_buffers_peak_bytes",
+  "Highest ArrayBuffer memory seen since the previous scrape, in bytes",
+  []
+);
+
+// cgroup v2 accounting for this container. This is the number the OOM killer
+// compares against the limit, so it decides whether the process lives, and it
+// counts page cache that RSS does not.
+//
+// The peak matters most. The kernel maintains it continuously, so it cannot
+// miss a spike that opens and closes between two reads - unlike every gauge
+// above it, and unlike cadvisor, which samples once per 60s.
+const containerMemoryCurrent = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_container_memory_current_bytes",
+  "Current cgroup v2 memory charge for this container, in bytes",
+  []
+);
+
+const containerMemoryPeak = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_container_memory_peak_bytes",
+  "Kernel high-water mark of cgroup memory since this container started, in bytes",
+  []
+);
+
+const containerMemoryLimit = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_container_memory_limit_bytes",
+  "cgroup v2 memory limit for this container, in bytes",
+  []
+);
+
+const containerMemoryOomKills = getOrCreateGauge(
+  apiRegistry,
+  "keeperhub_container_memory_oom_kills",
+  "OOM kills the kernel performed in this cgroup since the container started",
+  []
+);
+
+// prom-client's default Node.js metrics, on apiRegistry for the same reason the
+// gauges above are: only /api/metrics/api is scraped from the app pods, and
+// these values are per-pod. They add the per-V8-space heap breakdown, GC pause
+// counts and durations, and event-loop lag, which is what separates a burst
+// that returns its memory from growth that does not.
+//
+// The flag lives on globalThis for the same reason the registries do: a dev
+// hot reload re-evaluates this module, and a second collectDefaultMetrics call
+// against the retained registry throws on the duplicate names.
+const globalForRuntimeMetrics = globalThis as unknown as {
+  nodeRuntimeMetricsRegistered: boolean | undefined;
+};
+
+if (!globalForRuntimeMetrics.nodeRuntimeMetricsRegistered) {
+  globalForRuntimeMetrics.nodeRuntimeMetricsRegistered = true;
+  collectDefaultMetrics({ register: apiRegistry });
+}
+
 // TODO(HARDEN-03 / v1.13): register keeperhub_scan_address_duration_ms
 // (histogram, label: status), keeperhub_scan_cache_hit_total,
 // keeperhub_scan_cache_miss_total, and keeperhub_scan_zerion_calls_total
@@ -1947,6 +2070,13 @@ export async function getApiProcessMetrics(): Promise<string> {
   await initRpcMetricsForAllChains();
   const { startRpcHealthProbe } = await import("../rpc-health-probe");
   startRpcHealthProbe();
+
+  const { startProcessMemorySampler, updateProcessMemoryGauges } = await import(
+    "../instrumentation/process-memory"
+  );
+  startProcessMemorySampler();
+  updateProcessMemoryGauges();
+
   return await apiRegistry.metrics();
 }
 
@@ -1979,6 +2109,29 @@ export const rpcProbeMetrics = {
   latency: rpcProbeLatency,
   errorsTotal: rpcProbeErrorsTotal,
   lastSuccess: rpcProbeLastSuccess,
+};
+
+/**
+ * Process memory gauge accessors for the process-memory sampler.
+ *
+ * These stay out of gaugeMap on purpose. gaugeMap serves the
+ * setGauge(name, value) collector interface, which routes through the console
+ * collector as well; these gauges are written directly by the sampler and have
+ * no console-mode equivalent.
+ */
+export const processMemoryMetrics = {
+  rss: processMemoryRss,
+  heapUsed: processMemoryHeapUsed,
+  external: processMemoryExternal,
+  arrayBuffers: processMemoryArrayBuffers,
+  rssPeak: processMemoryRssPeak,
+  heapUsedPeak: processMemoryHeapUsedPeak,
+  externalPeak: processMemoryExternalPeak,
+  arrayBuffersPeak: processMemoryArrayBuffersPeak,
+  cgroupCurrent: containerMemoryCurrent,
+  cgroupPeak: containerMemoryPeak,
+  cgroupLimit: containerMemoryLimit,
+  cgroupOomKills: containerMemoryOomKills,
 };
 
 /**
