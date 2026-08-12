@@ -72,6 +72,24 @@ export function formatGasAsEth(
   return renderUnits(toDisplayUnits(wei, decimals), decimals);
 }
 
+/**
+ * The wallet-paid share of a period's gas.
+ *
+ * `totalWei` is every wei the runs burned, sponsored included, so the wallet
+ * share is what is left after removing the sponsorship ledger. Clamped at zero:
+ * the two figures sit on different time axes (run start vs ledger insert), so a
+ * window edge can put a sponsored transaction in one and not the other.
+ */
+export function walletShareWei(totalWei: string, sponsoredWei: string): string {
+  const total = parseWei(totalWei);
+  const sponsored = parseWei(sponsoredWei);
+  if (total === null || sponsored === null) {
+    return totalWei;
+  }
+  const wallet = total - sponsored;
+  return wallet > ZERO ? wallet.toString() : "0";
+}
+
 export type GasSplit = {
   total: string;
   wallet: string;

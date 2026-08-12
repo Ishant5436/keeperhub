@@ -30,7 +30,7 @@ test.describe("Analytics Gas Tracking", () => {
       { timeout: 15_000 }
     );
 
-    // Headline value is wallet-paid plus sponsored gas for the range
+    // Headline value is every wei the runs burned, sponsored included
     const gasCard = page.locator('[data-kpi="gas-spent"]');
     await expect(gasCard).toBeVisible({ timeout: 10_000 });
 

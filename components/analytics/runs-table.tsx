@@ -129,13 +129,19 @@ function formatGasAsEth(weiString: string | null): string {
 
 // Run-level gas: multi-network runs can't sum into one token, so they render
 // as "Composed" (per-network amounts live in the expanded steps). A single
-// network shows its real sponsored total in that network's token.
+// network shows its total in that network's token.
+//
+// The step rollup wins over the sponsorship ledger because it covers every
+// transaction the run made. A run that starts sponsored and falls back to
+// direct signing has only its sponsored leg in the ledger, so preferring the
+// ledger would drop the rest.
 function runGasDisplay(run: UnifiedRun): ReactNode {
   if (run.networks.length > 1) {
     return "Composed";
   }
-  if (run.gasCostWei) {
-    return formatGasNative(run.gasCostWei, run.networks[0] ?? run.network);
+  const wei = run.gasUsedWei ?? run.gasCostWei;
+  if (wei) {
+    return formatGasNative(wei, run.networks[0] ?? run.network);
   }
   return formatGasAsEth(run.gasUsedWei);
 }

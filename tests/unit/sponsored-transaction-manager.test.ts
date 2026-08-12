@@ -223,12 +223,16 @@ describe("executeSponsoredTransaction", () => {
     expect(result?.sponsored).toBe(true);
   });
 
-  it("returns gasUsed as raw gas units, not wei cost", async () => {
+  // gasUsed feeds output.gasUsed, which finalize sums into
+  // workflow_executions.gas_used_wei. It must be the fee, like the direct path.
+  it("returns gasUsed as the wei fee and gasUsedUnits as the unit count", async () => {
     setupSuccessfulSponsorship();
 
     const result = await executeSponsoredTransaction(baseTxParams);
 
-    expect(result?.gasUsed).toBe("21000");
+    expect(result?.gasUsed).toBe("21000000000000");
+    expect(result?.gasUsedUnits).toBe("21000");
+    expect(result?.effectiveGasPrice).toBe("1000000000");
   });
 
   it("records gas usage after confirmation", async () => {
@@ -479,7 +483,8 @@ describe("executeSponsoredContractTransaction", () => {
 
     expect(result).not.toBeNull();
     expect(result?.success).toBe(true);
-    expect(result?.gasUsed).toBe("21000");
+    expect(result?.gasUsed).toBe("21000000000000");
+    expect(result?.gasUsedUnits).toBe("21000");
   });
 
   it("encodes call data and forwards it to the Turnkey wrapper", async () => {

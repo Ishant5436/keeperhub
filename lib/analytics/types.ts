@@ -75,12 +75,13 @@ export type AnalyticsSummary = {
   cancelledCount: number;
   successRate: number;
   avgDurationMs: number | null;
-  /** Gas paid by the org's own wallet over the range, in wei. */
+  /** Every wei the runs burned over the range, sponsored gas included. */
   totalGasWei: string;
   /**
-   * Gas paid by KeeperHub sponsorship over the range, in wei, read from the
-   * gas-credit ledger. Disjoint from `totalGasWei`, so the headline figure the
-   * Gas Spent KPI renders is the two added together.
+   * The sponsored portion of `totalGasWei`, in wei, read from the gas-credit
+   * ledger and scoped to the same runs. A subset, NOT a disjoint figure: the
+   * Gas Spent KPI renders `totalGasWei` as the headline and derives the
+   * wallet-paid share by subtracting this. Adding the two double counts.
    */
   sponsoredGasWei: string;
   activeRuns: number;

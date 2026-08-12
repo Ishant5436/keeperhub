@@ -29,7 +29,9 @@ import { isSponsorshipSupported } from "@/lib/web3/turnkey-sponsorship-config";
 type SponsoredTransactionResult = {
   success: true;
   transactionHash: string;
+  /** Fee in wei (units * effectiveGasPrice), matching the direct-signing path. */
   gasUsed: string;
+  /** Raw gas unit count from the receipt. */
   gasUsedUnits: string;
   effectiveGasPrice: string;
   sponsored: true;
@@ -424,6 +426,11 @@ async function finalizeSponsoredTx(
 
   const gasUsed = receipt.gasUsed;
   const effectiveGasPrice = receipt.effectiveGasPrice;
+  // `gasUsed` on the receipt is a unit count; the fee is units * price. Callers
+  // put this in `output.gasUsed`, which finalize sums into
+  // `workflow_executions.gas_used_wei`, so it has to be the fee like the
+  // direct-signing path returns.
+  const gasCostWei = gasUsed * effectiveGasPrice;
 
   const metrics = getMetricsCollector();
   const labels = {
@@ -466,7 +473,6 @@ async function finalizeSponsoredTx(
   }
 
   if (!isTestnet) {
-    const gasCostWei = gasUsed * effectiveGasPrice;
     const gasCostEth = Number(gasCostWei) / 1e18;
     const gasCostUsd = gasCostEth * ethPriceUsd;
 
@@ -480,7 +486,7 @@ async function finalizeSponsoredTx(
   return {
     success: true,
     transactionHash: txHash,
-    gasUsed: gasUsed.toString(),
+    gasUsed: gasCostWei.toString(),
     gasUsedUnits: gasUsed.toString(),
     effectiveGasPrice: effectiveGasPrice.toString(),
     sponsored: true,

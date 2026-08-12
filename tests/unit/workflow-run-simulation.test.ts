@@ -318,7 +318,7 @@ describe("runWorkflowSimulation", () => {
     expect(spies.simulateNativeTransfer).not.toHaveBeenCalled();
   });
 
-  it("does not simulate an EVM-only preflight on Solana", async () => {
+  it("skips Solana writes silently without a warning", async () => {
     spies.getChainIdFromNetwork.mockReturnValueOnce(101);
     spies.isSolanaChain.mockReturnValueOnce(true);
 
@@ -333,7 +333,11 @@ describe("runWorkflowSimulation", () => {
       ],
     });
 
-    expect(result.warnings[0]?.code).toBe("SIMULATION_UNSUPPORTED_CHAIN");
+    expect(result).toEqual({
+      warnings: [],
+      simulatedNodeCount: 0,
+      skippedNodeCount: 1,
+    });
     expect(spies.simulateNativeTransfer).not.toHaveBeenCalled();
   });
 

@@ -18,7 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatGasSplit } from "@/lib/analytics/format-gas";
+import { formatGasSplit, walletShareWei } from "@/lib/analytics/format-gas";
 import type { TimeRange } from "@/lib/analytics/types";
 import {
   analyticsLoadingAtom,
@@ -40,17 +40,6 @@ function formatDuration(ms: number | null): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-// Wallet-paid and sponsored gas are tracked in separate ledgers, so the headline
-// figure is their sum. BigInt keeps the addition exact before the lossy
-// Number() conversion that the delta needs.
-function addWeiStrings(a: string, b: string): string {
-  try {
-    return (BigInt(a) + BigInt(b)).toString();
-  } catch {
-    return a;
-  }
 }
 
 function computeDelta(current: number, previous: number): number | null {
@@ -278,15 +267,12 @@ export function KpiCards(): ReactNode {
         ? computeDelta(summary.avgDurationMs, prev.avgDurationMs)
         : null;
 
-    const walletGasWei = summary.totalGasWei;
+    const totalGasWei = summary.totalGasWei;
     const sponsoredGasWei = summary.sponsoredGasWei;
-    const totalGasWei = addWeiStrings(walletGasWei, sponsoredGasWei);
+    const walletGasWei = walletShareWei(totalGasWei, sponsoredGasWei);
 
     const gasDelta = prev
-      ? computeDelta(
-          Number(totalGasWei),
-          Number(addWeiStrings(prev.totalGasWei, prev.sponsoredGasWei))
-        )
+      ? computeDelta(Number(totalGasWei), Number(prev.totalGasWei))
       : null;
 
     const hasSponsoredGas = sponsoredGasWei !== "0" && sponsoredGasWei !== "";

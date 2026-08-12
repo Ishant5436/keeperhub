@@ -467,10 +467,17 @@ async function getPreviousPeriodSummary(
 }
 
 /**
- * Sum of gas paid by KeeperHub sponsorship over the window (in wei), read
- * straight from the gas_credit_usage ledger. Org-level only: sponsorship is not
- * project-attributable, so a project-scoped view returns "0" rather than
- * leaking org-wide totals under a project filter.
+ * Sum of gas paid by KeeperHub sponsorship over the window (in wei), read from
+ * the gas_credit_usage ledger but scoped to the same runs `getWorkflowGasTotal`
+ * counts: joined through the execution, windowed on `started_at`, and limited
+ * to runs that have already written their `gas_used_wei` rollup.
+ *
+ * The scoping is what lets the KPI derive the wallet share by subtraction. The
+ * ledger inserts per confirmed transaction while the rollup is only written at
+ * finalize, so summing the ledger on its own axis would subtract gas from runs
+ * that have not landed in the total yet - on a 1h range that is the normal
+ * case, not an edge, and it would drive the wallet figure to zero. The join
+ * also makes the figure project-attributable, where the raw ledger is not.
  *
  * Caveat: this sums native gas across chains and the Gas Spent KPI renders it
  * as ETH, so a non-ETH chain's gas (e.g. Polygon's POL) is counted as ETH. It
@@ -484,19 +491,24 @@ async function getSponsoredGasTotal(
   rangeEnd: Date,
   projectId?: string
 ): Promise<string> {
-  if (projectId) {
-    return "0";
-  }
   const result = await db
     .select({
       totalWei: sql<string>`COALESCE(SUM(CAST(${gasCreditUsage.gasCostWei} AS NUMERIC)), 0)::text`,
     })
     .from(gasCreditUsage)
+    .innerJoin(
+      workflowExecutions,
+      eq(workflowExecutions.id, gasCreditUsage.executionId)
+    )
+    .innerJoin(workflows, eq(workflows.id, workflowExecutions.workflowId))
     .where(
       and(
         eq(gasCreditUsage.organizationId, organizationId),
-        gte(gasCreditUsage.createdAt, rangeStart),
-        lt(gasCreditUsage.createdAt, rangeEnd)
+        eq(workflows.organizationId, organizationId),
+        projectId ? eq(workflows.projectId, projectId) : undefined,
+        isNotNull(workflowExecutions.gasUsedWei),
+        gte(workflowExecutions.startedAt, rangeStart),
+        lt(workflowExecutions.startedAt, rangeEnd)
       )
     );
   return result[0]?.totalWei ?? "0";
@@ -1019,8 +1031,9 @@ async function fetchWorkflowRuns(
     .as("log_summary");
 
   // Total native gas cost sponsored per execution, from the sponsorship ledger.
-  // Used to show a single-network run's real total (the wallet-side gas above is
-  // ~0 for sponsored runs); multi-network runs render as "Composed" instead.
+  // Preferred for a single-network run because it carries the chain, so the
+  // amount renders in that chain's own token; multi-network runs render as
+  // "Composed" instead.
   const gasCostSummary = db
     .select({
       executionId: gasCreditUsage.executionId,

@@ -568,17 +568,9 @@ async function simulateNode(
   }
 
   if (isSolanaChain(chainId)) {
-    return {
-      status: "skipped",
-      warning: makeIssue(context, {
-        code: "SIMULATION_UNSUPPORTED_CHAIN",
-        fieldKey: "network",
-        message: `${nodeLabel(
-          context.node,
-          context.actionType
-        )} uses Solana. Workflow Run preflight currently supports EVM writes only.`,
-      }),
-    };
+    // Preflight is EVM-only by design; Solana writes are skipped without a
+    // warning so valid Solana workflows do not surface issues in the editor.
+    return { status: "skipped" };
   }
 
   const signerEligibility = await withSimulationDeadline(
