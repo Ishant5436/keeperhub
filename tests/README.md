@@ -26,6 +26,32 @@ make test-e2e-hybrid         # Vitest E2E against docker-compose hybrid deployme
 
 ---
 
+## Running the Playwright suite locally
+
+The proxy sends any signed-in user without a second factor to `/enroll-mfa`, so
+without a bypass token every auth setup fails before a single test runs. Set the
+same token on the app and on the run:
+
+```bash
+LOAD_TEST_BYPASS_TOKEN=local pnpm dev            # in one shell
+
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/keeperhub \
+LOAD_TEST_BYPASS_TOKEN=local \
+pnpm test:e2e                                     # in another
+```
+
+Playwright sends the token as a header on every request (`playwright.config.ts`),
+and the app compares it in `lib/load-test-bypass.ts`. Two suites expect the MFA
+gate to fire and therefore cannot pass with the token set; CI runs them in an
+environment it never reuses.
+
+Building a database from scratch follows the order CI uses in
+`.github/actions/setup-e2e-db`, which matters: the workflow schema goes first.
+
+```bash
+pnpm db:setup-workflow && pnpm db:migrate && pnpm db:seed && pnpm db:seed-test-wallet
+```
+
 ## Persistent Test Account
 
 The seed script `scripts/seed/seed-test-wallet.ts` provisions a persistent test account used by both Playwright and vitest E2E tests. It is idempotent -- safe to run multiple times.
