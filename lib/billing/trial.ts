@@ -124,10 +124,13 @@ export function isTrialEligible(
   // text and every other read path runs it through parsePlanName, so parse here
   // too: a raw compare calls an org ineligible over a value the rest of the app
   // already treats as free (pay-as-you-go orgs, legacy rows).
-  if (
-    sub.providerSubscriptionId != null ||
-    parsePlanName(sub.plan) !== "free"
-  ) {
+  //
+  // A churned row keeps its providerSubscriptionId so the org's trial history
+  // stays measurable, so the id alone no longer means "subscribed". Pair it
+  // with the status, the way the checkout and preview-proration routes do.
+  const stillSubscribed =
+    sub.providerSubscriptionId != null && sub.status !== "canceled";
+  if (stillSubscribed || parsePlanName(sub.plan) !== "free") {
     return false;
   }
   // First-timer: never trialed, and not a previously-subscribed-then-reset org.

@@ -53,6 +53,32 @@ function planChangeDirection(
 
 type SubscriptionRow = typeof organizationSubscriptions.$inferSelect;
 
+/**
+ * Count a trial conversion when a row leaves "trialing" for "active".
+ *
+ * Either handler can observe that move. At trial end the provider charges the
+ * card and sends both invoice.paid and subscription.updated, and whichever
+ * arrives first is the one that writes "active". Counting it in only one of
+ * them loses the conversion whenever the other wins the race.
+ *
+ * Each caller reads the row before its own write, so the handler that arrives
+ * second already sees "active" and counts nothing.
+ */
+function recordTrialConversion(
+  previousStatus: string,
+  nextStatus: string | undefined,
+  plan: PlanName,
+  tier: string | null
+): void {
+  if (!(previousStatus === "trialing" && nextStatus === "active")) {
+    return;
+  }
+  getMetricsCollector().incrementCounter(MetricNames.BILLING_TRIAL_CONVERTED, {
+    plan,
+    tier: tier ?? "none",
+  });
+}
+
 async function findSubscriptionByProviderId(
   providerSubscriptionId: string
 ): Promise<SubscriptionRow | undefined> {
@@ -444,12 +470,12 @@ async function handleSubscriptionUpdated(
 
   // Trial conversion: a trialing subscription became active (card charged at
   // trial end). This is the funnel counterpart to billing.trial.started.
-  if (current.status === "trialing" && data.status === "active") {
-    metrics.incrementCounter(MetricNames.BILLING_TRIAL_CONVERTED, {
-      plan: newPlan,
-      tier: (update.tier as string | null) ?? current.tier ?? "none",
-    });
-  }
+  recordTrialConversion(
+    current.status,
+    data.status,
+    newPlan,
+    (update.tier as string | null) ?? current.tier
+  );
 
   // Plan change is signaled by priceChanged in buildSubscriptionUpdate
   // (only present in the update payload when the price differs).
@@ -602,14 +628,18 @@ async function handleSubscriptionDeleted(
   // cannot move below the update.
   await collectFinalPeriodOverageSafely(current);
 
+  // plan and tier drop to free because every entitlement read decides access
+  // from plan alone. providerSubscriptionId and providerPriceId stay: clearing
+  // them left no record that this org ever held this subscription, so the
+  // churned trial fell outside the trials query and could never be counted.
+  // Keeping the id is safe against a late event for the dead subscription,
+  // because invoice.paid now resolves the real status from the provider.
   await db
     .update(organizationSubscriptions)
     .set({
       plan: "free",
       tier: null,
       status: "canceled",
-      providerSubscriptionId: null,
-      providerPriceId: null,
       cancelAtPeriodEnd: false,
       updatedAt: now,
     })
@@ -703,6 +733,39 @@ async function markOverageRecordsPaid(
   }
 }
 
+/**
+ * The status the provider reports for a subscription, or undefined when that
+ * read fails.
+ *
+ * A paid invoice proves an invoice was paid. It does not prove the subscription
+ * is active: the provider issues a paid $0 invoice at trial start, so treating
+ * invoice.paid as an activation overwrote "trialing" whenever the event won its
+ * race with row creation. The subscription object is the only authority for its
+ * own status.
+ *
+ * Returns undefined instead of a guess, so the caller leaves the stored status
+ * alone rather than writing one it cannot support.
+ */
+async function readSubscriptionStatus(
+  providerSubscriptionId: string,
+  provider: BillingProvider
+): Promise<string | undefined> {
+  try {
+    const details = await provider.getSubscriptionDetails(
+      providerSubscriptionId
+    );
+    return details.status;
+  } catch (error) {
+    logSystemWarn(
+      ErrorCategory.BILLING,
+      `${LOG_PREFIX} Could not read the subscription status; leaving the stored status unchanged`,
+      error,
+      { provider_subscription_id: providerSubscriptionId }
+    );
+    return undefined;
+  }
+}
+
 async function handleInvoicePaid(
   data: BillingWebhookEvent["data"],
   provider: BillingProvider
@@ -718,21 +781,38 @@ async function handleInvoicePaid(
     console.info(LOG_PREFIX, "invoice.paid - subId:", providerSubscriptionId);
 
     const sub = await findSubscriptionByProviderId(providerSubscriptionId);
+    const status = await readSubscriptionStatus(
+      providerSubscriptionId,
+      provider
+    );
+
+    const update: Partial<typeof organizationSubscriptions.$inferInsert> = {
+      billingAlert: null,
+      billingAlertUrl: null,
+      updatedAt: new Date(),
+    };
+    if (status !== undefined) {
+      update.status = status;
+    }
 
     await db
       .update(organizationSubscriptions)
-      .set({
-        status: "active",
-        billingAlert: null,
-        billingAlertUrl: null,
-        updatedAt: new Date(),
-      })
+      .set(update)
       .where(
         eq(
           organizationSubscriptions.providerSubscriptionId,
           providerSubscriptionId
         )
       );
+
+    if (sub) {
+      recordTrialConversion(
+        sub.status,
+        status,
+        parsePlanName(sub.plan, "free"),
+        sub.tier
+      );
+    }
 
     if (sub && invoiceId) {
       await markOverageRecordsPaid(sub.organizationId, invoiceId, provider);

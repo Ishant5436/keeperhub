@@ -704,10 +704,33 @@ describe("handleBillingEvent", () => {
           plan: "free",
           tier: null,
           status: "canceled",
-          providerSubscriptionId: null,
-          providerPriceId: null,
         })
       );
+    });
+
+    // Clearing the ids left no record that the org ever held this
+    // subscription, so a churned trial fell outside the trials query.
+    it("keeps the provider ids on the churned row", async () => {
+      const pastDate = new Date(Date.now() - 86_400_000);
+      mockSelectReturning([
+        {
+          providerSubscriptionId: "sub_1",
+          providerPriceId: "price_1",
+          currentPeriodEnd: pastDate,
+          plan: "pro",
+        },
+      ]);
+
+      const provider = createMockProvider();
+      const event = makeEvent("subscription.deleted", {
+        providerSubscriptionId: "sub_1",
+      });
+
+      await handleBillingEvent(event, provider);
+
+      const setArg = mockSet.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg).not.toHaveProperty("providerSubscriptionId");
+      expect(setArg).not.toHaveProperty("providerPriceId");
     });
 
     it("uses event periodEnd over DB periodEnd", async () => {
@@ -893,8 +916,22 @@ describe("handleBillingEvent", () => {
   });
 
   describe("invoice.paid", () => {
-    it("sets status active and clears billing alerts", async () => {
-      const provider = createMockProvider();
+    // A paid invoice proves an invoice was paid, not that the
+    // subscription is active. The provider is the authority for the status.
+    function providerReporting(status: string): BillingProvider {
+      return createMockProvider({
+        getSubscriptionDetails: vi.fn().mockResolvedValue({
+          priceId: process.env.STRIPE_PRICE_PRO_25K_MONTHLY,
+          status,
+          cancelAtPeriodEnd: false,
+          periodStart: new Date("2025-01-01"),
+          periodEnd: new Date("2025-02-01"),
+        }),
+      });
+    }
+
+    it("takes the status from the provider and clears billing alerts", async () => {
+      const provider = providerReporting("active");
       const event = makeEvent("invoice.paid", {
         providerSubscriptionId: "sub_1",
         invoiceId: "inv_1",
@@ -902,6 +939,7 @@ describe("handleBillingEvent", () => {
 
       await handleBillingEvent(event, provider);
 
+      expect(provider.getSubscriptionDetails).toHaveBeenCalledWith("sub_1");
       expect(db.update).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -910,6 +948,115 @@ describe("handleBillingEvent", () => {
           billingAlertUrl: null,
         })
       );
+    });
+
+    // The $0 invoice the provider issues at trial start is paid immediately.
+    // Before the fix that event overwrote "trialing" with "active".
+    it("leaves a trialing subscription trialing", async () => {
+      mockSelectReturning([
+        {
+          organizationId: "org_1",
+          providerSubscriptionId: "sub_1",
+          plan: "pro",
+          tier: "25k",
+          status: "trialing",
+        },
+      ]);
+
+      const provider = providerReporting("trialing");
+      const event = makeEvent("invoice.paid", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "inv_trial_zero",
+      });
+
+      await handleBillingEvent(event, provider);
+
+      expect(mockSet).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "trialing" })
+      );
+      expect(mockIncrementCounter).not.toHaveBeenCalledWith(
+        MetricNames.BILLING_TRIAL_CONVERTED,
+        expect.anything()
+      );
+    });
+
+    it("restores a past_due subscription once its invoice is paid", async () => {
+      mockSelectReturning([
+        {
+          organizationId: "org_1",
+          providerSubscriptionId: "sub_1",
+          plan: "pro",
+          tier: "25k",
+          status: "past_due",
+        },
+      ]);
+
+      const provider = providerReporting("active");
+      const event = makeEvent("invoice.paid", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "inv_retry",
+      });
+
+      await handleBillingEvent(event, provider);
+
+      expect(mockSet).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "active" })
+      );
+    });
+
+    it("counts the conversion when it lands the trialing -> active move", async () => {
+      mockSelectReturning([
+        {
+          organizationId: "org_1",
+          providerSubscriptionId: "sub_1",
+          plan: "pro",
+          tier: "25k",
+          status: "trialing",
+        },
+      ]);
+
+      const provider = providerReporting("active");
+      const event = makeEvent("invoice.paid", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "inv_first_charge",
+      });
+
+      await handleBillingEvent(event, provider);
+
+      expect(mockIncrementCounter).toHaveBeenCalledWith(
+        MetricNames.BILLING_TRIAL_CONVERTED,
+        { plan: "pro", tier: "25k" }
+      );
+    });
+
+    it("leaves the stored status alone when the provider cannot be read", async () => {
+      mockSelectReturning([
+        {
+          organizationId: "org_1",
+          providerSubscriptionId: "sub_1",
+          plan: "pro",
+          status: "trialing",
+        },
+      ]);
+
+      const provider = createMockProvider({
+        getSubscriptionDetails: vi
+          .fn()
+          .mockRejectedValue(new Error("provider unreachable")),
+      });
+      const event = makeEvent("invoice.paid", {
+        providerSubscriptionId: "sub_1",
+        invoiceId: "inv_1",
+      });
+
+      await handleBillingEvent(event, provider);
+
+      const setArg = mockSet.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg).not.toHaveProperty("status");
+      expect(setArg).toMatchObject({
+        billingAlert: null,
+        billingAlertUrl: null,
+      });
     });
 
     it("clears debt when invoiceId is present", async () => {

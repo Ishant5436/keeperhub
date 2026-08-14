@@ -175,6 +175,23 @@ describe("isTrialEligible", () => {
     );
   });
 
+  // A churned row keeps its providerSubscriptionId so churn stays
+  // measurable, so the id on its own must no longer read as "subscribed".
+  it("does not treat a canceled row as subscribed because it keeps its id", () => {
+    vi.stubEnv("TRIAL_ALLOW_REPEAT", "true");
+    expect(
+      isTrialEligible(
+        makeSub({
+          status: "canceled",
+          providerSubscriptionId: "sub_churned",
+          trialStartedAt: new Date(Date.now() - 200 * DAY_MS),
+        }),
+        "pro",
+        "25k"
+      )
+    ).toBe(true);
+  });
+
   it("is not eligible when the trials feature flag is off", () => {
     vi.stubEnv("TRIALS_ENABLED", "false");
     expect(isTrialEligible(undefined, "pro", "25k")).toBe(false);
@@ -207,9 +224,11 @@ describe("repeat trials (cooldown)", () => {
   });
 
   function trialedSub(daysAgo: number): TrialSub {
-    // Trialed once, converted, then reset back to free (canceled).
+    // Trialed once, converted, then reset back to free (canceled). The
+    // handler keeps the provider id on that row, so carry it here too.
     return makeSub({
       status: "canceled",
+      providerSubscriptionId: "sub_churned",
       trialStartedAt: new Date(Date.now() - daysAgo * DAY_MS),
     });
   }
