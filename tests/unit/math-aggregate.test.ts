@@ -49,7 +49,6 @@ async function expectSuccess(
   overrides: Partial<AggregateCoreInput>
 ): Promise<SuccessResult> {
   const result = await runAggregation(overrides);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(result.success).toBe(true);
   return result as SuccessResult;
 }
@@ -58,7 +57,6 @@ async function expectFailure(
   overrides: Partial<AggregateCoreInput>
 ): Promise<FailureResult> {
   const result = await runAggregation(overrides);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(result.success).toBe(false);
   return result as FailureResult;
 }

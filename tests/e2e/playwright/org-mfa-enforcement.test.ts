@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { openOrgSettings } from "./utils/settings";
 
 const UPDATED_REGEX = /enforcement updated/i;
 const NEEDS_FACTOR_REGEX = /at least one factor/i;
@@ -9,14 +10,7 @@ const NEEDS_FACTOR_REGEX = /at least one factor/i;
 // end-to-end; the wallet-member proxy gate is covered separately.
 
 async function openOrgSecurityTab(page: Page): Promise<void> {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  const orgSwitcher = page.locator('button[role="combobox"]');
-  await expect(orgSwitcher).toBeVisible({ timeout: 15_000 });
-  await orgSwitcher.click();
-  await page.locator("text=Manage Organizations").click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("tab", { name: "Security" }).click();
+  await openOrgSettings(page, "security");
   // The section fetches its current state before rendering; wait for the toggle
   // so callers don't race the loading spinner.
   await expect(page.getByTestId("org-mfa-enforce-toggle")).toBeVisible({

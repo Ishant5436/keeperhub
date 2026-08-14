@@ -12,8 +12,13 @@
  *
  * Setup (in a second terminal):
  *
- *   docker run --rm -p 8545:8545 ghcr.io/foundry-rs/foundry:latest \
+ *   docker run --rm -p 8545:8545 ghcr.io/foundry-rs/foundry:v1.7.1 \
  *     "anvil --host 0.0.0.0 --fork-url <YOUR_MAINNET_RPC_URL>"
+ *
+ *   Pin a version rather than `latest` or `stable` - on GHCR `latest`
+ *   is foundry's nightly tag, whose contents change daily and have
+ *   shipped anvil builds that cannot fork some chains at all, and
+ *   `stable` is unmaintained and lags the newest release.
  *
  *   The MAINNET_RPC_URL must be an archive-capable RPC; a free public
  *   RPC tends to rate-limit anvil's fork loads. Do NOT pass --chain-id

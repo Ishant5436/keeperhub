@@ -72,34 +72,36 @@ export function IntegrationsManager({
     const labels = getIntegrationLabels() as Record<string, string>;
     const filterLower = filter.toLowerCase();
 
-    return integrations
-      // Web3 wallets are managed in their own dedicated section, not as a
-      // generic connection. Keep them in the global store but hide them here.
-      .filter((integration) => integration.type !== "web3")
-      .map((integration) => ({
-        ...integration,
-        label:
-          labels[integration.type] ||
-          SYSTEM_INTEGRATION_LABELS[integration.type] ||
-          integration.type,
-      }))
-      .filter((integration) => {
-        if (!filter) {
-          return true;
-        }
-        return (
-          integration.label.toLowerCase().includes(filterLower) ||
-          integration.name.toLowerCase().includes(filterLower) ||
-          integration.type.toLowerCase().includes(filterLower)
-        );
-      })
-      .sort((a, b) => {
-        const labelCompare = a.label.localeCompare(b.label);
-        if (labelCompare !== 0) {
-          return labelCompare;
-        }
-        return a.name.localeCompare(b.name);
-      });
+    return (
+      integrations
+        // Web3 wallets are managed in their own dedicated section, not as a
+        // generic connection. Keep them in the global store but hide them here.
+        .filter((integration) => integration.type !== "web3")
+        .map((integration) => ({
+          ...integration,
+          label:
+            labels[integration.type] ||
+            SYSTEM_INTEGRATION_LABELS[integration.type] ||
+            integration.type,
+        }))
+        .filter((integration) => {
+          if (!filter) {
+            return true;
+          }
+          return (
+            integration.label.toLowerCase().includes(filterLower) ||
+            integration.name.toLowerCase().includes(filterLower) ||
+            integration.type.toLowerCase().includes(filterLower)
+          );
+        })
+        .sort((a, b) => {
+          const labelCompare = a.label.localeCompare(b.label);
+          if (labelCompare !== 0) {
+            return labelCompare;
+          }
+          return a.name.localeCompare(b.name);
+        })
+    );
   }, [integrations, filter]);
 
   const handleEdit = (integration: Integration) => {

@@ -13,6 +13,7 @@ import { PendingTemplateRunner } from "@/components/hub/pending-template-runner"
 import { LayoutContent } from "@/components/layout-content";
 import { MobileWarningDialog } from "@/components/mobile-warning-dialog";
 import { EditorWalkthrough } from "@/components/onboarding/editor-walkthrough";
+import { OrgDataSync } from "@/components/org-data-sync";
 import { OverlayProvider } from "@/components/overlays/overlay-provider";
 import { PendingScanRunner } from "@/components/scan/pending-scan-runner";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -124,6 +125,7 @@ const RootLayout = async ({ children }: RootLayoutProps) => {
         >
           <Provider>
             <AuthProvider>
+              <OrgDataSync />
               <FeatureSessionInvalidator />
               <PendingTemplateRunner />
               <PendingScanRunner />

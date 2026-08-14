@@ -15,10 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import {
-  runWalletStepUp,
-  type StepUpExtra,
-} from "@/lib/wallet/step-up-client";
+import { runWalletStepUp, type StepUpExtra } from "@/lib/wallet/step-up-client";
 
 type Enrolled = { wallet: boolean; totp: boolean; email: boolean };
 
@@ -226,7 +223,9 @@ export function WalletSecuritySection(): React.ReactElement {
           Failed to load security settings.{" "}
           <button
             className="underline"
-            onClick={() => void load()}
+            onClick={() => {
+              load().catch(() => undefined);
+            }}
             type="button"
           >
             Retry

@@ -15,10 +15,18 @@ Send transactional emails through SendGrid. Useful for formal notifications, rep
 
 ## Setup
 
+Email works without any setup. By default the Send Email action uses
+KeeperHub's own SendGrid key, so there is no connection to create.
+
+To send through your own SendGrid account instead:
+
 1. Create a [SendGrid account](https://sendgrid.com) and verify a sender identity
-2. Generate an API key at **Settings > API Keys**
-3. In KeeperHub, go to **Connections > Add Connection > SendGrid**
-4. Enter your API key and save
+2. In SendGrid, generate an API key at **Settings > API Keys**
+3. On the Send Email node in KeeperHub, uncheck **Use KeeperHub SendGrid API Key**
+4. Paste your API key into the **API Key** field
+
+The key is set on the action itself. Email is not offered in
+Settings > Organization > Connections, because it needs no shared credential.
 
 ## Send Email
 

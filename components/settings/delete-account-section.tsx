@@ -7,7 +7,6 @@ import { DualFactorSteps } from "@/components/auth/dual-factor-steps";
 import { useOverlay } from "@/components/overlays/overlay-provider";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -98,8 +97,8 @@ export function DeactivateAccountSection(): React.ReactElement {
           <div>
             <h3 className="font-medium text-destructive">Deactivate Account</h3>
             <p className="mt-1 text-muted-foreground text-sm">
-              Deactivate your account. You will be signed out and unable to
-              sign in until the account is reactivated.
+              Deactivate your account. You will be signed out and unable to sign
+              in until the account is reactivated.
             </p>
           </div>
 
@@ -120,9 +119,8 @@ export function DeactivateAccountSection(): React.ReactElement {
                 <AlertDialogTitle>Deactivate your account?</AlertDialogTitle>
                 <AlertDialogDescription>
                   Your account will be deactivated and you will be signed out.
-                  Your data will be preserved, but you will not be able to
-                  sign in until the account is reactivated by an
-                  administrator.
+                  Your data will be preserved, but you will not be able to sign
+                  in until the account is reactivated by an administrator.
                 </AlertDialogDescription>
               </AlertDialogHeader>
 
@@ -170,9 +168,7 @@ export function DeactivateAccountSection(): React.ReactElement {
                       setOpen(false);
                       resetAll();
                     }}
-                    onPrefetchEmail={() =>
-                      dual.prefetchEmail(emptyCodesFetch)
-                    }
+                    onPrefetchEmail={() => dual.prefetchEmail(emptyCodesFetch)}
                     onResendEmail={() => dual.resendEmail(emptyCodesFetch)}
                     onSubmit={handleDeactivate}
                     submitLabel="Deactivate account"

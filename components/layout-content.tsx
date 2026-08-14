@@ -4,6 +4,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { NavigationSidebar } from "@/components/navigation-sidebar";
+import { useRecordExitPath } from "@/components/settings/hub/hooks/use-exit-path";
 import { PersistentCanvas } from "@/components/workflow/persistent-canvas";
 import { WorkflowToolbar } from "@/components/workflow/workflow-toolbar";
 
@@ -27,7 +28,8 @@ const BARE_LAYOUT_PATHS: ReadonlySet<string> = new Set([
 
 // Prefixes whose whole subtree renders bare. The welcome landing plus its
 // onboarding wizard (/welcome, /welcome/create-org, ...) are full-screen and
-// must not render the workflow shell behind them.
+// must not render the workflow shell behind them. Shared execution views are
+// standalone pages for the same reason.
 const BARE_LAYOUT_PREFIXES: readonly string[] = ["/welcome", "/executions"];
 
 function isBareLayoutPath(pathname: string): boolean {
@@ -43,6 +45,7 @@ export function LayoutContent({
   children: ReactNode;
 }): React.ReactElement {
   const pathname = usePathname();
+  useRecordExitPath();
   if (isBareLayoutPath(pathname)) {
     return <div className="relative z-10">{children}</div>;
   }

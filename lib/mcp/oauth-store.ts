@@ -33,6 +33,12 @@ export type RefreshTokenEntry = {
   organizationId: string;
   scope: string;
   expiresAt: number;
+  /**
+   * When the person first consented. Refreshing rotates the row, so this is
+   * carried across rotations to keep the connection's age truthful; absent
+   * only on the first issue, where the row's own creation time is it.
+   */
+  connectedAt?: number;
 };
 
 export type OAuthClient = {
@@ -159,6 +165,7 @@ export async function storeRefreshToken(
     organizationId: entry.organizationId,
     scope: entry.scope,
     expiresAt: new Date(entry.expiresAt),
+    connectedAt: entry.connectedAt ? new Date(entry.connectedAt) : new Date(),
   });
 }
 
@@ -191,6 +198,7 @@ export async function getRefreshToken(
     organizationId: row.organizationId,
     scope: row.scope,
     expiresAt: row.expiresAt.getTime(),
+    connectedAt: (row.connectedAt ?? row.createdAt).getTime(),
   };
 }
 

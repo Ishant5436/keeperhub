@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { getAdminFetchHeaders } from "./admin-fetch";
 import { getDbConnection } from "./connection";
+import { openOrgSettings } from "./settings";
 
 /**
  * Navigate to accept-invite page and wait for it to render.
@@ -93,26 +94,19 @@ async function getInvitationIdViaDb(
 }
 
 /**
- * Navigate to the invite form inside the Manage Organizations modal.
- * Waits for org switcher visibility before interacting.
+ * Open the invite form on the organization's Users settings page.
+ *
+ * Reached through the rail rather than a built URL: the org-scoped route needs
+ * an organization id the test does not hold, and the rail resolves it from the
+ * active organization the way a person would.
  */
 export async function openInviteForm(page: Page): Promise<void> {
-  const orgSwitcher = page.locator('button[role="combobox"]');
-  await expect(orgSwitcher).toBeVisible({ timeout: 15_000 });
-  await orgSwitcher.click();
+  await openOrgSettings(page, "users");
 
-  await page.locator("text=Manage Organizations").click();
-
-  const dialog = page.locator('[role="dialog"]');
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
   await expect(
-    dialog.locator('h2:has-text("Manage Organizations")')
-  ).toBeVisible({ timeout: 5000 });
-
-  await dialog.locator('button:has-text("Manage")').first().click();
-
-  await expect(
-    dialog.locator('input[placeholder="colleague@example.com"]')
-  ).toBeVisible({ timeout: 5000 });
+    page.locator('input[placeholder="colleague@example.com"]')
+  ).toBeVisible({ timeout: 15_000 });
 }
 
 /**
@@ -125,12 +119,11 @@ export async function sendInvite(
 ): Promise<string> {
   await openInviteForm(page);
 
-  const dialog = page.locator('[role="dialog"]');
-  await dialog
+  await page
     .locator('input[placeholder="colleague@example.com"]')
     .fill(inviteeEmail);
 
-  const inviteButton = dialog.locator('button:has-text("Invite")');
+  const inviteButton = page.getByRole("button", { name: "Send invitation" });
   await expect(inviteButton).toBeEnabled({ timeout: 5000 });
   await inviteButton.click();
 

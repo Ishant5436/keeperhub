@@ -45,7 +45,6 @@ interface CliOptions {
   baseUrl: string;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: CLI entry point with inherent branching for argument parsing
 function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
     path: "/",
@@ -120,7 +119,6 @@ async function executeStep(page: Page, step: string): Promise<void> {
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-step page discovery requires sequential branching
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 

@@ -26,7 +26,6 @@ import {
 // ---------------------------------------------------------------------------
 
 function expectNoAbiErrors(result: ValidationResult): void {
-  // biome-ignore lint/suspicious/noMisplacedAssertion: custom assertion helper called inside it() blocks
   expect(
     result.errors.filter((e) => e.code === "low-confidence-abi-match")
   ).toHaveLength(0);

@@ -113,7 +113,6 @@ describe("registerAgent", () => {
   });
 
   it("Test 2: when DB is empty and REGISTRATION_PRIVATE_KEY is not set, throws an error", async () => {
-    // biome-ignore lint/performance/noDelete: delete is required to remove env vars (undefined assignment coerces to string)
     delete process.env.REGISTRATION_PRIVATE_KEY;
 
     const mockContractRegister = vi.fn();

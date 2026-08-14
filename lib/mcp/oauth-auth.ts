@@ -7,6 +7,13 @@ import {
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { logSecurityEvent } from "@/lib/logging";
+import { touchConnection } from "@/lib/mcp/connections";
+import {
+  DEFAULT_EPOCH,
+  effectiveScope,
+  getScopePolicy,
+  getScopePolicyForMint,
+} from "@/lib/mcp/scope-policy";
 import { isUserMemberOfOrganization } from "@/lib/workflow/access";
 
 export type OAuthTokenPayload = {
@@ -15,6 +22,16 @@ export type OAuthTokenPayload = {
   scope: string;
   exp: number;
   iat: number;
+  /**
+   * The scope epoch this token was minted against. Absent on tokens issued
+   * before epochs existed, which read as DEFAULT_EPOCH.
+   */
+  epoch?: number;
+  /**
+   * The client this token belongs to. Absent on tokens issued before it was
+   * added, which is why liveness is skipped rather than guessed for those.
+   */
+  cid?: string;
 };
 
 export type OAuthAuthResult = {
@@ -45,13 +62,21 @@ export async function createAccessToken(payload: {
   sub: string;
   org: string;
   scope: string;
+  /** The client this token was issued to, so a call can be attributed to the
+   * connection that made it rather than to everything the person has. */
+  cid?: string;
 }): Promise<string> {
   const secret = getJwtSecret();
   const now = Math.floor(Date.now() / 1000);
+  // Stamped at mint time so the verifier can tell this token apart from one
+  // issued before the last revoke or scope change.
+  const { epoch } = await getScopePolicyForMint(payload.sub, payload.org);
   return await new SignJWT({
     sub: payload.sub,
     org: payload.org,
     scope: payload.scope,
+    epoch,
+    cid: payload.cid,
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuedAt(now)
@@ -156,6 +181,30 @@ export async function authenticateOAuthToken(
     };
   }
 
+  // Reject tokens minted before the last revoke or scope change. The same
+  // one-hour window that the deactivation check below closes applies to what a
+  // connection is allowed to do: without this, narrowing a scope or cutting a
+  // connection off would not take hold until the token expired on its own.
+  const policy = await getScopePolicy(payload.sub, payload.org);
+  if ((payload.epoch ?? DEFAULT_EPOCH) !== policy.epoch) {
+    return {
+      authenticated: false,
+      // Standard 401 handling applies: the refresh token still works unless
+      // the connection was revoked, so a client that renews on 401 comes back
+      // at the new level without anyone touching it.
+      error:
+        "Access for this connection changed. Refresh the token to continue.",
+      statusCode: 401,
+    };
+  }
+
+  // Liveness for the connections list, recorded only for a token that was
+  // actually accepted. Awaited rather than left floating so it cannot be cut
+  // short when the handler returns; the throttle inside means all but one call
+  // a minute returns without touching the database, and it swallows its own
+  // failures so it can never turn a working call into a failed one.
+  await touchConnection(payload.sub, payload.org, payload.cid);
+
   // Reject tokens issued to a now-deactivated user. JWTs are valid for 1
   // hour after creation; without this check, a user deactivated within that
   // window could keep authenticating against MCP endpoints until the token
@@ -232,10 +281,16 @@ export async function authenticateOAuthToken(
     };
   }
 
+  // What the token says it may do is what the person consented to for
+  // themselves. What it may actually do is that, bounded by the ceilings the
+  // organization's owners and admins set. Applying them here rather than
+  // trusting the minted scope is what stops a person handing themselves a wider
+  // token by reconnecting, and it takes effect without waiting for the old
+  // token to expire.
   return {
     authenticated: true,
     userId: payload.sub,
     organizationId: payload.org,
-    scope: payload.scope,
+    scope: effectiveScope(payload.scope, policy),
   };
 }

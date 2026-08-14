@@ -424,21 +424,28 @@ const orgPlanUsageRatio = getOrCreateGauge(
   ["org_slug"]
 );
 
-// Directional MRR per (plan, tier) in USD cents. Computed from
-// PLANS[plan].tiers[tier].monthlyPrice for every active/trialing/past_due
+// Directional MRR per (plan, tier, billing_status) in USD cents. Computed
+// from PLANS[plan].tiers[tier].monthlyPrice for every active/trialing/past_due
 // subscription. Stripe Dashboard remains the source of truth for actual
 // revenue accounting; this gauge is for trend/observability only.
+//
+// The billing_status label separates committed revenue from trial pipeline
+// revenue. A trialing org carries its full tier price here but pays nothing
+// yet, so query billing_status="trialing" to see the pipeline on its own.
 const mrrUsdCents = getOrCreateGauge(
   dbRegistry,
   "keeperhub_mrr_usd_cents",
-  "Approximate MRR in USD cents per (plan, tier)",
-  ["plan", "tier"]
+  "Approximate MRR in USD cents per (plan, tier, billing_status)",
+  ["plan", "tier", "billing_status"]
 );
 
+// Committed MRR only: active and past_due subscriptions. Trialing orgs are
+// excluded because they have not been charged. Their revenue stays visible
+// through keeperhub_mrr_usd_cents{billing_status="trialing"}.
 const mrrUsdCentsTotal = getOrCreateGauge(
   dbRegistry,
   "keeperhub_mrr_usd_cents_total",
-  "Approximate total MRR in USD cents across all plans",
+  "Approximate committed MRR in USD cents across all plans (excludes trials)",
   []
 );
 
@@ -1963,7 +1970,11 @@ async function refreshDbMetricsNow(): Promise<void> {
     mrrUsdCents.reset();
     for (const entry of billingStats.mrrCentsByPlan) {
       mrrUsdCents.set(
-        { plan: entry.plan, tier: entry.tier ?? "" },
+        {
+          plan: entry.plan,
+          tier: entry.tier ?? "",
+          billing_status: entry.billingStatus,
+        },
         entry.cents
       );
     }

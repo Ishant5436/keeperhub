@@ -139,7 +139,9 @@ GET /api/workflows/executions/{executionId}/status
 
 Returns a `transactionHashes` array in the success payload —
 you can read tx hashes directly from the status response
-without fetching logs separately.
+without fetching logs separately. Each entry is a receipt object
+(`hash`, `nodeId`, `verified`, ...), not a bare hash string — see
+[Transaction Hashes](/api/executions#transaction-hashes).
 
 ### Get execution logs
 ```
@@ -213,11 +215,13 @@ const walletId = res.data[0].id; // bare array, no wrapper
 
 The workflow execution status endpoint returns `transactionHashes`
 directly in the success payload. You can read tx hashes from
-the status response without fetching logs:
+the status response without fetching logs. Each entry is a receipt
+object, so pull `.hash` out of it rather than using the entry itself
+as the hash:
 
 ```typescript
 const status = await getExecutionStatus(executionId);
-const txHashes = status.transactionHashes;
+const txHashes = status.transactionHashes.map((entry) => entry.hash);
 ```
 
 ---

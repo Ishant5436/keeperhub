@@ -180,8 +180,8 @@ Connections store credentials for external services. Set them up before configur
 
 ### Adding a Connection
 
-1. Click your profile icon in the top-right corner
-2. Select **Connections**
+1. Open Settings from the user menu
+2. Under Organization, select **Connections**
 3. Click **Add Connection**
 4. Choose the connection type
 5. Enter the required credentials

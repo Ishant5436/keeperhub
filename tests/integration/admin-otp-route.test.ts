@@ -62,7 +62,6 @@ describe("GET /api/admin/test/otp", () => {
 
   describe("authentication", () => {
     it("should return 401 when TEST_API_KEY is not configured", async () => {
-      // biome-ignore lint/performance/noDelete: delete is required to remove env vars (undefined assignment coerces to string)
       delete process.env.TEST_API_KEY;
       const response = await GET(createRequest(TEST_EMAIL, TEST_KEY));
       expect(response.status).toBe(401);

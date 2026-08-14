@@ -125,7 +125,6 @@ function resultFromReader(reader: SandboxResultReader): SandboxRunResult {
  * it, and return the child's result. Kills the child on timeout or when
  * the caller's AbortSignal fires.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: single cohesive spawner with timeout + stream aggregation + graceful teardown + signal wiring
 async function runInChild(
   code: string,
   timeoutMs: number,

@@ -19,7 +19,7 @@ export function UpgradePrompt({
       </p>
       <Button
         className="shrink-0 border-yellow-500/50 text-yellow-700 dark:text-yellow-200 hover:bg-yellow-500/10"
-        onClick={() => router.push("/billing")}
+        onClick={() => router.push("/settings")}
         size="sm"
         variant="outline"
       >

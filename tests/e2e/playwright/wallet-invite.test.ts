@@ -21,7 +21,7 @@ const INVITE_CREATED_REGEX = /invitation created/i;
 const WELCOME_REGEX = /welcome to/i;
 const SIGN_TO_JOIN_REGEX = /sign to join/i;
 const NOT_FOUND_REGEX = /no keeperhub account signs in with that wallet/i;
-const ADDRESS_INPUT = "0x... (their sign-in wallet)";
+const ADDRESS_INPUT = "0x...";
 
 // The owner invited by address, which resolved to the wallet account's
 // synthetic email; look that email up to find the pending invitation id.
@@ -84,10 +84,11 @@ test.describe("wallet org invite", () => {
       // 2. Owner invites that sign-in address.
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await openInviteForm(page);
-      const dialog = page.locator('[role="dialog"]');
-      await dialog.getByRole("button", { name: "Wallet", exact: true }).click();
-      await dialog.getByPlaceholder(ADDRESS_INPUT).fill(TEST_WALLET_ADDRESS);
-      await dialog.getByRole("button", { name: "Invite" }).click();
+      await page
+        .getByRole("button", { name: "Invite by wallet address instead" })
+        .click();
+      await page.getByPlaceholder(ADDRESS_INPUT).fill(TEST_WALLET_ADDRESS);
+      await page.getByRole("button", { name: "Create invite link" }).click();
       await expect(page.locator("[data-sonner-toast]")).toContainText(
         INVITE_CREATED_REGEX,
         { timeout: 15_000 }
@@ -112,12 +113,13 @@ test.describe("wallet org invite", () => {
   test("inviting an unknown wallet address is rejected", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await openInviteForm(page);
-    const dialog = page.locator('[role="dialog"]');
-    await dialog.getByRole("button", { name: "Wallet", exact: true }).click();
-    await dialog
+    await page
+      .getByRole("button", { name: "Invite by wallet address instead" })
+      .click();
+    await page
       .getByPlaceholder(ADDRESS_INPUT)
       .fill("0x000000000000000000000000000000000000dEaD");
-    await dialog.getByRole("button", { name: "Invite" }).click();
+    await page.getByRole("button", { name: "Create invite link" }).click();
     await expect(page.locator("[data-sonner-toast]")).toContainText(
       NOT_FOUND_REGEX,
       { timeout: 15_000 }

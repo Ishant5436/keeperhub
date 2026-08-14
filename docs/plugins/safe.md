@@ -19,7 +19,7 @@ For **Get Pending Transactions**, you need a Safe Transaction Service API key:
 
 1. Go to [developer.safe.global](https://developer.safe.global/) and create an API project
 2. Copy the JWT API key
-3. In KeeperHub, go to **Connections > Add Connection > Safe**
+3. In KeeperHub, go to **Settings > Organization > Connections** and add a Safe connection
 4. Paste the API key and save
 
 ## Actions

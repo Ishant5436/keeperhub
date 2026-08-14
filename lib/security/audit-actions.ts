@@ -126,6 +126,19 @@ const ACTION_MAP: Record<string, AuditActionDescription> = {
   "tag.updated": { phrase: "updated a tag", kind: "change" },
   "tag.deleted": { phrase: "deleted a tag", kind: "remove" },
   "public_tag.created": { phrase: "created a public tag", kind: "add" },
+  "mcp_connection.created": { phrase: "connected an AI agent", kind: "add" },
+  "mcp_connection.revoked": {
+    phrase: "disconnected an AI agent",
+    kind: "remove",
+  },
+  "mcp_member_scope.changed": {
+    phrase: "changed what a member's AI agents may do",
+    kind: "change",
+  },
+  "mcp_policy.updated": {
+    phrase: "changed the organization's AI agent limit",
+    kind: "change",
+  },
 };
 
 const DELIMITERS = /[._]/g;

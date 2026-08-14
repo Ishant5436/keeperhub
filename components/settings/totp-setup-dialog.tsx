@@ -240,8 +240,8 @@ export function TotpSetupDialog({
         <DialogHeader>
           <DialogTitle>Set up two-factor authentication</DialogTitle>
           <DialogDescription>
-            Scan the QR with an authenticator app and verify a code. Save
-            your backup codes after.
+            Scan the QR with an authenticator app and verify a code. Save your
+            backup codes after.
           </DialogDescription>
         </DialogHeader>
 
@@ -250,8 +250,8 @@ export function TotpSetupDialog({
         {phase === "setup" && (
           <div className="space-y-4">
             <p className="text-muted-foreground text-sm">
-              Scan the QR code in your authenticator app (Google
-              Authenticator, 1Password, Authy), or paste the setup key.
+              Scan the QR code in your authenticator app (Google Authenticator,
+              1Password, Authy), or paste the setup key.
             </p>
             <div className="flex justify-center">
               {setupData ? (
@@ -303,8 +303,8 @@ export function TotpSetupDialog({
                 value={code}
               />
               <p className="text-muted-foreground text-xs">
-                Open your authenticator app and enter the code it is
-                showing right now.
+                Open your authenticator app and enter the code it is showing
+                right now.
               </p>
             </div>
             <DialogFooter>
@@ -324,8 +324,8 @@ export function TotpSetupDialog({
         {phase === "codes" && backupCodes && (
           <div className="space-y-4">
             <p className="text-muted-foreground text-sm">
-              Two-factor is enabled. Save these codes for recovery if you
-              lose your authenticator. Regenerate later from settings.
+              Two-factor is enabled. Save these codes for recovery if you lose
+              your authenticator. Regenerate later from settings.
             </p>
             <TotpBackupCodesPanel codes={backupCodes} />
             <DialogFooter>

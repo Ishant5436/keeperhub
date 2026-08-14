@@ -6,6 +6,7 @@ import {
   getGasTokenUsdFeedAddress,
   isTestnetChain,
 } from "@/lib/web3/chainlink-feeds";
+import { SPONSORSHIP_CHAINS } from "@/lib/web3/sponsorship-chains-meta";
 
 describe("getGasTokenUsdFeedAddress", () => {
   it("prices Polygon gas with the POL feed, not an ETH feed", () => {
@@ -43,5 +44,19 @@ describe("isTestnetChain", () => {
     for (const chainId of [1, 137, 8453, 42_161]) {
       expect(isTestnetChain(chainId)).toBe(false);
     }
+  });
+});
+
+describe("every billable sponsorship chain has a price feed", () => {
+  // A mainnet on the sponsorship surface with no feed is billed at the
+  // hardcoded fallback price. The primary guard is the type annotation on
+  // GAS_TOKEN_USD_FEEDS, which makes that a compile error; this is the
+  // runtime backstop for anyone who widens the annotation.
+  const billable = SPONSORSHIP_CHAINS.filter((chain) => !chain.isTestnet);
+
+  it.each(billable)("$name ($chainId) resolves a gas-token USD feed", ({
+    chainId,
+  }) => {
+    expect(getGasTokenUsdFeedAddress(chainId)).toBeDefined();
   });
 });

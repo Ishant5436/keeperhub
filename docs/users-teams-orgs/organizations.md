@@ -9,19 +9,26 @@ Organizations allow multiple users to collaborate on workflows. All members of a
 
 ## Accessing Organizations
 
-Open the "Manage Organizations" modal from the user menu to view and manage your organizations.
+The organization switcher in the top bar lists every organization you belong
+to. Selecting one switches to it. Each row also carries a settings icon that
+opens that organization's settings without switching to it.
 
-The modal contains two tabs:
+Organization settings live under Settings > Organization:
 
-- **Organizations**: View and manage organizations you belong to
-- **Invitations**: View pending invitations from other organizations
+- **General**: name, slug, and creating another organization
+- **Users**: members and the invitations you have sent
+- **Organization security**, **Notifications**, **Billing**, **Plans**,
+  **Wallets**, **Spending limits**, **Connections**, and **Projects and tags**
+
+Invitations addressed to *you* are personal rather than organizational, so
+they sit under Settings > Account > Profile.
 
 ## Creating an Organization
 
 To create a new organization:
 
-1. Open the Manage Organizations modal
-2. Click "Create Organization"
+1. Go to Settings > Organization > General
+2. Choose to create an organization
 3. Enter the required information:
    - **Organization Name**: Display name for the organization (e.g., "Acme Inc.")
    - **Slug**: URL identifier for the organization (e.g., "acme-inc")
@@ -33,23 +40,23 @@ The slug is used in URLs and must be unique. It should contain only lowercase le
 
 Organization members can invite others to join:
 
-1. Navigate to the organization settings
-2. Enter the email address of the person to invite
+1. Go to Settings > Organization > Users
+2. Enter the email address of the person to invite and pick a role
 3. Send the invitation
 
-The invited user will see the invitation in their Invitations tab and can accept or decline.
+The invited user will see it under Settings > Account > Profile and can accept
+or decline. Invitations you have sent stay listed on the Users page until they
+are answered.
 
-**Note**: Invitations are created successfully even if the invitation email fails to deliver. The invitation remains valid and can be accessed through the invitation link or the user's Invitations tab.
+**Note**: Invitations are created successfully even if the invitation email fails to deliver. The invitation remains valid and can be accessed through the invitation link or under Settings > Account > Profile.
 
 ## Managing Invitations
 
-In the Invitations tab:
+Under Settings > Account > Profile you can:
 
-- View all pending invitations
+- View all pending invitations addressed to you
 - Accept invitations to join organizations
 - Decline invitations you do not wish to accept
-
-When no invitations are pending, the tab displays "No pending invitations."
 
 ## Shared Workflows
 
@@ -64,11 +71,23 @@ Workflows created within an organization are automatically shared with all membe
 
 Members can leave an organization at any time:
 
-1. Open the Manage Organizations modal
-2. Select the organization you want to leave
-3. Click **Leave Organization**
+1. Go to Settings > Organization > General
+2. Under Leave or delete, click **Leave**
+3. Confirm
 
-If you are the sole owner, you must transfer ownership to another accepted member before leaving. Select a member to promote to owner during the leave process.
+An organization has exactly one owner. If that is you, leaving means handing
+it over, so the confirmation asks which accepted member takes it. Pending
+invitations do not count: only someone who has already joined can become the
+owner.
+
+If you are the owner and the only member, there is nobody to hand it to. Leave
+is unavailable and deleting the organization is the way out.
+
+## Deleting an Organization
+
+Only the owner can delete an organization. Go to Settings > Organization >
+General and click **Delete** under Leave or delete. Its workflows, members and
+wallet go with it, and this cannot be undone.
 
 ## Roles
 

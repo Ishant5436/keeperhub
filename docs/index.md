@@ -98,8 +98,10 @@ Pick the path that matches how you work:
 | Calling from a backend service | [API](/getting-started/api) |
 | Working from a terminal | [CLI](/getting-started/cli) |
 
-All four provision a Turnkey wallet automatically on signup and include a monthly allowance of
-sponsored gas, so a first run does not require funding anything. See
+All four provision a Turnkey wallet automatically on signup. Eligible EVM transactions may use
+KeeperHub's monthly gas sponsorship, but sponsorship covers network fees only and depends on the
+network, sender routing, mempool path, and available credits. Any native value or tokens being
+transferred must still be funded. See [Gas Management](/wallet-management/gas) and
 [Getting Started](/getting-started).
 
 ## Coming from Another Platform?

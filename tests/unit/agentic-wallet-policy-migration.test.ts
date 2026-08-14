@@ -66,7 +66,6 @@ describe("reconcileBaselinePolicies", () => {
   it("returns noop for every baseline when sub-org is up-to-date", async () => {
     const client = buildClientWithExactBaseline();
     const result = await reconcileBaselinePolicies({
-      // biome-ignore lint/suspicious/noExplicitAny: stub matches Turnkey ApiClient surface for the methods used
       client: client as any,
       subOrgId: "sub-1",
     });
@@ -80,7 +79,6 @@ describe("reconcileBaselinePolicies", () => {
   it("creates missing policies (empty starting state)", async () => {
     const client = buildClient([]);
     const result = await reconcileBaselinePolicies({
-      // biome-ignore lint/suspicious/noExplicitAny: stub matches Turnkey ApiClient surface for the methods used
       client: client as any,
       subOrgId: "sub-1",
     });
@@ -101,7 +99,6 @@ describe("reconcileBaselinePolicies", () => {
     }));
     const client = buildClient(initial);
     const result = await reconcileBaselinePolicies({
-      // biome-ignore lint/suspicious/noExplicitAny: stub matches Turnkey ApiClient surface for the methods used
       client: client as any,
       subOrgId: "sub-1",
     });
@@ -137,7 +134,6 @@ describe("reconcileBaselinePolicies", () => {
     }));
     const client = buildClient(initial);
     const result = await reconcileBaselinePolicies({
-      // biome-ignore lint/suspicious/noExplicitAny: stub matches Turnkey ApiClient surface for the methods used
       client: client as any,
       subOrgId: "sub-1",
     });

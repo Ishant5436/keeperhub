@@ -206,8 +206,8 @@ Billing-aware observability layered onto the org model. Plan distribution, per-o
 | `org.executions.30d` | Workflow executions per org in the last 30 days | `org_slug`, `plan` | DB |
 | `org.executions.month` | Workflow executions per org since start of current calendar month | `org_slug`, `plan` | DB |
 | `org.plan_usage_ratio` | Current-month executions / monthly plan limit (0 when unlimited) | `org_slug`, `plan` | DB |
-| `mrr.usd_cents` | Approximate MRR in USD cents per plan (PLANS table * current tier) | `plan` | DB |
-| `mrr.usd_cents.total` | Approximate total MRR across all plans | - | DB |
+| `mrr.usd_cents` | Approximate MRR in USD cents per plan (PLANS table * current tier) | `plan`, `tier`, `billing_status` | DB |
+| `mrr.usd_cents.total` | Approximate committed MRR across all plans (excludes trials) | - | DB |
 | `billing.subscription.created` | Subscriptions created (paid plan attached after checkout) | `plan`, `tier` | API |
 | `billing.subscription.updated` | Subscription update events from the billing provider | `plan` | API |
 | `billing.subscription.canceled` | Subscriptions canceled (provider-side or downgraded to free) | `plan`, `tier` | API |
@@ -218,7 +218,19 @@ Billing-aware observability layered onto the org model. Plan distribution, per-o
 
 **Billing status values** (`billing_status` label): `active`, `trialing`, `past_due`, `canceled`, `unpaid`, `paused`, `none` (orgs without a subscription row).
 
-**MRR caveat:** `mrr.usd_cents` is computed from `lib/billing/plans.ts` × the org's current `(plan, tier)` tuple, summed across subscriptions in `active`, `trialing`, or `past_due` status. Stripe Dashboard remains the source of truth for accounting; this gauge exists for trend visibility only.
+**MRR caveat:** `mrr.usd_cents` is computed from `lib/billing/plans.ts` × the org's current `(plan, tier)` tuple, for every subscription in `active`, `trialing`, or `past_due` status. Stripe Dashboard remains the source of truth for accounting; this gauge exists for trend visibility only.
+
+**Committed vs trial MRR:** `mrr.usd_cents.total` sums `active` and `past_due` subscriptions only. A trialing org has not been charged, so it must not appear in a revenue figure. Its list price still ships on `mrr.usd_cents` under `billing_status="trialing"`, so trial pipeline revenue stays visible:
+
+```promql
+# committed revenue in USD
+max(keeperhub_mrr_usd_cents_total{cluster=~"$cluster", namespace="keeperhub"}) / 100
+
+# trial pipeline revenue in USD, not yet earned
+sum(max by (plan, tier, billing_status) (keeperhub_mrr_usd_cents{cluster=~"$cluster", namespace="keeperhub", billing_status="trialing"})) / 100
+```
+
+`past_due` counts as committed because the subscription is still on the plan and the invoice is being retried.
 
 ### Workflow Definition Metrics
 

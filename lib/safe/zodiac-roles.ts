@@ -11,7 +11,6 @@
  */
 
 import { ethers } from "ethers";
-// biome-ignore lint/style/useImportType: rolesAbi is a runtime value, not a type
 import { rolesAbi } from "zodiac-roles-sdk";
 
 /**

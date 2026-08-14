@@ -44,8 +44,8 @@ from wallet sign-in instead. See [Headless Onboarding](/api/headless-onboarding)
 
 ## 2. Fund the wallet, if the workflow spends
 
-Your organization's Turnkey wallet is provisioned on signup and gets a monthly allowance of
-sponsored gas on mainnet.
+Your organization's Turnkey wallet is provisioned on signup. Eligible transactions on supported
+EVM mainnets and testnets may use the organization's monthly sponsored-gas allowance.
 
 Sponsorship pays the **network fee**, not the value moved. A workflow that sends 0.1 ETH still
 needs 0.1 ETH in the wallet, and an ERC-20 transfer still needs the token balance. Sponsorship

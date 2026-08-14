@@ -275,7 +275,6 @@ describe.skipIf(SKIP_INFRA_TESTS)("Full Pipeline E2E", () => {
   /**
    * Helper to run workflow-runner script (simulates K8s job)
    */
-  // biome-ignore lint/suspicious/useAwait: async needed for return type Promise, implementation uses new Promise
   async function runWorkflowRunner(
     workflowId: string,
     executionId: string,

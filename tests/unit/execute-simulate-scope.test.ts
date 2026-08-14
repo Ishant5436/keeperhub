@@ -18,6 +18,27 @@ const {
   mockSimulateToken: vi.fn(),
 }));
 
+// The auth path reads the scope epoch and records liveness; neither is what
+// these tests exercise, so both are stubbed to their no-change answers.
+vi.mock("@/lib/mcp/scope-policy", () => ({
+  DEFAULT_EPOCH: 0,
+  effectiveScope: (scope: string) => scope,
+  getScopePolicy: vi.fn().mockResolvedValue({
+    epoch: 0,
+    memberMaxScope: null,
+    orgMaxScope: null,
+  }),
+  getScopePolicyForMint: vi.fn().mockResolvedValue({
+    epoch: 0,
+    memberMaxScope: null,
+    orgMaxScope: null,
+  }),
+}));
+
+vi.mock("@/lib/mcp/connections", () => ({
+  touchConnection: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: { query: { users: { findFirst: mockUsersFindFirst } } },
 }));

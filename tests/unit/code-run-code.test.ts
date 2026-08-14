@@ -57,7 +57,6 @@ async function expectSuccess(
   overrides: Partial<RunCodeCoreInput>
 ): Promise<SuccessResult> {
   const result = await run(overrides);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(result.success).toBe(true);
   return result as SuccessResult;
 }
@@ -66,7 +65,6 @@ async function expectFailure(
   overrides: Partial<RunCodeCoreInput>
 ): Promise<FailureResult> {
   const result = await run(overrides);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(result.success).toBe(false);
   return result as FailureResult;
 }

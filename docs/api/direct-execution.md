@@ -319,7 +319,13 @@ Successful broadcast requests return HTTP `202 Accepted`:
 }
 ```
 
-The execution runs synchronously. Status will be `completed` or `failed` when the request returns. `transactionHash` and `transactionLink` are present only when `status` is `completed`.
+The execution runs synchronously. Status will be `completed`, `failed` or
+`unconfirmed` when the request returns. `transactionHash` and `transactionLink`
+are present only when the transfer step reported success, so a `failed` or
+`unconfirmed` response carries neither - including when a transaction was
+broadcast and its receipt could not be confirmed. Retrieve the hash for those
+from `GET /api/execute/{executionId}/status`, which reads the stored execution
+rather than the step result.
 
 ## Call Smart Contract
 
@@ -371,11 +377,23 @@ Read functions return immediately with the result value.
 ```json
 {
   "executionId": "direct_123",
-  "status": "completed"
+  "status": "completed",
+  "transactionHash": "0x...",
+  "transactionLink": "https://etherscan.io/tx/0x..."
 }
 ```
 
-Write functions execute synchronously and return execution status.
+Write functions execute synchronously. `status` is `completed`, `failed` or
+`unconfirmed` by the time the request returns.
+
+`transactionHash` is present whenever a transaction reached the chain, which
+includes `failed` and `unconfirmed`. A call that reverts still produced a
+transaction, and the hash is how you find out what the chain said about it. It
+is absent only when the call never broadcast - a guard, a validation error, or
+a failure before submission.
+
+`transactionLink` accompanies the hash for a successful broadcast. A reverted
+call returns the hash without a link.
 
 ## Check and Execute
 
@@ -624,9 +642,11 @@ Check the status of a direct execution.
   "executionId": "direct_123",
   "status": "completed",
   "type": "transfer",
+  "network": "11155111",
   "transactionHash": "0x...",
   "transactionLink": "https://etherscan.io/tx/0x...",
   "sponsored": false,
+  "retryCount": 0,
   "receipts": [
     {
       "hash": "0x...",
@@ -639,12 +659,42 @@ Check the status of a direct execution.
     }
   ],
   "gasUsedWei": "21000000000000",
+  "gasPriceWei": "1163827869",
+  "estimatedCostUsd": null,
   "result": {...},
   "error": null,
   "createdAt": "2024-01-01T00:00:00Z",
   "completedAt": "2024-01-01T00:00:15Z"
 }
 ```
+
+**Other fields:**
+
+- `network`: the chain identifier the request supplied, stored verbatim as a
+  string. The form is decided by the value, not by the field: both `chainId`
+  and the deprecated `network` alias accept a numeric chain ID or a known chain
+  name, so `"11155111"` and `"sepolia"` are each reachable through either.
+  Do not key a chain lookup on this without handling both forms. A body
+  carrying neither field is rejected with a 400 before an execution row exists,
+  so this is never `null` on the endpoints documented here.
+  When a body sends both, the routes disagree about which wins: `contract-call`
+  takes `network`, while `transfer` and `check-and-execute` take `chainId`.
+  Send one.
+- `retryCount`: internal re-submissions of a node execution, which is
+  `/api/execute/node` and is not covered by this page. It is always `0` for the
+  transfer, contract-call and check-and-execute endpoints documented here,
+  whatever happened internally - those paths never set it. A `0` is therefore
+  not evidence that no nonce replacement or gas bump occurred.
+- `gasPriceWei`: the effective gas price, as a decimal string. On EVM chains
+  this is in wei. On Solana it is the micro-lamports-per-compute-unit price of
+  the priority component, as described in
+  [Gas Management](../wallet-management/gas.md).
+  Do not multiply it by `gasUsedWei`: that field is already a cost
+  (`gasUsed * effectiveGasPrice`), so the product squares the price. The figure
+  in gas units is the per-receipt `gasUsed` above, and multiplying that is a
+  cost on EVM chains only.
+- `estimatedCostUsd`: reserved, and always `null` today. Nothing populates it;
+  it awaits a price-oracle integration. Do not branch on it being non-null.
 
 **Receipts:**
 
@@ -670,8 +720,21 @@ read calls and simulations.
 
 - `pending`: Queued for execution
 - `running`: Currently executing
+- `unconfirmed`: Broadcast, but the receipt could not be read conclusively yet.
+  **Non-terminal.** Keep polling. Do not re-send the request with a fresh
+  `Idempotency-Key`, which would risk a second transaction: see
+  [Idempotency](#idempotency) and
+  [Zero to a Verified Onchain Transaction](/guides/first-verified-transaction).
 - `completed`: Successfully completed
 - `failed`: Execution failed
+
+Treat this list as a lower bound rather than a closed set. A client that routes an
+unrecognised status into a failing `default` branch will report a failure for an
+execution that is still settling, and one that responds by retrying with a new
+idempotency key can put a second transaction onchain. Decide terminality from the
+`X-Poll-Interval-Hint` response header rather than from the status string: the
+server computes it from its own terminal set, so it stays correct for statuses
+added after your client shipped. `0` means terminal.
 
 `sponsored` is `true` when the write was gas-sponsored and broadcast through
 a relayer or smart-account path rather than your org's EOA wallet — see
@@ -699,16 +762,24 @@ Direct execution endpoints return detailed error information:
 - `429`: Rate limit exceeded
 - `400`: Invalid request parameters
 
-An `insufficient_scope` response names both scopes so the caller can reauthorize with the right one:
+An `insufficient_scope` response names the scope the endpoint needs and the one
+this connection is allowed:
 
 ```json
 {
   "error": "insufficient_scope",
-  "message": "This endpoint requires the `mcp:write` OAuth scope. The current token has `mcp:read`.",
+  "message": "This endpoint requires the `mcp:write` OAuth scope. This connection is allowed `mcp:read`. Reconnecting will not raise it: the limit is set by an organization owner or admin under Settings > Developer > Agents. Do not retry; ask them to raise it.",
+  "retryable": false,
   "required_scope": "mcp:write",
   "granted_scope": "mcp:read"
 }
 ```
+
+`granted_scope` is what the connection may do right now, which is not always the
+scope the token was issued with. An organization can cap what its agents may do,
+and a cap is applied on every call, so a token issued with `mcp:admin` reports
+`mcp:read` here while a read-only cap is in force. Reauthorizing with a wider
+scope does not lift a cap; only an owner or admin can, in the Agents settings.
 
 Broadcasting requires `mcp:write`. A dry run (`simulate: true`) neither signs nor broadcasts, so `mcp:read` is sufficient.
 

@@ -41,7 +41,11 @@ export function TwoFactorSection(): React.ReactElement | null {
   const [manageOpen, setManageOpen] = useState(false);
 
   const sessionUser = session.data?.user as
-    | { email?: string | null; name?: string | null; isAnonymous?: boolean | null }
+    | {
+        email?: string | null;
+        name?: string | null;
+        isAnonymous?: boolean | null;
+      }
     | undefined;
   const userIsAnonymous = sessionUser
     ? isAnonymousUserShape(sessionUser)

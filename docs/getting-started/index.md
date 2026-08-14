@@ -29,8 +29,25 @@ that sends 0.1 ETH still needs 0.1 ETH in the wallet. See
 
 Read-only workflows, including most monitoring, never need a funded wallet at all.
 
+### Your first transaction, without funding anything
+
+Sponsored gas covers the network fee, and a write that moves no tokens needs nothing else. So you
+can land a real mainnet transaction before you fund anything at all: call `approve(spender, 0)` on
+any ERC-20 contract.
+
+It changes state, it produces a transaction hash you can open on a block explorer, and it transfers
+nothing, so it succeeds on an empty wallet. USDC on Base is
+`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, and any address will do as the spender.
+
+Worth knowing because most templates read data and send alerts. Those are useful, but they produce
+no transaction, so they cannot give you the moment where you see your own hash confirm on mainnet.
+A zero-value write is the shortest path to that.
+
 ## If you are new to the model
 
 A workflow is a **trigger** plus a sequence of **actions**, with **conditions** to branch between
 them. [Core Concepts](/concepts) covers the vocabulary; you do not need it to finish any of the
 four paths above.
+
+
+

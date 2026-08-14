@@ -1,7 +1,6 @@
 import "server-only";
 
 import { ethers } from "ethers";
-// biome-ignore lint/style/useImportType: callsPlannedForApplyRole, encodeCalls, processPermissions are runtime
 import {
   callsPlannedForApplyRole,
   encodeCalls,

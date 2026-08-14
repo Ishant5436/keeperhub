@@ -324,6 +324,10 @@ export const organization = pgTable("organization", {
   // (e.g. ["totp"], ["email"], or both); null/empty means no extra requirement.
   enforceMfa: boolean("enforce_mfa").notNull().default(false),
   enforcedMfaFactors: jsonb("enforced_mfa_factors"),
+  // Ceiling on what any MCP connection in this org may hold. Null means no
+  // ceiling, which is what every org predating the setting gets, so nothing
+  // an agent already does stops working on deploy.
+  mcpMaxScope: text("mcp_max_scope"),
 });
 
 export const member = pgTable(
@@ -337,6 +341,12 @@ export const member = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").default("member").notNull(),
+    // Ceiling on what this person's MCP agents may do in this organization,
+    // set by an owner or admin. It lives on the membership rather than on a
+    // connection because every `mcp add` registers a new client: a cap tied to
+    // a connection would be shed by reconnecting. Null means the organization
+    // ceiling alone applies.
+    mcpMaxScope: text("mcp_max_scope"),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [

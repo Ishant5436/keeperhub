@@ -17,7 +17,7 @@ Send messages to Discord channels using webhook URLs. No bot setup required.
 
 1. In Discord, go to **Server Settings > Integrations > Webhooks**
 2. Click **New Webhook**, select a channel, and copy the webhook URL
-3. In KeeperHub, go to **Connections > Add Connection > Discord**
+3. In KeeperHub, go to **Settings > Organization > Connections** and add a Discord connection
 4. Paste the webhook URL and save
 
 ## Send Message

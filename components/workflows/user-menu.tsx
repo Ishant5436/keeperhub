@@ -1,18 +1,7 @@
 "use client";
 
 import { useSetAtom } from "jotai";
-import {
-  Bot,
-  Copy,
-  CreditCard,
-  FolderTree,
-  Key,
-  LogOut,
-  Plug,
-  Rocket,
-  Settings,
-  Users,
-} from "lucide-react";
+import { Copy, LogOut, Rocket, Settings, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -22,12 +11,6 @@ import {
   isSingleProviderSignInInitiated,
 } from "@/components/auth/dialog";
 import { ManageOrgsModal } from "@/components/organization/manage-orgs-modal";
-import { ApiKeysOverlay } from "@/components/overlays/api-keys-overlay";
-import { ConnectAgentOverlay } from "@/components/overlays/connect-agent-overlay";
-import { IntegrationsOverlay } from "@/components/overlays/integrations-overlay";
-import { useOverlay } from "@/components/overlays/overlay-provider";
-import { ProjectsAndTagsOverlay } from "@/components/overlays/projects-and-tags-overlay";
-import { SettingsOverlay } from "@/components/overlays/settings-overlay";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,10 +22,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toChecksumAddress, truncateAddress } from "@/lib/address-utils";
 import { isWalletEmail } from "@/lib/auth/wallet-constants";
 import { signOut, useSession } from "@/lib/auth-client";
-import { isBillingEnabled } from "@/lib/billing/feature-flag";
 import {
   hasNotificationType,
   useNotificationStatus,
@@ -126,13 +113,11 @@ const AuthenticatedUserMenu = (): React.ReactElement => {
       toast.error("Could not copy address");
     }
   };
-  const { open: openOverlay } = useOverlay();
   const [orgModalOpen, setOrgModalOpen] = useState(false);
   const { organization } = useOrganization();
   const { isOwner } = useActiveMember();
   const router = useRouter();
   const openGettingStarted = useSetAtom(gettingStartedOpenAtom);
-  const showBilling = isOwner && isBillingEnabled();
   const { status: notificationStatus, refresh: refreshNotifications } =
     useNotificationStatus(isOwner ? organization?.id : null);
   const showAvatarDot = notificationStatus.unreadCount > 0;
@@ -197,8 +182,8 @@ const AuthenticatedUserMenu = (): React.ReactElement => {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>
-            <div className="flex min-w-0 flex-col space-y-1">
+          <DropdownMenuLabel className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 flex-col space-y-1">
               <p className="truncate font-medium text-sm leading-none">
                 {session?.user?.name || "User"}
               </p>
@@ -221,10 +206,39 @@ const AuthenticatedUserMenu = (): React.ReactElement => {
                 </p>
               )}
             </div>
+            <div className="h-8 w-px shrink-0 bg-border" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label="Account settings"
+                  className="relative shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => router.push("/settings")}
+                  type="button"
+                >
+                  <Settings className="size-4" />
+                  {showBillingDot && (
+                    <span
+                      aria-hidden="true"
+                      className="-top-0.5 -right-0.5 absolute size-2 rounded-full bg-destructive"
+                      data-testid="billing-notification-dot"
+                    />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Account settings</TooltipContent>
+            </Tooltip>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <div className="lg:hidden">
-            <DropdownMenuItem onClick={() => setOrgModalOpen(true)}>
+            <DropdownMenuItem
+              onClick={() =>
+                router.push(
+                  organization?.id
+                    ? `/settings/${organization.id}/organization`
+                    : "/settings"
+                )
+              }
+            >
               <Users className="size-4" />
               <span className="truncate">
                 {organization?.name ?? "Organization"}
@@ -232,44 +246,6 @@ const AuthenticatedUserMenu = (): React.ReactElement => {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </div>
-          <DropdownMenuItem onClick={() => openOverlay(SettingsOverlay)}>
-            <Settings className="size-4" />
-            <span>Settings</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() =>
-              openOverlay(ConnectAgentOverlay, undefined, { size: "2xl" })
-            }
-          >
-            <Bot className="size-4" />
-            <span>Connect an agent</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openOverlay(IntegrationsOverlay)}>
-            <Plug className="size-4" />
-            <span>Connections</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openOverlay(ApiKeysOverlay)}>
-            <Key className="size-4" />
-            <span>API Keys</span>
-          </DropdownMenuItem>
-          {showBilling && (
-            <DropdownMenuItem onClick={() => router.push("/billing")}>
-              <CreditCard className="size-4" />
-              <span className="flex-1">Billing</span>
-              {showBillingDot && (
-                <span
-                  aria-hidden="true"
-                  className="size-2 rounded-full bg-destructive"
-                  data-testid="billing-notification-dot"
-                />
-              )}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onClick={() => openOverlay(ProjectsAndTagsOverlay)}>
-            <FolderTree className="size-4" />
-            <span>Projects and Tags</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => openGettingStarted(true)}>
             <Rocket className="size-4" />
             <span>Getting started</span>
@@ -281,6 +257,8 @@ const AuthenticatedUserMenu = (): React.ReactElement => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* Kept only to consume the `?digestSettings=<orgId>` deep link that
+          existing digest emails still point at. Nothing opens it from here. */}
       <ManageOrgsModal
         consumeDeepLink
         onOpenChange={setOrgModalOpen}

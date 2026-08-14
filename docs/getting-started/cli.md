@@ -80,14 +80,15 @@ kh run logs <run-id>
 
 ## 4. Call a contract directly
 
-For a one-off call with no workflow around it:
+For a one-off call with no workflow around it, start on a testnet. The examples below use Ethereum
+Sepolia (`11155111`); use `kh chain list` to choose another enabled testnet if needed.
 
 ```bash
 # Read a value
-kh execute contract-call --chain 1 --contract 0x... --method balanceOf --args '["0x..."]'
+kh execute contract-call --chain 11155111 --contract 0x... --method balanceOf --args '["0x..."]'
 
 # Write, and wait for the transaction
-kh execute contract-call --chain 1 --contract 0x... --method transfer \
+kh execute contract-call --chain 11155111 --contract 0x... --method transfer \
   --args '["0x...","1000"]' --wait
 ```
 

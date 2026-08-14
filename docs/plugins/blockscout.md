@@ -38,12 +38,15 @@ Each action has a **Chain** selector backed by hosted Blockscout instances, so n
 
 For a chain not in the list above, or to use a self-hosted instance or an API key:
 
-1. In KeeperHub, go to **Connections > Add Connection > Blockscout**
-2. Set the **Blockscout Instance URL** (for example `https://gnosis.blockscout.com`)
-3. Optionally add an **API Key** for higher rate limits
-4. Save the connection and select it on the action
+1. On the Blockscout node, set the **Blockscout Instance URL** (for example
+   `https://gnosis.blockscout.com`)
+2. Optionally add an **API Key** for higher rate limits
 
-A connection's instance URL takes precedence over the Chain selector.
+These are set on the action itself. Blockscout is not offered in
+Settings > Organization > Connections, because the public Ethereum mainnet
+instance works without a credential.
+
+An instance URL takes precedence over the Chain selector.
 
 ## Get Address Balance
 

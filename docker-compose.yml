@@ -77,6 +77,18 @@ x-env-service-keys: &env_service_keys
   # into the internal_service_hmac_secrets store so signed requests verify.
   INTERNAL_SERVICE_HMAC_SECRET: ${INTERNAL_SERVICE_HMAC_SECRET:-bG9jYWwtZGV2LWludGVybmFsLXNlcnZpY2UtaG1hYzA=}
 
+# anvil 1.7.1, the newest foundry release, pinned by digest and defined
+# once so the two anvil services cannot drift apart. `latest` on GHCR is
+# foundry's nightly tag, not a release: it moves daily, and the
+# 2026-08-13 nightly shipped an anvil that could not fork any OP-stack
+# chain at all ("network family optimism is not enabled in this build").
+# `stable` is unmaintained and still points at 1.5.1 from 2025-12-22, so
+# pin an explicit version instead. Keep in step with the FOUNDRY_IMAGE in
+# .github/workflows/e2e-tests-ephemeral.yml, which starts the same forks
+# on the cache-hit path while these services serve the cache-miss path.
+# Override FOUNDRY_IMAGE to try a different anvil without editing files.
+x-foundry-image: &foundry_image ${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:v1.7.1@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd}
+
 # -----------------------------------------------------------------------------
 # Services
 # -----------------------------------------------------------------------------
@@ -710,7 +722,7 @@ services:
       - test
 
   test-anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: *foundry_image
     container_name: keeperhub-test-anvil
     ports:
       - "8546:8545"
@@ -736,7 +748,7 @@ services:
   # Set ANVIL_FORK_MAINNET_URL to a private node that serves historical
   # state for higher rate limits and consistent block pinning.
   test-anvil-fork-mainnet:
-    image: ghcr.io/foundry-rs/foundry:latest
+    image: *foundry_image
     container_name: keeperhub-test-anvil-fork-mainnet
     ports:
       - "8548:8545"

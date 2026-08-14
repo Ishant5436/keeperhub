@@ -54,14 +54,14 @@
       "path": "/api/workflows/{workflowId}",
       "route_file": "app/api/workflows/[workflowId]/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 215
+      "line": 230
     },
     {
       "method": "DELETE",
       "path": "/api/workflows/{workflowId}/executions",
       "route_file": "app/api/workflows/[workflowId]/executions/route.ts",
       "source": "docs/api/executions.md",
-      "line": 311
+      "line": 315
     },
     {
       "method": "GET",
@@ -146,7 +146,7 @@
       "path": "/api/execute/{executionId}/status",
       "route_file": "app/api/execute/[executionId]/status/route.ts",
       "source": "docs/api/direct-execution.md",
-      "line": 615
+      "line": 633
     },
     {
       "method": "GET",
@@ -174,7 +174,7 @@
       "path": "/api/mcp/schemas",
       "route_file": "app/api/mcp/schemas/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 369
+      "line": 384
     },
     {
       "method": "GET",
@@ -251,7 +251,7 @@
       "path": "/api/workflows/executions/{executionId}/logs",
       "route_file": "app/api/workflows/executions/[executionId]/logs/route.ts",
       "source": "docs/api/executions.md",
-      "line": 168
+      "line": 172
     },
     {
       "method": "GET",
@@ -265,35 +265,35 @@
       "path": "/api/workflows/executions/{executionId}/wait",
       "route_file": "app/api/workflows/executions/[executionId]/wait/route.ts",
       "source": "docs/api/executions.md",
-      "line": 125
+      "line": 129
     },
     {
       "method": "GET",
       "path": "/api/workflows/public",
       "route_file": "app/api/workflows/public/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 322
+      "line": 337
     },
     {
       "method": "GET",
       "path": "/api/workflows/{workflowId}",
       "route_file": "app/api/workflows/[workflowId]/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 51
+      "line": 66
     },
     {
       "method": "GET",
       "path": "/api/workflows/{workflowId}/code",
       "route_file": "app/api/workflows/[workflowId]/code/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 287
+      "line": 302
     },
     {
       "method": "GET",
       "path": "/api/workflows/{workflowId}/download",
       "route_file": "app/api/workflows/[workflowId]/download/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 279
+      "line": 294
     },
     {
       "method": "GET",
@@ -342,7 +342,7 @@
       "path": "/api/workflows/{workflowId}",
       "route_file": "app/api/workflows/[workflowId]/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 193
+      "line": 208
     },
     {
       "method": "POST",
@@ -384,14 +384,14 @@
       "path": "/api/execute/check-and-execute",
       "route_file": "app/api/execute/check-and-execute/route.ts",
       "source": "docs/api/direct-execution.md",
-      "line": 383
+      "line": 401
     },
     {
       "method": "POST",
       "path": "/api/execute/contract-call",
       "route_file": "app/api/execute/contract-call/route.ts",
       "source": "docs/api/direct-execution.md",
-      "line": 327
+      "line": 333
     },
     {
       "method": "POST",
@@ -405,14 +405,14 @@
       "path": "/api/executions/{executionId}/cancel",
       "route_file": "app/api/executions/[executionId]/cancel/route.ts",
       "source": "docs/api/authentication.md",
-      "line": 80
+      "line": 83
     },
     {
       "method": "POST",
       "path": "/api/hub/featured",
       "route_file": "app/api/hub/featured/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 361
+      "line": 376
     },
     {
       "method": "POST",
@@ -489,63 +489,63 @@
       "path": "/api/workflow/{workflowId}/execute",
       "route_file": "app/api/workflow/[workflowId]/execute/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 230
+      "line": 245
     },
     {
       "method": "POST",
       "path": "/api/workflows/create",
       "route_file": "app/api/workflows/create/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 84
+      "line": 99
     },
     {
       "method": "POST",
       "path": "/api/workflows/{id}/execute",
       "route_file": "app/api/workflows/[workflowId]/execute/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 184
+      "line": 199
     },
     {
       "method": "POST",
       "path": "/api/workflows/{id}/webhook",
       "route_file": "app/api/workflows/[workflowId]/webhook/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 184
+      "line": 199
     },
     {
       "method": "POST",
       "path": "/api/workflows/{workflowId}/claim",
       "route_file": "app/api/workflows/[workflowId]/claim/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 295
+      "line": 310
     },
     {
       "method": "POST",
       "path": "/api/workflows/{workflowId}/duplicate",
       "route_file": "app/api/workflows/[workflowId]/duplicate/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 271
+      "line": 286
     },
     {
       "method": "POST",
       "path": "/api/workflows/{workflowId}/execute",
       "route_file": "app/api/workflows/[workflowId]/execute/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 227
+      "line": 242
     },
     {
       "method": "POST",
       "path": "/api/workflows/{workflowId}/simulate",
       "route_file": "app/api/workflows/[workflowId]/simulate/route.ts",
       "source": "docs/api/direct-execution.md",
-      "line": 717
+      "line": 788
     },
     {
       "method": "POST",
       "path": "/api/workflows/{workflowId}/webhook",
       "route_file": "app/api/workflows/[workflowId]/webhook/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 263
+      "line": 278
     },
     {
       "method": "PUT",
@@ -566,7 +566,7 @@
       "path": "/api/workflows/{workflowId}/go-live",
       "route_file": "app/api/workflows/[workflowId]/go-live/route.ts",
       "source": "docs/api/workflows.md",
-      "line": 303
+      "line": 318
     }
   ]
 }

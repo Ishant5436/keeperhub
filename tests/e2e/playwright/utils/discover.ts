@@ -158,7 +158,6 @@ export async function getInteractiveElements(
       return null;
     };
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: DOM element classification requires extensive branching
     const suggestLocator = (el: Element): string => {
       const testId = el.getAttribute("data-testid");
       if (testId) {
@@ -202,7 +201,6 @@ export async function getInteractiveElements(
       return tag;
     };
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: browser-context function with independent disability checks, cannot be extracted
     const getDisabledReason = (el: Element): string | null => {
       const reasons: string[] = [];
 
@@ -343,7 +341,6 @@ export async function getPageStructure(page: Page): Promise<PageStructure> {
   const title = await page.title();
   const url = page.url();
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accessibility tree traversal with many node types
   const structure = await page.evaluate(() => {
     // biome-ignore lint/suspicious/noExplicitAny: polyfill for esbuild decorator
     if (typeof (globalThis as any).__name === "undefined") {
@@ -488,7 +485,6 @@ export async function getAccessibilityTree(
  *   - main:
  *     - button "Start building"
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: element grouping logic with multiple region detection heuristics
 function parseAriaSnapshot(snapshot: string): AccessibilityNode {
   const lines = snapshot.split("\n").filter((l) => l.trim().length > 0);
   const root: AccessibilityNode = { role: "page", name: "", children: [] };
@@ -682,7 +678,6 @@ export function diffReports(
 /**
  * Format a state diff as readable markdown.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: markdown report generation with many section types
 export function formatDiff(diff: StateDiff): string {
   const lines: string[] = [];
   lines.push("# State Diff");
@@ -986,7 +981,6 @@ function formatAccessibilityTree(node: AccessibilityNode, depth = 0): string {
   return parts.join("\n");
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-step discovery orchestration
 function formatForClaude(report: DiscoveryReport): string {
   const lines: string[] = [];
 
@@ -1266,7 +1260,6 @@ export function printReport(report: DiscoveryReport): void {
       "searchbox",
       "spinbutton",
     ]);
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: accessibility tree printing with recursive node handling
     const printA11yNode = (node: AccessibilityNode, depth: number): void => {
       const indent = "  ".repeat(depth);
       if (interactiveRoles.has(node.role)) {

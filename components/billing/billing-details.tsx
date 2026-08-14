@@ -1,11 +1,12 @@
 "use client";
 
 import { Loader2, Pencil } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BILLING_API } from "@/lib/billing/constants";
+import { useCachedResource } from "@/lib/hooks/use-cached-resource";
 import { useOrganization } from "@/lib/hooks/use-organization";
 
 type PaymentMethod = {
@@ -36,31 +37,22 @@ function formatBrand(brand: string): string {
 export function BillingDetails(): React.ReactElement {
   const { organization } = useOrganization();
   const orgId = organization?.id;
-  const [data, setData] = useState<BillingDetailsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
 
-  const fetchDetails = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
+  // Remembered per organization, so returning to billing shows the card on
+  // file straight away and only replaces it if it has changed.
+  const details = useCachedResource<BillingDetailsResponse>(
+    orgId ? `billing-details:${orgId}` : null,
+    async () => {
       const response = await fetch(BILLING_API.BILLING_DETAILS);
-      if (response.ok) {
-        const json = (await response.json()) as BillingDetailsResponse;
-        setData(json);
-      } else {
-        setData({ paymentMethod: null, billingEmail: null });
+      if (!response.ok) {
+        return { billingEmail: null, paymentMethod: null };
       }
-    } catch {
-      setData({ paymentMethod: null, billingEmail: null });
-    } finally {
-      setLoading(false);
+      return (await response.json()) as BillingDetailsResponse;
     }
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: orgId drives re-fetch on org switch
-  useEffect(() => {
-    fetchDetails().catch(() => undefined);
-  }, [fetchDetails, orgId]);
+  );
+  const data = details.data ?? null;
+  const loading = details.loading;
 
   async function openPortal(): Promise<void> {
     setPortalLoading(true);
@@ -90,21 +82,23 @@ export function BillingDetails(): React.ReactElement {
           <span>Billing Details</span>
           {hasPaymentMethod && (
             <Button
-              aria-label="Edit billing details"
-              className="size-7 text-muted-foreground hover:text-foreground"
+              className="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
               disabled={portalLoading}
               onClick={() => {
                 openPortal().catch(() => undefined);
               }}
-              size="icon"
+              size="sm"
               variant="ghost"
             >
               <Pencil className="size-3.5" />
+              {portalLoading ? "Opening..." : "Manage payment method"}
             </Button>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      {/* Card and invoice email sit side by side: stacked, each on its own
+          line, they left most of a full-width card empty. */}
+      <CardContent className="flex flex-wrap items-start justify-between gap-x-12 gap-y-4">
         {loading && (
           <div className="flex items-center gap-2 text-muted-foreground text-sm">
             <Loader2 className="size-4 animate-spin" />
@@ -136,7 +130,7 @@ export function BillingDetails(): React.ReactElement {
         )}
 
         {!loading && (
-          <div className="border-t border-border/50 pt-3">
+          <div>
             <p className="text-sm">
               <span className="text-muted-foreground">Invoice Email:</span>{" "}
               {billingEmail ? (

@@ -60,7 +60,7 @@ endpoints all answer this way.
 
 ### Paginated collection
 
-A collection that paginates returns items alongside page metadata and links.
+Most collections that paginate return items alongside page metadata and links.
 
 ```json
 {
@@ -78,14 +78,20 @@ A collection that paginates returns items alongside page metadata and links.
 
 ### Bare array
 
-List endpoints that do not paginate return a plain JSON array with no envelope.
-`GET /api/chains` and `GET /api/workflows` both answer this way.
+Some list endpoints return a plain JSON array with no envelope. `GET /api/chains`
+and `GET /api/workflows` both answer this way.
 
 ```json
 [
   { "chainId": 1, "name": "Ethereum Mainnet" }
 ]
 ```
+
+`GET /api/workflows` accepts `limit` and `offset` and still answers with a bare
+array, so the shape is the same whether or not a page was requested. It reports
+no total; page by requesting successive offsets until a response comes back
+shorter than `limit`. A request for more than the maximum page size is rejected
+rather than trimmed, so a short response always means the end of the list.
 
 When writing a generic client, key the unwrapping on the endpoint rather than
 sniffing the body.

@@ -9,12 +9,36 @@ vi.mock("viem", () => ({
   http: () => ({}),
 }));
 
+const mockLogSystemWarn = vi.fn();
+const mockLogSystemError = vi.fn();
+
+// Only the two emitters are faked. ErrorCategory is passed through from the
+// real module so the category assertions below fail if the constant is
+// renamed or its value changes - a hardcoded copy here would only ever
+// validate the mock against itself, while the error_category label every Loki
+// query and Prometheus alert is built on changed underneath them.
+vi.mock("@/lib/logging", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/logging")>();
+  return {
+    ...actual,
+    logSystemWarn: (...args: unknown[]) => mockLogSystemWarn(...args),
+    logSystemError: (...args: unknown[]) => mockLogSystemError(...args),
+  };
+});
+
+// getGasTokenPriceUsd keeps a module-level price cache and report-throttle
+// keyed by chainId, and no beforeEach can reset them. Every test that asserts
+// on caching or reporting therefore owns a distinct chain id.
 vi.mock("@/lib/web3/chainlink-feeds", () => ({
   AGGREGATOR_V3_ABI: [],
   getGasTokenUsdFeedAddress: (chainId: number) => {
     const feeds: Record<number, string> = {
       1: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+      10: "0x13e3Ee699D1909E989722E753853AE30b17e08c5",
+      137: "0xAB594600376Ec9fD91F8e885dADF0CE036862dE0",
+      5000: "0x0000000000000000000000000000000000005000",
       8453: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+      42161: "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612",
     };
     return feeds[chainId];
   },
@@ -98,6 +122,7 @@ import {
 } from "@/lib/billing/gas-credits";
 import type { PlanLimits } from "@/lib/billing/plans";
 import { getOrgSubscription } from "@/lib/billing/plans-server";
+import { ErrorCategory } from "@/lib/logging";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -217,6 +242,150 @@ describe("getGasTokenPriceUsd", () => {
     const price = await getGasTokenPriceUsd("https://rpc.example.com", 8453);
 
     expect(price).toBe(3000);
+  });
+
+  // Billing on anything other than a fresh oracle read has to be reported,
+  // and how loudly depends on how far the billed number has drifted from an
+  // observed price. The four tests below pin one branch each.
+  it("logs an error when the chain has no configured feed", async () => {
+    const price = await getGasTokenPriceUsd("https://rpc.example.com", 31_337);
+
+    expect(price).toBe(3000);
+    expect(mockReadContract).not.toHaveBeenCalled();
+    expect(mockLogSystemError).toHaveBeenCalledOnce();
+    const [category, message, error, labels] = mockLogSystemError.mock.calls[0];
+    expect(category).toBe(ErrorCategory.BILLING);
+    expect(message).toContain("No gas-token USD price feed configured");
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("31337");
+    expect(labels).toMatchObject({
+      chain_id: "31337",
+      fallback_usd: "3000",
+    });
+    expect(mockLogSystemWarn).not.toHaveBeenCalled();
+  });
+
+  it("logs an error when it bills on the hardcoded fallback", async () => {
+    mockReadContract.mockRejectedValue(new Error("RPC timeout"));
+
+    const price = await getGasTokenPriceUsd("https://rpc.example.com", 42_161);
+
+    expect(price).toBe(3000);
+    expect(mockLogSystemError).toHaveBeenCalledOnce();
+    const [category, message, error, labels] = mockLogSystemError.mock.calls[0];
+    expect(category).toBe(ErrorCategory.BILLING);
+    expect(message).toContain("hardcoded fallback");
+    // The caught error is forwarded, not dropped: without it every Sentry
+    // event for a feed outage is an untyped `Error: undefined` with no stack.
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("RPC timeout");
+    expect(labels).toMatchObject({ chain_id: "42161", fallback_usd: "3000" });
+    expect(mockLogSystemWarn).not.toHaveBeenCalled();
+  });
+
+  it("warns rather than errors when a recent cached price covers the failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const seconds = BigInt(Math.floor(Date.now() / 1000));
+      mockReadContract.mockResolvedValue([
+        BigInt(1),
+        BigInt(250_000_000_000),
+        seconds,
+        seconds,
+        BigInt(1),
+      ]);
+      expect(await getGasTokenPriceUsd("https://rpc.example.com", 137)).toBe(
+        2500
+      );
+
+      // Past the 60s cache TTL, so the next call re-reads the feed and fails.
+      vi.advanceTimersByTime(61_000);
+      mockReadContract.mockRejectedValue(new Error("RPC timeout"));
+
+      const price = await getGasTokenPriceUsd("https://rpc.example.com", 137);
+
+      expect(price).toBe(2500);
+      expect(mockLogSystemError).not.toHaveBeenCalled();
+      expect(mockLogSystemWarn).toHaveBeenCalledOnce();
+      const [category, message, error, labels] =
+        mockLogSystemWarn.mock.calls[0];
+      expect(category).toBe(ErrorCategory.BILLING);
+      expect(message).toContain("billing on cached price");
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("RPC timeout");
+      // The observed price and its age are the whole point of this branch:
+      // without them the warning does not say what is being billed.
+      expect(labels).toMatchObject({
+        chain_id: "137",
+        cached_usd: "2500",
+        cached_age_ms: "61000",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("escalates to an error once the cached price passes the staleness threshold", async () => {
+    vi.useFakeTimers();
+    try {
+      const seconds = BigInt(Math.floor(Date.now() / 1000));
+      mockReadContract.mockResolvedValue([
+        BigInt(1),
+        BigInt(250_000_000_000),
+        seconds,
+        seconds,
+        BigInt(1),
+      ]);
+      expect(await getGasTokenPriceUsd("https://rpc.example.com", 10)).toBe(
+        2500
+      );
+
+      // Past the 1h threshold an oracle answer itself is rejected at, so the
+      // feed has been failing for at least that long.
+      vi.advanceTimersByTime(3_600_001);
+      mockReadContract.mockRejectedValue(new Error("RPC timeout"));
+
+      const price = await getGasTokenPriceUsd("https://rpc.example.com", 10);
+
+      // Still billed on the cached price - it beats the hardcoded constant.
+      // Only the severity changes.
+      expect(price).toBe(2500);
+      expect(mockLogSystemWarn).not.toHaveBeenCalled();
+      expect(mockLogSystemError).toHaveBeenCalledOnce();
+      const [, message, , labels] = mockLogSystemError.mock.calls[0];
+      expect(message).toContain("billing on cached price");
+      expect(labels).toMatchObject({
+        chain_id: "10",
+        cached_usd: "2500",
+        cached_age_ms: "3600001",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a sustained outage once per interval, not once per transaction", async () => {
+    vi.useFakeTimers();
+    try {
+      mockReadContract.mockRejectedValue(new Error("RPC timeout"));
+
+      for (let i = 0; i < 5; i++) {
+        expect(await getGasTokenPriceUsd("https://rpc.example.com", 5000)).toBe(
+          3000
+        );
+      }
+      expect(mockLogSystemError).toHaveBeenCalledOnce();
+
+      // Throttled, not one-shot: the condition is reported again once the
+      // window closes, so a still-broken feed does not go quiet.
+      vi.advanceTimersByTime(300_001);
+      expect(await getGasTokenPriceUsd("https://rpc.example.com", 5000)).toBe(
+        3000
+      );
+      expect(mockLogSystemError).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

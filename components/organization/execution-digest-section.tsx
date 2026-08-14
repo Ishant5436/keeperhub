@@ -55,6 +55,19 @@ type ExecutionDigestSectionProps = {
   canManageBilling: boolean;
 };
 
+/** Stable shape for comparing the form against what is persisted. */
+function serialiseDigest(
+  enabled: boolean,
+  cadences: Set<Cadence>,
+  subscribers: Set<string>
+): string {
+  return JSON.stringify({
+    cadences: [...cadences].sort(),
+    enabled,
+    subscribers: [...subscribers].sort(),
+  });
+}
+
 export function ExecutionDigestSection({
   organizationId,
   canManageBilling,
@@ -70,6 +83,9 @@ export function ExecutionDigestSection({
   const [cadences, setCadences] = useState<Set<Cadence>>(new Set(["weekly"]));
   const [subscribers, setSubscribers] = useState<Set<string>>(new Set());
   const [members, setMembers] = useState<DigestMember[]>([]);
+  // Snapshot of the persisted values, so the form can tell you when it is
+  // holding changes you have not saved yet.
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -85,6 +101,13 @@ export function ExecutionDigestSection({
         setSubscribers(new Set(data.subscriberUserIds));
         setMembers(data.members);
         setEligible(data.eligible);
+        setSaved(
+          serialiseDigest(
+            data.enabled,
+            new Set(data.cadences),
+            new Set(data.subscriberUserIds)
+          )
+        );
       })
       .finally(() => {
         if (active) {
@@ -120,6 +143,23 @@ export function ExecutionDigestSection({
     });
   }, []);
 
+  const dirty =
+    saved !== null && serialiseDigest(enabled, cadences, subscribers) !== saved;
+
+  const handleReset = useCallback(() => {
+    if (!saved) {
+      return;
+    }
+    const previous = JSON.parse(saved) as {
+      enabled: boolean;
+      cadences: Cadence[];
+      subscribers: string[];
+    };
+    setEnabled(previous.enabled);
+    setCadences(new Set(previous.cadences));
+    setSubscribers(new Set(previous.subscribers));
+  }, [saved]);
+
   const handleSave = useCallback(async () => {
     if (enabled && cadences.size === 0) {
       toast.error(DIGEST_REQUIRES_CADENCE_ERROR);
@@ -144,6 +184,7 @@ export function ExecutionDigestSection({
         }
       );
       if (res.ok) {
+        setSaved(serialiseDigest(enabled, cadences, subscribers));
         toast.success("Digest settings saved");
       } else if (res.status === 402) {
         toast.error("Execution digests require a paid plan");
@@ -175,7 +216,7 @@ export function ExecutionDigestSection({
           </p>
           {isBillingEnabled() &&
             (canManageBilling ? (
-              <Button onClick={() => router.push("/billing")} size="sm">
+              <Button onClick={() => router.push("/settings")} size="sm">
                 Upgrade
               </Button>
             ) : (
@@ -280,15 +321,28 @@ export function ExecutionDigestSection({
         </div>
       </div>
 
-      <Button
-        className="w-full"
-        disabled={loading || saving}
-        onClick={handleSave}
-        size="sm"
-        variant="outline"
-      >
-        {saving ? "Saving..." : "Save changes"}
-      </Button>
+      <div className="flex items-center justify-end gap-2">
+        {dirty && !saving && (
+          <span className="mr-auto text-muted-foreground text-xs">
+            Unsaved changes
+          </span>
+        )}
+        <Button
+          disabled={!dirty || saving}
+          onClick={handleReset}
+          size="sm"
+          variant="ghost"
+        >
+          Cancel
+        </Button>
+        <Button
+          disabled={loading || saving || !dirty}
+          onClick={handleSave}
+          size="sm"
+        >
+          {saving ? "Saving..." : "Save changes"}
+        </Button>
+      </div>
     </div>
   );
 }

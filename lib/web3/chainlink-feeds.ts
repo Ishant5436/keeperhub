@@ -3,12 +3,30 @@ import type { Address } from "viem";
 import { SPONSORSHIP_CHAINS } from "@/lib/web3/sponsorship-chains-meta";
 
 /**
+ * The chains that can actually be billed for sponsorship, as a literal union
+ * derived from the shared sponsorship surface. Testnets are excluded because
+ * they are never charged.
+ */
+type BillableChainId = Extract<
+  (typeof SPONSORSHIP_CHAINS)[number],
+  { isTestnet: false }
+>["chainId"];
+
+/**
  * Chainlink native-gas-token/USD price feed addresses per chain. Gas is paid in
  * each chain's native token, so the feed must match that token: ETH on the L1
  * and the ETH L2s, POL on Polygon. Pricing Polygon gas with an ETH feed
  * overstates its USD cost by orders of magnitude. All feeds report 8 decimals.
+ *
+ * The `Record<BillableChainId, Address>` half of the annotation is what makes
+ * adding a mainnet to SPONSORSHIP_CHAINS without a feed a compile error rather
+ * than a runtime surprise: an unmapped chain is billed at
+ * `FALLBACK_ETH_PRICE_USD`, which tracks nothing. Extra entries for chains
+ * outside the sponsorship surface stay legal via the `Record<number, Address>`
+ * half.
  */
-const GAS_TOKEN_USD_FEEDS: Record<number, Address> = {
+const GAS_TOKEN_USD_FEEDS: Record<number, Address> &
+  Record<BillableChainId, Address> = {
   1: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419", // Ethereum ETH/USD
   10: "0x13e3Ee699D1909E989722E753853AE30b17e08c5", // Optimism ETH/USD
   137: "0xAB594600376Ec9fD91F8e885dADF0CE036862dE0", // Polygon POL/USD

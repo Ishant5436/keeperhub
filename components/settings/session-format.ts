@@ -1,4 +1,10 @@
-import { Laptop, type LucideIcon, Monitor, Smartphone, Tablet } from "lucide-react";
+import {
+  Laptop,
+  type LucideIcon,
+  Monitor,
+  Smartphone,
+  Tablet,
+} from "lucide-react";
 
 const RELATIVE_TIME = new Intl.RelativeTimeFormat(undefined, {
   numeric: "auto",
@@ -30,6 +36,43 @@ export function relativeTime(iso: string): string {
  * the org-admin per-member sessions view so both describe devices the
  * same way.
  */
+const MOBILE = /iphone|android.*mobile/;
+const TABLET = /ipad|android(?!.*mobile)/;
+
+// Ordered: Edge and Chrome both claim to be Safari, and Edge claims Chrome.
+const BROWSERS: readonly [needle: string, name: string][] = [
+  ["firefox", "Firefox"],
+  ["edg/", "Edge"],
+  ["chrome", "Chrome"],
+  ["safari", "Safari"],
+];
+
+const OPERATING_SYSTEMS: readonly [needle: string, name: string][] = [
+  ["mac os x", "macOS"],
+  ["windows", "Windows"],
+  ["linux", "Linux"],
+  ["iphone", "iOS"],
+  ["ipad", "iOS"],
+  ["android", "Android"],
+];
+
+function firstMatch(
+  table: readonly [needle: string, name: string][],
+  haystack: string
+): string | undefined {
+  return table.find(([needle]) => haystack.includes(needle))?.[1];
+}
+
+function deviceIcon(lower: string): LucideIcon {
+  if (MOBILE.test(lower)) {
+    return Smartphone;
+  }
+  if (TABLET.test(lower)) {
+    return Tablet;
+  }
+  return Laptop;
+}
+
 export function describeUserAgent(ua: string | null): {
   label: string;
   icon: LucideIcon;
@@ -38,28 +81,7 @@ export function describeUserAgent(ua: string | null): {
     return { label: "Unknown device", icon: Monitor };
   }
   const lower = ua.toLowerCase();
-  const isMobile = /iphone|android.*mobile/.test(lower);
-  const isTablet = /ipad|android(?!.*mobile)/.test(lower);
-  const browser = lower.includes("firefox")
-    ? "Firefox"
-    : lower.includes("edg/")
-      ? "Edge"
-      : lower.includes("chrome")
-        ? "Chrome"
-        : lower.includes("safari")
-          ? "Safari"
-          : "Browser";
-  const os = lower.includes("mac os x")
-    ? "macOS"
-    : lower.includes("windows")
-      ? "Windows"
-      : lower.includes("linux")
-        ? "Linux"
-        : lower.includes("iphone") || lower.includes("ipad")
-          ? "iOS"
-          : lower.includes("android")
-            ? "Android"
-            : "Unknown OS";
-  const icon = isMobile ? Smartphone : isTablet ? Tablet : Laptop;
-  return { label: `${browser} on ${os}`, icon };
+  const browser = firstMatch(BROWSERS, lower) ?? "Browser";
+  const os = firstMatch(OPERATING_SYSTEMS, lower) ?? "Unknown OS";
+  return { icon: deviceIcon(lower), label: `${browser} on ${os}` };
 }

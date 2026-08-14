@@ -124,7 +124,6 @@ export function buildIterationGroups<T extends IterationLogFields>(
  * recursively on iteration sub-arrays so nested For Each nodes can find
  * their children in the full log set.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: nested For Each + time-window partitioning requires branching
 export function groupLogsByIteration<T extends IterationLogFields>(
   logs: T[],
   lookup?: ChildLogsLookup<T>

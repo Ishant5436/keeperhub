@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isWalletEmail } from "@/lib/auth/wallet-constants";
-import { useSession } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { handleGuardError } from "@/lib/client/handle-guard-error";
 import {
   runWalletStepUp,
@@ -29,7 +29,7 @@ import { Overlay } from "./overlay";
 import { useOverlay } from "./overlay-provider";
 import type { OverlayComponentProps } from "./types";
 
-type ApiKey = {
+export type ApiKey = {
   id: string;
   name: string | null;
   keyPrefix: string;
@@ -62,7 +62,7 @@ const SCOPE_LABELS: Record<string, string> = {
  * Overlay for creating a new API key.
  * Pushed onto the stack from ApiKeysOverlay.
  */
-function CreateApiKeyOverlay({
+export function CreateApiKeyOverlay({
   overlayId,
   onCreated,
   endpoint,
@@ -283,7 +283,7 @@ function CreateApiKeyOverlay({
  * a confirmation click; the generic ConfirmOverlay can't collect a
  * second factor without bloating its API.
  */
-function DeleteApiKeyOverlay({
+export function DeleteApiKeyOverlay({
   overlayId,
   keyId,
   onDelete,
@@ -575,12 +575,15 @@ function ApiKeysList({
 /**
  * Hook for managing API keys state and operations
  */
-function useApiKeys(
+export function useApiKeys(
   listEndpoint: string,
   deleteEndpoint: (id: string) => string
 ) {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // Organisation keys are scoped server-side to the active org, so the org id
+  // belongs in the query identity: switching org must reload the list.
+  const { data: activeOrg } = authClient.useActiveOrganization();
 
   const {
     items: apiKeys,
@@ -597,7 +600,7 @@ function useApiKeys(
         }
         return r.json() as Promise<Page<ApiKey>>;
       }),
-    listEndpoint
+    `${listEndpoint}:${activeOrg?.id ?? ""}`
   );
 
   useEffect(() => {
@@ -780,13 +783,22 @@ function KeyActivityButton({
 /**
  * Main API Keys management overlay with tabs for Webhook and Organisation keys.
  */
-export function ApiKeysOverlay({
-  overlayId,
+type ApiKeysPanelProps = {
+  highlightId?: string;
+  highlightType?: "api_key" | "org_api_key";
+  onKeyCreated?: (key: string, type: "webhook" | "organisation") => void;
+};
+
+/**
+ * Key list, scopes and activity. Rendered inline on the settings route; the
+ * overlay below is the thin legacy wrapper around the same panel.
+ */
+export function ApiKeysPanel({
   highlightId,
   highlightType,
   onKeyCreated,
-}: ApiKeysOverlayProps) {
-  const { push, closeAll } = useOverlay();
+}: ApiKeysPanelProps) {
+  const { push } = useOverlay();
   const { isAdmin, role } = useActiveMember();
   const { data: session } = useSession();
   // Webhook keys are personal, so their creator is the current user.
@@ -821,33 +833,30 @@ export function ApiKeysOverlay({
   const orgReadOnlyReason =
     "Only organization admins or owners can manage these keys.";
 
+  const createKey = (): void => {
+    push(CreateApiKeyOverlay, {
+      onCreated: (key: ApiKey) => {
+        currentKeys.handleKeyCreated(key);
+        if (key.key) {
+          onKeyCreated?.(key.key, activeTab as "webhook" | "organisation");
+        }
+      },
+      endpoint: createEndpoint,
+      keyType: activeTab as "webhook" | "organisation",
+    });
+  };
+
   return (
-    <Overlay
-      actions={[
-        {
-          label: "New API Key",
-          variant: "outline",
-          disabled: activeTab === "organisation" && !canManageOrgKeys,
-          onClick: () =>
-            push(CreateApiKeyOverlay, {
-              onCreated: (key: ApiKey) => {
-                currentKeys.handleKeyCreated(key);
-                if (key.key) {
-                  onKeyCreated?.(
-                    key.key,
-                    activeTab as "webhook" | "organisation"
-                  );
-                }
-              },
-              endpoint: createEndpoint,
-              keyType: activeTab as "webhook" | "organisation",
-            }),
-        },
-        { label: "Done", onClick: closeAll },
-      ]}
-      overlayId={overlayId}
-      title="API Keys"
-    >
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          disabled={activeTab === "organisation" && !canManageOrgKeys}
+          onClick={createKey}
+          variant="outline"
+        >
+          New API Key
+        </Button>
+      </div>
       <McpEndpointCard />
       <Tabs className="-mt-2" onValueChange={setActiveTab} value={activeTab}>
         <TabsList className="w-full">
@@ -939,6 +948,28 @@ export function ApiKeysOverlay({
           )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+export function ApiKeysOverlay({
+  overlayId,
+  highlightId,
+  highlightType,
+  onKeyCreated,
+}: ApiKeysOverlayProps) {
+  const { closeAll } = useOverlay();
+  return (
+    <Overlay
+      actions={[{ label: "Done", onClick: closeAll }]}
+      overlayId={overlayId}
+      title="API Keys"
+    >
+      <ApiKeysPanel
+        highlightId={highlightId}
+        highlightType={highlightType}
+        onKeyCreated={onKeyCreated}
+      />
     </Overlay>
   );
 }

@@ -26,16 +26,19 @@ KeeperHub has two types of API keys:
 
 | Prefix | Scope | Created in | Used for |
 |--------|-------|------------|----------|
-| `kh_` | Organization | Settings > API Keys > Organisation | REST API, MCP server, Claude Code plugin |
-| `wfb_` | User | Settings > API Keys | Webhook triggers |
+| `kh_` | Organization | Settings > Developer > API keys > Organisation keys | REST API, MCP server, Claude Code plugin |
+| `wfb_` | User | Settings > Developer > API keys > Webhook keys | Webhook triggers |
 
 ### Creating API Keys
 
-1. Navigate to Settings in the KeeperHub dashboard
-2. Select "API Keys"
-3. For organization keys (`kh_`), switch to the Organisation tab
-4. Click "Create New Key"
+1. Open Settings in the KeeperHub dashboard
+2. Under Developer, select "API keys"
+3. Use "Organisation keys" for `kh_` keys, or "Webhook keys" for `wfb_` keys
+4. Create the key
 5. Copy the key immediately. It will only be shown once.
+
+Creating organization keys is limited to owners and admins. Any member can
+create a webhook key.
 
 ### Key Security
 

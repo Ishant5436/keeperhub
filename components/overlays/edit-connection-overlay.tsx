@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, type Integration } from "@/lib/api-client";
@@ -48,14 +49,23 @@ type EditConnectionOverlayProps = {
 };
 
 /**
- * Overlay for editing an existing connection
+ * Credential form for an existing connection. Rendered inline in settings;
+ * the overlay below is the legacy wrapper around the same form.
  */
-export function EditConnectionOverlay({
-  overlayId,
+export function EditConnectionForm({
   integration,
   onSuccess,
   onDelete,
-}: EditConnectionOverlayProps) {
+  onCancel,
+  inline = false,
+}: {
+  integration: Integration;
+  onSuccess?: () => void;
+  onDelete?: () => void;
+  onCancel?: () => void;
+  /** Renders its own Test and Update buttons instead of overlay actions. */
+  inline?: boolean;
+}) {
   const { push, closeAll } = useOverlay();
   const integrationWithConfig = integration as IntegrationWithOptionalConfig;
   const hasConfigFromProps =
@@ -365,35 +375,7 @@ export function EditConnectionOverlay({
   };
 
   return (
-    <Overlay
-      actions={[
-        {
-          label: "Delete",
-          variant: "ghost",
-          onClick: handleDelete,
-          disabled: loading || saving || testing,
-        },
-        {
-          label: "Test",
-          variant: "outline",
-          onClick: handleTest,
-          loading: testing,
-          disabled: loading || saving,
-        },
-        {
-          label: "Update",
-          onClick: handleSave,
-          loading: saving,
-          disabled: loading,
-        },
-      ]}
-      overlayId={overlayId}
-      title={`Edit ${getLabel(integration.type)}`}
-    >
-      <p className="-mt-2 mb-4 text-muted-foreground text-sm">
-        Update your connection credentials
-      </p>
-
+    <>
       {loading ? (
         <div className="flex items-center gap-2 py-8 text-muted-foreground">
           <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -414,6 +396,51 @@ export function EditConnectionOverlay({
           </div>
         </div>
       )}
+
+      {inline && !loading && (
+        <div className="flex items-center justify-end gap-2 pt-4">
+          {onCancel && (
+            <Button onClick={onCancel} size="sm" variant="ghost">
+              Cancel
+            </Button>
+          )}
+          <Button
+            disabled={saving}
+            onClick={handleTest}
+            size="sm"
+            variant="outline"
+          >
+            {testing ? "Testing..." : "Test"}
+          </Button>
+          <Button disabled={saving} onClick={handleSave} size="sm">
+            {saving ? "Saving..." : "Update"}
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function EditConnectionOverlay({
+  overlayId,
+  integration,
+  onSuccess,
+  onDelete,
+}: EditConnectionOverlayProps) {
+  return (
+    <Overlay
+      overlayId={overlayId}
+      title={`Edit ${getLabel(integration.type)}`}
+    >
+      <p className="-mt-2 mb-4 text-muted-foreground text-sm">
+        Update your connection credentials
+      </p>
+      <EditConnectionForm
+        inline
+        integration={integration}
+        onDelete={onDelete}
+        onSuccess={onSuccess}
+      />
     </Overlay>
   );
 }

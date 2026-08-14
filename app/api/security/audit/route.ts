@@ -349,6 +349,15 @@ export async function GET(request: Request) {
     const integrationIds = idsForType("integration");
     const orgKeyIds = idsForType("org_api_key");
     const personalKeyIds = idsForType("api_key");
+    // An agent-access change is about a person, so the row has to name them.
+    // A revoked session carries "<clientId>::<userId>", so the person is the
+    // tail of it.
+    const subjectUserIds = [
+      ...idsForType("mcp_member_scope"),
+      ...idsForType("mcp_connection").map((id) =>
+        id.slice(id.indexOf("::") + 2)
+      ),
+    ].filter((id) => id.length > 0);
     const integrationRows = integrationIds.length
       ? await db
           .select({
@@ -378,6 +387,17 @@ export async function GET(request: Request) {
             )
           )
       : [];
+    const subjectUserRows = subjectUserIds.length
+      ? await db
+          .select({
+            email: users.email,
+            id: users.id,
+            image: users.image,
+            name: users.name,
+          })
+          .from(users)
+          .where(inArray(users.id, subjectUserIds))
+      : [];
     const personalKeyRows = personalKeyIds.length
       ? await db
           .select({ id: apiKeys.id, name: apiKeys.name })
@@ -400,6 +420,30 @@ export async function GET(request: Request) {
     const personalKeyNameMap = new Map(
       personalKeyRows.map((k) => [k.id, k.name])
     );
+    // The affected party is a person, so the feed is given the identity to
+    // render rather than a name it would have to make a chip out of.
+    const subjectUserMap = new Map(subjectUserRows.map((u) => [u.id, u]));
+
+    const subjectUserFor = (
+      type: string | null,
+      id: string | null
+    ): {
+      id: string;
+      name: string | null;
+      email: string | null;
+      image: string | null;
+    } | null => {
+      if (!(type && id)) {
+        return null;
+      }
+      if (type === "mcp_member_scope") {
+        return subjectUserMap.get(id) ?? null;
+      }
+      if (type === "mcp_connection") {
+        return subjectUserMap.get(id.slice(id.indexOf("::") + 2)) ?? null;
+      }
+      return null;
+    };
     const resourceNameFor = (
       type: string | null,
       id: string | null
@@ -519,6 +563,7 @@ export async function GET(request: Request) {
         resourceType: r.resourceType,
         resourceId: r.resourceId,
         resourceName: resourceNameFor(r.resourceType, r.resourceId),
+        resourceUser: subjectUserFor(r.resourceType, r.resourceId),
         version:
           versionByEventId.get(r.id) ??
           (r.resourceType === "workflow" && r.action.endsWith(".created")

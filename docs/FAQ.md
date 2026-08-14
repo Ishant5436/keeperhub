@@ -16,7 +16,7 @@ People use it for things like treasury monitoring, DeFi position management, eve
 ### How do I get started?
 
 1. Create an account at [app.keeperhub.com](https://app.keeperhub.com)
-2. Your organization's Turnkey wallet is provisioned automatically once your email is verified. Open the Wallet tab to see its address
+2. Your organization's Turnkey wallet is provisioned automatically once your email is verified. Open Settings > Organization > Wallets to see its address
 3. Fund your wallet with ETH on the network you want to use (start with Sepolia -- it's free)
 4. Build a workflow with the visual builder or the AI assistant
 5. Test with a manual trigger before turning on automated scheduling
@@ -62,13 +62,13 @@ The tradeoff is that you're trusting Turnkey's enclave infrastructure to be avai
 
 ### How do I fund my wallet?
 
-Transfer ETH to your Turnkey wallet address on the network you want to use. The address is the same across all EVM networks -- you can find it in the Wallet tab.
+Transfer ETH to your Turnkey wallet address on the network you want to use. The address is the same across all EVM networks -- you can find it under Settings > Organization > Wallets.
 
 Start on Sepolia. You can get free test ETH from public faucets and experiment without risking real money.
 
 ### Can I export my private key?
 
-Yes. Turnkey supports private key export. Use the Export Key feature in the Wallet tab to retrieve your key if you need to migrate to another wallet solution.
+Yes. Turnkey supports private key export. Use the Export Key feature under Settings > Organization > Wallets to retrieve your key if you need to migrate to another wallet solution.
 
 ---
 
@@ -198,7 +198,7 @@ Your KeeperHub connection is separate. Check it with `/keeperhub:status`, and re
 
 ### What's the difference between `kh_` and `wfb_` API keys?
 
-`kh_` keys are organization-scoped -- used for the REST API, MCP server, and Claude Code plugin. Create them in Settings > API Keys > Organisation tab. `wfb_` keys are user-scoped and used for webhook triggers. Most of the time you want a `kh_` key.
+`kh_` keys are organization-scoped, used for the REST API, MCP server, and Claude Code plugin. Create them in Settings > Developer > API keys > Organisation keys. `wfb_` keys are user-scoped and used for webhook triggers; they live beside the organisation keys under Webhook keys. Most of the time you want a `kh_` key.
 
 ### Can I run the MCP server for remote agents (not just local)?
 
@@ -214,7 +214,7 @@ Yes. The REST API at `app.keeperhub.com/api` covers workflow CRUD, execution, an
 
 ### What notification channels are supported?
 
-[Discord](/plugins/discord) (webhook URL), [Slack](/plugins/slack) (bot token), [Telegram](/plugins/telegram) (bot token), [SendGrid email](/plugins/sendgrid), and generic [webhooks](/plugins/webhook). Set up connections once in account settings and reuse them across workflows.
+[Discord](/plugins/discord) (webhook URL), [Slack](/plugins/slack) (bot token), [Telegram](/plugins/telegram) (bot token), [SendGrid email](/plugins/sendgrid), and generic [webhooks](/plugins/webhook). Set up connections once in Settings > Organization > Connections and reuse them across workflows.
 
 ### Can I export or version-control my workflows?
 

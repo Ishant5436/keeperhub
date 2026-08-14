@@ -3,6 +3,7 @@ import {
   redactAllUrls,
   redactSecretUrls,
   scrubRpcUrls,
+  scrubSentryEvent,
 } from "@/lib/rpc/scrub-rpc-urls";
 
 // Fake key markers. Long enough to trip the generic 32+ char path mask;
@@ -295,5 +296,55 @@ describe("scrubRpcUrls - CHAIN_RPC_CONFIG provider coverage", () => {
         expect(out).not.toContain(c.fakeKey);
       }
     }
+  });
+});
+
+describe("scrubSentryEvent", () => {
+  it("scrubs the exception chain, so a linked cause cannot leak a key", () => {
+    // LinkedErrors flattens `cause` into extra exception.values entries, which
+    // is how a viem HttpRequestError wrapping a keyed RPC URL reaches Sentry
+    // even when the top-level error message is clean.
+    const event = {
+      exception: {
+        values: [
+          { value: "HTTP request failed" },
+          {
+            value: `URL: https://eth-mainnet.g.alchemy.com/v2/${FAKE_ALCHEMY_KEY}`,
+          },
+        ],
+      },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.exception.values[1].value).not.toContain(FAKE_ALCHEMY_KEY);
+    expect(event.exception.values[1].value).toContain(
+      "eth-mainnet.g.alchemy.com"
+    );
+    expect(event.exception.values[0].value).toBe("HTTP request failed");
+  });
+
+  it("scrubs message, logentry and breadcrumbs", () => {
+    const event = {
+      message: `boom https://mainnet.infura.io/v3/${FAKE_INFURA_KEY}`,
+      logentry: {
+        message: `entry https://mainnet.infura.io/v3/${FAKE_INFURA_KEY}`,
+      },
+      breadcrumbs: [
+        { message: `crumb https://mainnet.infura.io/v3/${FAKE_INFURA_KEY}` },
+      ],
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.message).not.toContain(FAKE_INFURA_KEY);
+    expect(event.logentry.message).not.toContain(FAKE_INFURA_KEY);
+    expect(event.breadcrumbs[0].message).not.toContain(FAKE_INFURA_KEY);
+  });
+
+  it("leaves an event with no free-text fields alone", () => {
+    const event: Record<string, unknown> = {};
+    expect(() => scrubSentryEvent(event)).not.toThrow();
+    expect(event).toEqual({});
   });
 });

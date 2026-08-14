@@ -83,9 +83,7 @@ function createAdapter(): EvmChainAdapter {
 
   return new EvmChainAdapter(
     11_155_111,
-    // biome-ignore lint/suspicious/noExplicitAny: test mock
     gasStrategy as any,
-    // biome-ignore lint/suspicious/noExplicitAny: test mock
     nonceManager as any
   );
 }
@@ -101,7 +99,6 @@ describe("EvmChainAdapter preflight signer address", () => {
 
     try {
       await adapter.executeContractCall(
-        // biome-ignore lint/suspicious/noExplicitAny: test mock
         signer as any,
         {
           contractAddress: "0x779877A7B0D9E8603169DdbD7836e478b4624789",
@@ -109,7 +106,6 @@ describe("EvmChainAdapter preflight signer address", () => {
           functionKey: "approve",
           args: [SPENDER, AMOUNT],
         },
-        // biome-ignore lint/suspicious/noExplicitAny: test mock
         { currentNonce: 5 } as any,
         { gasOverrides: {} }
       );
@@ -137,7 +133,6 @@ describe("EvmChainAdapter preflight signer address", () => {
 
     try {
       await adapter.executeContractCall(
-        // biome-ignore lint/suspicious/noExplicitAny: test mock
         signer as any,
         {
           contractAddress: "0x779877A7B0D9E8603169DdbD7836e478b4624789",
@@ -146,7 +141,6 @@ describe("EvmChainAdapter preflight signer address", () => {
           args: [SPENDER, AMOUNT],
           value: ethValue,
         },
-        // biome-ignore lint/suspicious/noExplicitAny: test mock
         { currentNonce: 5 } as any,
         { gasOverrides: {} }
       );

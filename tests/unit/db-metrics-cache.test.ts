@@ -158,6 +158,20 @@ const FINISHED_AGE_17_RE =
 const FINISHED_AGE_ZERO_RE =
   /keeperhub_workflow_executions_finished_age_seconds\s+0(\s|$)/m;
 
+// MRR series. Label order follows the object passed to .set()
+// (plan, tier, billing_status), but stay tolerant of extra labels.
+const MRR_ACTIVE_RE =
+  /keeperhub_mrr_usd_cents\{[^}]*plan="pro"[^}]*tier="25k"[^}]*billing_status="active"[^}]*\}\s+24500/;
+const MRR_TRIALING_RE =
+  /keeperhub_mrr_usd_cents\{[^}]*plan="pro"[^}]*tier="25k"[^}]*billing_status="trialing"[^}]*\}\s+39200/;
+const MRR_PAST_DUE_RE =
+  /keeperhub_mrr_usd_cents\{[^}]*plan="pro"[^}]*tier="25k"[^}]*billing_status="past_due"[^}]*\}\s+4900/;
+const MRR_ENTERPRISE_NO_TIER_RE =
+  /keeperhub_mrr_usd_cents\{[^}]*plan="enterprise"[^}]*tier=""[^}]*billing_status="active"[^}]*\}\s+0/;
+// Unlabeled gauge: name followed by the value, no `{...}` block.
+const MRR_TOTAL_COMMITTED_RE = /keeperhub_mrr_usd_cents_total\s+29400(\s|$)/m;
+const MRR_TOTAL_WITH_TRIALS_RE = /keeperhub_mrr_usd_cents_total\s+68600(\s|$)/m;
+
 describe("updateDbMetrics TTL cache", () => {
   const originalTtl = process.env.DB_METRICS_CACHE_TTL_MS;
 
@@ -176,7 +190,6 @@ describe("updateDbMetrics TTL cache", () => {
 
   afterEach(() => {
     if (originalTtl === undefined) {
-      // biome-ignore lint/performance/noDelete: must truly unset the env var to restore the unset state; assigning "" or undefined changes cache-TTL semantics
       delete process.env.DB_METRICS_CACHE_TTL_MS;
     } else {
       process.env.DB_METRICS_CACHE_TTL_MS = originalTtl;
@@ -391,7 +404,6 @@ describe("keeperhub_workflow_errors_by_workflow gauge", () => {
 
   afterEach(() => {
     if (originalTtl === undefined) {
-      // biome-ignore lint/performance/noDelete: must truly unset the env var to restore the unset state; assigning "" or undefined changes cache-TTL semantics
       delete process.env.DB_METRICS_CACHE_TTL_MS;
     } else {
       process.env.DB_METRICS_CACHE_TTL_MS = originalTtl;
@@ -454,7 +466,6 @@ describe("keeperhub_system_errors_by_category gauge", () => {
 
   afterEach(() => {
     if (originalTtl === undefined) {
-      // biome-ignore lint/performance/noDelete: must truly unset the env var to restore the unset state; assigning "" or undefined changes cache-TTL semantics
       delete process.env.DB_METRICS_CACHE_TTL_MS;
     } else {
       process.env.DB_METRICS_CACHE_TTL_MS = originalTtl;
@@ -521,7 +532,6 @@ describe("keeperhub_workflow_executions_finished_age_seconds gauge", () => {
 
   afterEach(() => {
     if (originalTtl === undefined) {
-      // biome-ignore lint/performance/noDelete: must truly unset the env var to restore the unset state; assigning "" or undefined changes cache-TTL semantics
       delete process.env.DB_METRICS_CACHE_TTL_MS;
     } else {
       process.env.DB_METRICS_CACHE_TTL_MS = originalTtl;
@@ -551,5 +561,99 @@ describe("keeperhub_workflow_executions_finished_age_seconds gauge", () => {
     const out = await getDbMetrics();
     expect(out).toMatch(FINISHED_AGE_17_RE);
     expect(out).not.toMatch(FINISHED_AGE_ZERO_RE);
+  });
+});
+
+// The MRR gauge must carry billing_status so a dashboard can tell
+// committed revenue from trial pipeline revenue, and the total must exclude
+// trials. On prod the old total read $686 while only $294 was committed.
+describe("keeperhub_mrr_usd_cents gauge", () => {
+  const originalTtl = process.env.DB_METRICS_CACHE_TTL_MS;
+
+  beforeEach(() => {
+    __resetDbMetricsCacheForTest();
+    for (const fn of Object.values(dbMocks)) {
+      fn.mockReset();
+    }
+    rebindDefaultDbMockImplementations();
+    process.env.DB_METRICS_CACHE_TTL_MS = "0";
+  });
+
+  afterEach(() => {
+    if (originalTtl === undefined) {
+      delete process.env.DB_METRICS_CACHE_TTL_MS;
+    } else {
+      process.env.DB_METRICS_CACHE_TTL_MS = originalTtl;
+    }
+  });
+
+  it("labels each series with billing_status and keeps trials out of the total", async () => {
+    dbMocks.getBillingStatsFromDb.mockResolvedValue({
+      orgsByPlan: [],
+      orgsExecutions: [],
+      mrrCentsByPlan: [
+        { plan: "pro", tier: "25k", billingStatus: "active", cents: 24_500 },
+        { plan: "pro", tier: "25k", billingStatus: "trialing", cents: 39_200 },
+        { plan: "pro", tier: "25k", billingStatus: "past_due", cents: 4900 },
+      ],
+      mrrCentsTotal: 29_400,
+      trialsByOutcome: [],
+    });
+
+    await updateDbMetrics();
+    const out = await getDbMetrics();
+
+    expect(out).toMatch(MRR_ACTIVE_RE);
+    expect(out).toMatch(MRR_TRIALING_RE);
+    expect(out).toMatch(MRR_PAST_DUE_RE);
+    // Committed only. 68600 was the pre-fix figure that counted trials.
+    expect(out).toMatch(MRR_TOTAL_COMMITTED_RE);
+    expect(out).not.toMatch(MRR_TOTAL_WITH_TRIALS_RE);
+  });
+
+  it("emits an empty tier label for a plan with no tier", async () => {
+    dbMocks.getBillingStatsFromDb.mockResolvedValue({
+      orgsByPlan: [],
+      orgsExecutions: [],
+      mrrCentsByPlan: [
+        { plan: "enterprise", tier: null, billingStatus: "active", cents: 0 },
+      ],
+      mrrCentsTotal: 0,
+      trialsByOutcome: [],
+    });
+
+    await updateDbMetrics();
+
+    expect(await getDbMetrics()).toMatch(MRR_ENTERPRISE_NO_TIER_RE);
+  });
+
+  it("clears the trialing series once the org converts to active", async () => {
+    dbMocks.getBillingStatsFromDb.mockResolvedValueOnce({
+      orgsByPlan: [],
+      orgsExecutions: [],
+      mrrCentsByPlan: [
+        { plan: "pro", tier: "25k", billingStatus: "trialing", cents: 4900 },
+      ],
+      mrrCentsTotal: 0,
+      trialsByOutcome: [],
+    });
+    await updateDbMetrics();
+    expect(await getDbMetrics()).toContain('billing_status="trialing"');
+
+    // The trial converted, so the next scrape reports it as active. reset()
+    // must drop the trialing series rather than strand it at its old value.
+    dbMocks.getBillingStatsFromDb.mockResolvedValue({
+      orgsByPlan: [],
+      orgsExecutions: [],
+      mrrCentsByPlan: [
+        { plan: "pro", tier: "25k", billingStatus: "active", cents: 4900 },
+      ],
+      mrrCentsTotal: 4900,
+      trialsByOutcome: [],
+    });
+    await updateDbMetrics();
+    const out = await getDbMetrics();
+    expect(out).not.toContain('billing_status="trialing"');
+    expect(out).toContain('billing_status="active"');
   });
 });

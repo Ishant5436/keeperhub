@@ -1,5 +1,5 @@
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { start } from "workflow/api";
 import { db } from "@/lib/db";
@@ -16,6 +16,7 @@ import { recordExecutionErrorFinalized } from "@/lib/errors/finalize-error";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { signSqsMessageAttributes } from "@/lib/sqs-message-auth";
 import { executeWorkflow } from "@/lib/workflow/executor/executor.workflow";
+import { calculateTotalSteps } from "@/lib/workflow/executor/progress";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
 
 let _sqsClient: SQSClient | null = null;
@@ -115,6 +116,33 @@ export async function executeWorkflowInBackground(
         and(
           eq(workflowExecutions.id, executionId),
           eq(workflowExecutions.status, "pending")
+        )
+      );
+
+    // Mirrors keeperhub-executor's initializeExecutionProgress (the K8s Job
+    // and in-process/SQS dispatch paths already do this before running).
+    // Without it, total_steps stays NULL forever and the status endpoint's
+    // progress.percentage is stuck at 0 even after a successful run.
+    // Guarded on totalSteps being unset (like the status flip above is
+    // guarded on status) so a duplicate dispatch naming an already-running
+    // executionId can't reset its completedSteps/executionTrace/last-node
+    // fields back to zero mid-flight: this initializes once and is a no-op
+    // on every subsequent call for the same executionId.
+    await db
+      .update(workflowExecutions)
+      .set({
+        totalSteps: calculateTotalSteps(nodes, edges).toString(),
+        completedSteps: "0",
+        executionTrace: [],
+        currentNodeId: null,
+        currentNodeName: null,
+        lastSuccessfulNodeId: null,
+        lastSuccessfulNodeName: null,
+      })
+      .where(
+        and(
+          eq(workflowExecutions.id, executionId),
+          isNull(workflowExecutions.totalSteps)
         )
       );
 

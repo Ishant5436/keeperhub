@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Mail, UserPlus, Wallet } from "lucide-react";
+import { Copy, Link as LinkIcon, Mail, UserPlus, Wallet } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { isAddress } from "viem";
@@ -9,7 +9,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -28,8 +27,21 @@ import { useOrganization } from "@/lib/hooks/use-organization";
 
 type InviteMode = "email" | "wallet";
 
-export function InviteModal() {
-  const [open, setOpen] = useState(false);
+/**
+ * Invite form body. Rendered inline in settings; the dialog below keeps the
+ * old trigger working for surfaces that have not moved yet.
+ */
+export function InviteMemberForm({
+  onDone,
+  onInvited,
+  compact = false,
+}: {
+  onDone?: () => void;
+  /** Fires once an invitation exists, so a pending list can refresh. */
+  onInvited?: () => void;
+  /** One row rather than a stack, for opening inside a card. */
+  compact?: boolean;
+}): React.ReactElement {
   const [mode, setMode] = useState<InviteMode>("email");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
@@ -101,6 +113,7 @@ export function InviteModal() {
       const invitationId = invitationData?.id || invitationData?.invitation?.id;
       if (invitationId) {
         setInviteId(invitationId);
+        onInvited?.();
         toast.success(
           mode === "wallet"
             ? "Invitation created. Share the link so they can sign to join."
@@ -118,6 +131,17 @@ export function InviteModal() {
     }
   };
 
+  const submitLabel = (() => {
+    if (mode === "wallet") {
+      return loading ? "Creating..." : "Create invite link";
+    }
+    return loading ? "Sending..." : "Send invitation";
+  })();
+
+  const inviteLink = inviteId
+    ? `${typeof window === "undefined" ? "" : window.location.origin}/accept-invite/${inviteId}`
+    : "";
+
   const copyInviteLink = () => {
     if (!inviteId) {
       return;
@@ -127,14 +151,194 @@ export function InviteModal() {
     toast.success("Invite link copied to clipboard");
   };
 
-  const copyInviteCode = () => {
-    if (!inviteId) {
-      return;
-    }
-    navigator.clipboard.writeText(inviteId);
-    toast.success("Invite code copied to clipboard");
-  };
+  if (compact) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex min-w-56 flex-1 flex-col gap-1.5">
+            <Label htmlFor="invite-who">
+              {mode === "email" ? "Email address" : "Wallet address"}
+            </Label>
+            <Input
+              disabled={loading}
+              id="invite-who"
+              onChange={(e) =>
+                mode === "email"
+                  ? setEmail(e.target.value)
+                  : setAddress(e.target.value)
+              }
+              placeholder={mode === "email" ? "colleague@example.com" : "0x..."}
+              type={mode === "email" ? "email" : "text"}
+              value={mode === "email" ? email : address}
+            />
+          </div>
 
+          <div className="flex w-36 flex-col gap-1.5">
+            <Label htmlFor="invite-role">Role</Label>
+            <Select
+              onValueChange={(v) => setRole(v as "member" | "admin")}
+              value={role}
+            >
+              <SelectTrigger id="invite-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="member">Member</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            disabled={loading || (mode === "email" ? !email : !address)}
+            onClick={handleInvite}
+          >
+            {submitLabel}
+          </Button>
+          {onDone && (
+            <Button onClick={onDone} variant="ghost">
+              Cancel
+            </Button>
+          )}
+        </div>
+
+        <button
+          className="w-fit text-muted-foreground text-xs underline-offset-2 hover:underline"
+          onClick={() => setMode(mode === "email" ? "wallet" : "email")}
+          type="button"
+        >
+          {mode === "email"
+            ? "Invite by wallet address instead"
+            : "Invite by email instead"}
+        </button>
+
+        {inviteId && (
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">
+              {inviteLink}
+            </code>
+            <Button onClick={copyInviteLink} size="sm" variant="outline">
+              <Copy className="size-3.5" />
+              Copy
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            onClick={() => setMode("email")}
+            size="sm"
+            type="button"
+            variant={mode === "email" ? "default" : "outline"}
+          >
+            <Mail className="mr-2 h-3 w-3" />
+            Email
+          </Button>
+          <Button
+            onClick={() => setMode("wallet")}
+            size="sm"
+            type="button"
+            variant={mode === "wallet" ? "default" : "outline"}
+          >
+            <Wallet className="mr-2 h-3 w-3" />
+            Wallet
+          </Button>
+        </div>
+        {mode === "email" ? (
+          <div className="space-y-2">
+            <Label htmlFor="email">Email Address</Label>
+            <Input
+              disabled={loading}
+              id="email"
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="colleague@example.com"
+              type="email"
+              value={email}
+            />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="wallet-address">Wallet Address</Label>
+            <Input
+              disabled={loading}
+              id="wallet-address"
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="0x..."
+              value={address}
+            />
+            <p className="text-muted-foreground text-xs">
+              The address they sign in with. They will sign a challenge to join.
+            </p>
+          </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="role">Role</Label>
+          <Select
+            onValueChange={(v) => setRole(v as "member" | "admin")}
+            value={role}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="member">
+                Member - Can create workflows
+              </SelectItem>
+              <SelectItem value="admin">
+                Admin - Can manage members and wallets
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {inviteId && (
+          <div className="space-y-2 rounded-lg border p-3">
+            <p className="text-muted-foreground text-xs">
+              {mode === "wallet"
+                ? "Share this link so they can sign in and join."
+                : "Sent by email. Share this link if it does not arrive."}
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">
+                {inviteLink}
+              </code>
+              <Button onClick={copyInviteLink} size="sm" variant="outline">
+                <Copy className="size-3.5" />
+                Copy
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="flex justify-end gap-2 pt-4">
+        {onDone && (
+          <Button onClick={onDone} variant="outline">
+            Close
+          </Button>
+        )}
+        <Button
+          disabled={loading || (mode === "email" ? !email : !address)}
+          onClick={handleInvite}
+        >
+          {mode === "wallet" ? (
+            <LinkIcon className="mr-2 h-4 w-4" />
+          ) : (
+            <Mail className="mr-2 h-4 w-4" />
+          )}
+          {submitLabel}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+export function InviteModal(): React.ReactElement {
+  const [open, setOpen] = useState(false);
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
@@ -150,112 +354,7 @@ export function InviteModal() {
             Send an invitation to join this organization.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              onClick={() => setMode("email")}
-              size="sm"
-              type="button"
-              variant={mode === "email" ? "default" : "outline"}
-            >
-              <Mail className="mr-2 h-3 w-3" />
-              Email
-            </Button>
-            <Button
-              onClick={() => setMode("wallet")}
-              size="sm"
-              type="button"
-              variant={mode === "wallet" ? "default" : "outline"}
-            >
-              <Wallet className="mr-2 h-3 w-3" />
-              Wallet
-            </Button>
-          </div>
-          {mode === "email" ? (
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                disabled={loading}
-                id="email"
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="colleague@example.com"
-                type="email"
-                value={email}
-              />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="wallet-address">Wallet Address</Label>
-              <Input
-                disabled={loading}
-                id="wallet-address"
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="0x..."
-                value={address}
-              />
-              <p className="text-muted-foreground text-xs">
-                The address they sign in with. They will sign a challenge to
-                join.
-              </p>
-            </div>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="role">Role</Label>
-            <Select
-              onValueChange={(v) => setRole(v as "member" | "admin")}
-              value={role}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="member">
-                  Member - Can create workflows
-                </SelectItem>
-                <SelectItem value="admin">
-                  Admin - Can manage members and wallets
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {inviteId && (
-            <div className="space-y-2 rounded-lg border bg-muted p-4">
-              <p className="font-medium text-sm">Invitation Created</p>
-              <div className="flex gap-2">
-                <Button
-                  className="flex-1"
-                  onClick={copyInviteLink}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Copy className="mr-2 h-3 w-3" />
-                  Copy Link
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={copyInviteCode}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Copy className="mr-2 h-3 w-3" />
-                  Copy Code
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button onClick={() => setOpen(false)} variant="outline">
-            Close
-          </Button>
-          <Button
-            disabled={loading || (mode === "email" ? !email : !address)}
-            onClick={handleInvite}
-          >
-            <Mail className="mr-2 h-4 w-4" />
-            {loading ? "Sending..." : "Send Invitation"}
-          </Button>
-        </DialogFooter>
+        <InviteMemberForm onDone={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

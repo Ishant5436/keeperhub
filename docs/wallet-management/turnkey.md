@@ -9,7 +9,7 @@ Turnkey is the wallet provider in KeeperHub. It uses secure enclaves to protect 
 
 ## Creating a Turnkey Wallet
 
-Your organization's Turnkey wallet is provisioned automatically once your email is verified. The wallet is shared across your organization, and its address is visible in the Wallet tab.
+Your organization's Turnkey wallet is provisioned automatically once your email is verified. The wallet is shared across your organization, and its address is visible under Settings > Organization > Wallets.
 
 ## How It Works
 

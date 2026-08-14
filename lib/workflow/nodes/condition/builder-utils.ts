@@ -294,7 +294,6 @@ function unwrapOperand(raw: string): string {
  * Returns the parts and the detected logic operator, or null if
  * neither `&&` nor `||` appears at depth 0.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: character-by-character parsing with paren depth tracking
 function splitTopLevel(
   expr: string
 ): { parts: string[]; logic: "AND" | "OR" } | null {

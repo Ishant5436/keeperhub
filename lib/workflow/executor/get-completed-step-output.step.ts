@@ -55,7 +55,6 @@ fetchCompletedStepOutputStep.maxRetries = 1;
  * path so each iteration recovers its own output, not whichever iteration was
  * last to write.
  */
-// biome-ignore lint/suspicious/useAwait: workflow "use step" requires async
 export async function fetchCompletedStepOutputAtIterationStep(
   executionId: string,
   nodeId: string,

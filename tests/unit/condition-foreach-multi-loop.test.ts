@@ -91,7 +91,6 @@ function buildMaps(
 ): {
   edgesBySource: Map<string, string[]>;
   edgesBySourceHandle: ReturnType<typeof buildEdgesBySourceHandle>;
-  // biome-ignore lint/suspicious/noExplicitAny: TestNode is a minimal stand-in for WorkflowNode from xyflow
   nodeMap: Map<string, any>;
 } {
   const edgesBySource = new Map<string, string[]>();

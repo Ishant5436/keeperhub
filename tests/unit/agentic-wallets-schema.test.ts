@@ -214,7 +214,6 @@ describe("agenticWalletCredits table", () => {
     expect(unique).toBeDefined();
     expect(unique?.config.unique).toBe(true);
     const columns = unique?.config.columns ?? [];
-    // biome-ignore lint/suspicious/noExplicitAny: drizzle index column type is loose
     const names = columns.map((c: any) => c.name);
     expect(names).toContain("sub_org_id");
     expect(names).toContain("allocation_reason");

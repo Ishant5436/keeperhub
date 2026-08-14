@@ -515,7 +515,6 @@ type ManageOrgsModalProps = {
   consumeDeepLink?: boolean;
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex modal with multiple states - refactoring would split related logic
 export function ManageOrgsModal({
   triggerText,
   defaultShowCreateForm = false,

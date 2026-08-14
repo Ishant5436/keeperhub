@@ -3,6 +3,7 @@ import { expect, test } from "./fixtures";
 import { signUpAndVerify as signUpAndVerifyBase } from "./utils/auth";
 import { getDbConnection } from "./utils/connection";
 import { PERSISTENT_TEST_USER_EMAIL } from "./utils/db";
+import { openOrgSettings } from "./utils/settings";
 
 // Regex patterns (moved to top level for performance)
 const SLUG_PATTERN = /test-org-/;
@@ -24,29 +25,22 @@ async function signUpAndVerify(
   return { email };
 }
 
-// Open the organization creation form from Manage Organizations modal
+// Open the organization creation form on the General settings page.
 async function openCreateOrgForm(page: Page): Promise<void> {
-  const orgSwitcher = page.locator('button[role="combobox"]');
-  await orgSwitcher.click();
+  await openOrgSettings(page, "organization");
 
-  await page.locator("text=Manage Organizations").click();
-
-  const dialog = page.locator('[role="dialog"]');
-  await expect(
-    dialog.locator('h2:has-text("Manage Organizations")')
-  ).toBeVisible({ timeout: 5000 });
-
-  // Check if form is already visible (may be shown by default)
-  const orgNameInput = dialog.locator("#org-name");
+  const orgNameInput = page.locator("#new-org-name");
   if (await orgNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-    return; // Form already visible
+    return;
   }
-
-  // Click the "Create New Organization" button to show the form
-  await dialog.locator('button:has-text("Create New Organization")').click();
-
-  // Wait for the org name input to appear (form is now visible)
-  await expect(orgNameInput).toBeVisible({ timeout: 5000 });
+  // Re-click until the form opens: straight after navigation the first click
+  // can land before the handler is wired and be dropped.
+  const openForm = page.getByRole("button", { name: "New organization" });
+  await expect(openForm).toBeVisible({ timeout: 20_000 });
+  await expect(async () => {
+    await openForm.click();
+    await expect(orgNameInput).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 // Open the wallet overlay from the user menu
@@ -132,18 +126,13 @@ test.describe("Organization Management", () => {
       // Open create organization form
       await openCreateOrgForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
-
-      // Fill in organization details
       const orgName = `Test Org ${Date.now()}`;
-      await dialog.locator("#org-name").fill(orgName);
+      await page.locator("#new-org-name").fill(orgName);
 
       // Verify slug is auto-generated
-      const slugInput = dialog.locator("#org-slug");
-      await expect(slugInput).toHaveValue(SLUG_PATTERN);
+      await expect(page.locator("#new-org-slug")).toHaveValue(SLUG_PATTERN);
 
-      // Submit the form
-      await dialog.locator('button:has-text("Create")').click();
+      await page.getByRole("button", { name: "Create organization" }).click();
 
       // Verify success - should redirect or show the new org
       await expect(
@@ -158,13 +147,11 @@ test.describe("Organization Management", () => {
       });
       await openCreateOrgForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
-
       // Type organization name
-      await dialog.locator("#org-name").fill("My Test Organization");
+      await page.locator("#new-org-name").fill("My Test Organization");
 
       // Verify slug is auto-generated with correct format
-      const slugInput = dialog.locator("#org-slug");
+      const slugInput = page.locator("#new-org-slug");
       await expect(slugInput).toHaveValue("my-test-organization");
     });
 
@@ -175,14 +162,12 @@ test.describe("Organization Management", () => {
       });
       await openCreateOrgForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
-
       // Fill in organization name
-      await dialog.locator("#org-name").fill("My Organization");
+      await page.locator("#new-org-name").fill("My Organization");
 
       // Manually edit the slug with unique timestamp
       const customSlug = `custom-slug-${Date.now()}`;
-      const slugInput = dialog.locator("#org-slug");
+      const slugInput = page.locator("#new-org-slug");
       await slugInput.clear();
       await slugInput.fill(customSlug);
 
@@ -190,7 +175,7 @@ test.describe("Organization Management", () => {
       await expect(slugInput).toHaveValue(customSlug);
 
       // Submit and verify success
-      await dialog.locator('button:has-text("Create")').click();
+      await page.getByRole("button", { name: "Create organization" }).click();
       await expect(
         page.locator("[data-sonner-toast]").filter({ hasText: CREATED_PATTERN })
       ).toBeVisible({ timeout: 10_000 });
@@ -206,22 +191,15 @@ test.describe("Organization Management", () => {
 
       // Create a new organization
       await openCreateOrgForm(page);
-      const dialog = page.locator('[role="dialog"]');
 
       const orgName = `Switcher Test Org ${Date.now()}`;
-      await dialog.locator("#org-name").fill(orgName);
-      await dialog.locator('button:has-text("Create")').click();
+      await page.locator("#new-org-name").fill(orgName);
+      await page.getByRole("button", { name: "Create organization" }).click();
 
       // Wait for creation
       await expect(
         page.locator("[data-sonner-toast]").filter({ hasText: CREATED_PATTERN })
       ).toBeVisible({ timeout: 10_000 });
-
-      // Close any open dialogs by pressing Escape
-      await page.keyboard.press("Escape");
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({
-        timeout: 5000,
-      });
 
       // Open org switcher
       const orgSwitcher = page.locator('button[role="combobox"]');

@@ -107,17 +107,14 @@ export function ActiveSessionsSection(): React.ReactElement {
     }
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/user/sessions/${revokeTarget.id}/revoke`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code: dual.totpCode.trim(),
-            emailOtp: dual.emailOtp.trim() || undefined,
-          }),
-        }
-      );
+      const res = await fetch(`/api/user/sessions/${revokeTarget.id}/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: dual.totpCode.trim(),
+          emailOtp: dual.emailOtp.trim() || undefined,
+        }),
+      });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         code?: string;
@@ -183,8 +180,8 @@ export function ActiveSessionsSection(): React.ReactElement {
         <div className="space-y-1">
           <h3 className="font-medium text-sm">Active sessions</h3>
           <p className="text-muted-foreground text-xs">
-            Every device signed in to this account. Revoke any session you
-            don't recognise.{" "}
+            Every device signed in to this account. Revoke any session you don't
+            recognise.{" "}
             {isWallet
               ? "Revoking requires a signature from your wallet."
               : "Revoking requires a code from your email and your authenticator."}
@@ -220,7 +217,10 @@ export function ActiveSessionsSection(): React.ReactElement {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm">{ua.label}</span>
                     {row.isCurrent && (
-                      <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
+                      <Badge
+                        className="h-5 px-1.5 text-[10px]"
+                        variant="secondary"
+                      >
                         This device
                       </Badge>
                     )}

@@ -48,7 +48,7 @@ The API uses a short set of stable, lowercase codes in the `error` field. Some r
 | Code | HTTP status | Meaning | Resolution |
 |------|-------------|---------|------------|
 | `unauthorized` | 401 | Missing or invalid authentication | Include a valid session cookie or API key |
-| `insufficient_scope` | 403 | The session or key lacks the required scope | Use a key with the needed scope |
+| `insufficient_scope` | 403 | The caller is not allowed the required scope | Use a key with the needed scope. For an agent connection, check whether the limit set on the person is holding it below its token's scope |
 | `invalid_input` | 400 | Request validation failed | Check required fields and formats |
 | `not_found` | 404 | Resource does not exist or is not visible to you | Verify the resource id |
 | `conflict` | 409 | Request conflicts with the current state | Reconcile and retry |

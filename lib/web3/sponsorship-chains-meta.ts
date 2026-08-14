@@ -11,7 +11,11 @@ export type SponsorshipChain = {
 // runtime sponsorship preflight and the billing UI, so the two cannot drift.
 // Turnkey supports four mainnets and their canonical testnets; Optimism and
 // BNB are intentionally absent because the Gas Station does not cover them.
-export const SPONSORSHIP_CHAINS: readonly SponsorshipChain[] = [
+// `as const satisfies` rather than a `readonly SponsorshipChain[]` annotation:
+// the literal chainId/isTestnet types survive, which lets chainlink-feeds.ts
+// derive the set of billable chain ids as a type and require a price feed for
+// each one at compile time.
+export const SPONSORSHIP_CHAINS = [
   { chainId: 1, name: "Ethereum", isTestnet: false, symbol: "ETH" },
   { chainId: 137, name: "Polygon", isTestnet: false, symbol: "POL" },
   { chainId: 8453, name: "Base", isTestnet: false, symbol: "ETH" },
@@ -30,7 +34,7 @@ export const SPONSORSHIP_CHAINS: readonly SponsorshipChain[] = [
     isTestnet: true,
     symbol: "ETH",
   },
-];
+] as const satisfies readonly SponsorshipChain[];
 
 export const SPONSORSHIP_CHAIN_IDS: ReadonlySet<number> = new Set(
   SPONSORSHIP_CHAINS.map((c) => c.chainId)

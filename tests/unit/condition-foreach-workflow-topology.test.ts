@@ -120,7 +120,6 @@ for (const edge of edges) {
 
 const edgesBySourceHandle = buildEdgesBySourceHandle(edges);
 
-// biome-ignore lint/suspicious/noExplicitAny: TestNode is a minimal stand-in for WorkflowNode from xyflow
 const nodeMap = new Map<string, any>();
 for (const n of nodes) {
   nodeMap.set(n.id, n);

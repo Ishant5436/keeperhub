@@ -16,10 +16,13 @@
  * Failure mode: if a vendor inlines its key in a shape none of these
  * patterns match (e.g. an opaque 8-char host prefix, or a custom header
  * echoed into a multi-line error body), this helper passes the string
- * through unchanged. The mitigation for that residual risk is a Sentry
- * `beforeSend` hook (tracked as a follow-up) plus the higher-level
- * guidance to log `code` + `shortMessage` instead of full messages
- * (ethers v6 today does not inline `requestUrl` into `shortMessage`).
+ * through unchanged. The remaining mitigation is the higher-level guidance
+ * to log `code` + `shortMessage` instead of full messages (ethers v6 today
+ * does not inline `requestUrl` into `shortMessage`).
+ *
+ * `scrubSentryEvent` below applies this to outbound Sentry events, which is
+ * the only path that carries a raw provider error without going through
+ * `buildErrPayload` first.
  */
 
 const URL_RE = /\bhttps?:\/\/[^\s)'"<>]+|wss?:\/\/[^\s)'"<>]+/gi;
@@ -68,6 +71,47 @@ export function scrubRpcUrls(text: string): string {
     return text;
   }
   return text.replace(URL_RE, maskUrl);
+}
+
+/**
+ * The parts of a Sentry event that carry free text an SDK error can have
+ * inlined a provider URL into. Structural rather than imported from
+ * `@sentry/*` so this module stays dependency-free; the real `ErrorEvent` is
+ * assignable to it at the `beforeSend` call site.
+ */
+type ScrubbableSentryEvent = {
+  message?: string;
+  logentry?: { message?: string };
+  exception?: { values?: { value?: string }[] };
+  breadcrumbs?: { message?: string }[];
+};
+
+/**
+ * Scrub provider secrets out of an outbound Sentry event, in place.
+ *
+ * `logSystemError`/`logSystemWarn` scrub the Loki payload via `buildErrPayload`
+ * but hand `captureException` the original Error, so a viem/ethers error whose
+ * message inlines a keyed RPC URL reaches Sentry verbatim. The `exception`
+ * sweep covers the `cause` chain too: the LinkedErrors integration flattens it
+ * into additional `exception.values` entries, each of which is scrubbed here.
+ */
+export function scrubSentryEvent(event: ScrubbableSentryEvent): void {
+  if (event.message !== undefined) {
+    event.message = scrubRpcUrls(event.message);
+  }
+  if (event.logentry?.message !== undefined) {
+    event.logentry.message = scrubRpcUrls(event.logentry.message);
+  }
+  for (const value of event.exception?.values ?? []) {
+    if (value.value !== undefined) {
+      value.value = scrubRpcUrls(value.value);
+    }
+  }
+  for (const breadcrumb of event.breadcrumbs ?? []) {
+    if (breadcrumb.message !== undefined) {
+      breadcrumb.message = scrubRpcUrls(breadcrumb.message);
+    }
+  }
 }
 
 const URL_PLACEHOLDER = "[REDACTED-URL]";

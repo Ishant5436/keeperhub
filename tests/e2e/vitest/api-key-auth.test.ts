@@ -246,10 +246,9 @@ describe.skipIf(shouldSkip)("API Key Authentication", () => {
       const response = await fetch(`${baseUrl}/api/workflows`, {
         headers: { Authorization: "Bearer kh_invalid_key" },
       });
-      expect(response.status).toBe(200);
-      const workflows = await response.json();
-      expect(Array.isArray(workflows)).toBe(true);
-      expect(workflows.length).toBe(0);
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBeTruthy();
     });
 
     it("should reject malformed API key", async ({ skip }) => {
@@ -259,9 +258,9 @@ describe.skipIf(shouldSkip)("API Key Authentication", () => {
       const response = await fetch(`${baseUrl}/api/workflows`, {
         headers: { Authorization: "Bearer invalid_prefix_key" },
       });
-      expect(response.status).toBe(200);
-      const workflows = await response.json();
-      expect(Array.isArray(workflows)).toBe(true);
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBeTruthy();
     });
   });
 
@@ -524,9 +523,9 @@ describe.skipIf(shouldSkip)("API Key Authentication", () => {
       const response = await fetch(`${baseUrl}/api/workflows`, {
         headers: { Authorization: `Bearer ${expiredKey}` },
       });
-      expect(response.status).toBe(200);
-      const workflows = await response.json();
-      expect(workflows.length).toBe(0);
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBeTruthy();
     });
   });
 
@@ -557,9 +556,9 @@ describe.skipIf(shouldSkip)("API Key Authentication", () => {
       const response = await fetch(`${baseUrl}/api/workflows`, {
         headers: { Authorization: `Bearer ${revokedKey}` },
       });
-      expect(response.status).toBe(200);
-      const workflows = await response.json();
-      expect(workflows.length).toBe(0);
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBeTruthy();
     });
   });
 });

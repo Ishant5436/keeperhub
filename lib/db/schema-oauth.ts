@@ -1,4 +1,12 @@
-import { index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { generateId } from "../utils/id";
 
 export const mcpOauthAuthCodes = pgTable("mcp_oauth_auth_codes", {
@@ -58,12 +66,44 @@ export const mcpOauthRefreshTokens = pgTable(
     scope: text("scope").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    // When this connection last proved itself, so the list can say whether an
+    // agent is still working or has been idle for a month. Written at most
+    // once a minute per row, never once per call.
+    lastUsedAt: timestamp("last_used_at"),
+    // When the person first consented. Refreshing rotates the row, so
+    // createdAt is the age of the current token rather than of the
+    // connection; this is carried forward across rotations.
+    connectedAt: timestamp("connected_at"),
   },
   (table) => [
     index("idx_mcp_refresh_tokens_client").on(table.clientId),
     index("idx_mcp_refresh_tokens_user").on(table.userId),
+    index("idx_mcp_refresh_tokens_org").on(table.organizationId),
   ]
 );
 
 export type McpOauthRefreshToken = typeof mcpOauthRefreshTokens.$inferSelect;
 export type NewMcpOauthRefreshToken = typeof mcpOauthRefreshTokens.$inferInsert;
+
+/**
+ * Invalidation counter for the stateless access tokens a person holds in one
+ * organization.
+ *
+ * Access tokens are self-contained JWTs carrying their own scope, so nothing
+ * about them can be taken back once minted. The epoch is signed into the token
+ * and compared on every call: bumping it here retires every token already out
+ * there, which is what makes revoking and narrowing a scope mean anything
+ * before the token would have expired on its own.
+ */
+export const mcpScopeEpochs = pgTable(
+  "mcp_scope_epochs",
+  {
+    userId: text("user_id").notNull(),
+    organizationId: text("organization_id").notNull(),
+    epoch: integer("epoch").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.organizationId] })]
+);
+
+export type McpScopeEpoch = typeof mcpScopeEpochs.$inferSelect;

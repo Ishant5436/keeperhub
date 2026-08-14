@@ -112,7 +112,9 @@ export function useWalletBalances(): UseWalletBalancesReturn {
   const [supportedTokenBalances, setSupportedTokenBalances] = useState<
     SupportedTokenBalance[]
   >([]);
-  const [loading, setLoading] = useState(false);
+  // True until the first fetch answers: with false, a caller sees an empty
+  // list that has not been asked for yet and reads it as "nothing here".
+  const [loading, setLoading] = useState(true);
 
   const fetchBalances = useCallback(
     async (

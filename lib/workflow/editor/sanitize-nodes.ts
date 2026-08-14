@@ -238,7 +238,6 @@ function extractConfig(
   return config;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing, needs refactor
 function sanitizeNode(raw: Record<string, unknown>): Record<string, unknown> {
   const nodeType = String(raw.type ?? "action");
   const rawData = (raw.data ?? {}) as Record<string, unknown>;

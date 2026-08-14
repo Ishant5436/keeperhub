@@ -1204,9 +1204,13 @@ export async function getEnabledChainNamesFromDb(): Promise<string[]> {
   }
 }
 
-// Subscription statuses that count toward MRR — kept inline in the SQL
+// Subscription statuses that carry a priced tier. Kept inline in the SQL
 // query (active / trialing / past_due). Canceled / unpaid / paused
 // subscriptions do not contribute.
+//
+// Not every priced status is committed revenue. A trialing org pays nothing
+// yet, so it is reported as its own labelled series and left out of the
+// total. See MRR_COMMITTED_STATUSES below.
 
 export type BillingStats = {
   // Org count per (plan, tier, billing_status). One entry per unique
@@ -1229,16 +1233,20 @@ export type BillingStats = {
     monthlyLimit: number;
   }>;
 
-  // Approximate MRR in USD cents per (plan, tier), computed from
-  // PLANS[plan].tiers[tier].monthlyPrice. Stripe remains the source of
-  // truth for accounting.
+  // Approximate MRR in USD cents per (plan, tier, billing_status), computed
+  // from PLANS[plan].tiers[tier].monthlyPrice. Stripe remains the source of
+  // truth for accounting. The billingStatus split lets a consumer separate
+  // committed revenue from trial pipeline revenue.
   mrrCentsByPlan: Array<{
     plan: PlanName;
     tier: TierKey | null;
+    billingStatus: BillingStatus;
     cents: number;
   }>;
 
-  // Total MRR in USD cents across all plans and tiers.
+  // Committed MRR in USD cents across all plans and tiers. Counts the
+  // statuses in MRR_COMMITTED_STATUSES only, so a trialing org contributes
+  // nothing until it converts. Read mrrCentsByPlan for the trial pipeline.
   mrrCentsTotal: number;
 
   // Trial funnel snapshot: orgs that have ever started a trial, by current
@@ -1257,6 +1265,15 @@ const VALID_TRIAL_OUTCOMES: ReadonlySet<string> = new Set<TrialOutcome>([
   "converted",
   "churned",
 ]);
+
+// Billing statuses that count as committed revenue in mrrCentsTotal. A
+// past_due org stays on the plan and is still billed, so it counts. A
+// trialing org pays nothing yet, so it does not.
+//
+// Tested against the parsed status rather than a "not trialing" check, so
+// the total stays correct if the SQL query widens its status filter.
+const MRR_COMMITTED_STATUSES: ReadonlySet<BillingStatus> =
+  new Set<BillingStatus>(["active", "past_due"]);
 
 function emptyBillingStats(): BillingStats {
   return {
@@ -1342,13 +1359,15 @@ export async function getBillingStatsFromDb(): Promise<BillingStats> {
         organizationSubscriptions.tier
       );
 
-    // Active-subscription tier list for MRR computation. We include past_due
+    // Priced-subscription tier list for MRR computation. We include past_due
     // because those orgs are still on the plan; only canceled/unpaid/paused
-    // are excluded.
+    // are excluded. We also include trialing, but the status comes back with
+    // the row so the tally can keep trial revenue out of the total.
     const mrrSubsResult = await db
       .select({
         plan: organizationSubscriptions.plan,
         tier: organizationSubscriptions.tier,
+        status: organizationSubscriptions.status,
       })
       .from(organizationSubscriptions)
       .where(
@@ -1416,20 +1435,27 @@ export async function getBillingStatsFromDb(): Promise<BillingStats> {
       });
     }
 
-    // Compute MRR per (plan, tier) from active subscriptions × tier price
+    // Compute MRR per (plan, tier, billing_status) from priced subscriptions
+    // × tier price. Only committed statuses reach the total.
     for (const row of mrrSubsResult) {
       const plan = parsePlanName(row.plan, "free");
       const tier = parseTierKey(row.tier);
+      const billingStatus = parseBillingStatus(row.status);
       const cents = tierMonthlyPriceCents(plan, tier);
       const existing = stats.mrrCentsByPlan.find(
-        (e) => e.plan === plan && e.tier === tier
+        (e) =>
+          e.plan === plan &&
+          e.tier === tier &&
+          e.billingStatus === billingStatus
       );
       if (existing) {
         existing.cents += cents;
       } else {
-        stats.mrrCentsByPlan.push({ plan, tier, cents });
+        stats.mrrCentsByPlan.push({ plan, tier, billingStatus, cents });
       }
-      stats.mrrCentsTotal += cents;
+      if (MRR_COMMITTED_STATUSES.has(billingStatus)) {
+        stats.mrrCentsTotal += cents;
+      }
     }
 
     // Tally trial outcomes (active / converted / churned)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/tooltip";
 import { BILLING_API } from "@/lib/billing/constants";
 import type { InvoiceItem } from "@/lib/billing/provider";
+import { useCachedResource } from "@/lib/hooks/use-cached-resource";
+import { useOrganization } from "@/lib/hooks/use-organization";
 
 type InvoiceResponse = {
   invoices: Array<{
@@ -97,48 +99,29 @@ function formatUsageExact(used: number, limit: number): string {
 const PAGE_SIZE = 10;
 
 export function BillingHistory(): React.ReactElement {
-  const [invoices, setInvoices] = useState<InvoiceResponse["invoices"]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const { organization } = useOrganization();
+  const [extra, setExtra] = useState<InvoiceResponse["invoices"]>([]);
+  const [moreHasMore, setMoreHasMore] = useState<boolean | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const fetchInvoices = useCallback(
-    async (startingAfter?: string): Promise<void> => {
+  // The first page is remembered, so coming back to billing shows the invoices
+  // it showed last time while the fresh ones are on their way.
+  const firstPage = useCachedResource<InvoiceResponse>(
+    organization?.id ? `invoices:${organization.id}` : null,
+    async () => {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-      if (startingAfter) {
-        params.set("startingAfter", startingAfter);
-      }
-
       const response = await fetch(`${BILLING_API.INVOICES}?${params}`);
       if (!response.ok) {
-        console.error("[Billing] Failed to fetch invoices:", response.status);
-        return;
+        throw new Error(`Failed to fetch invoices: ${response.status}`);
       }
-
-      const data = (await response.json()) as InvoiceResponse;
-
-      if (startingAfter) {
-        setInvoices((prev) => [...prev, ...data.invoices]);
-      } else {
-        setInvoices(data.invoices);
-      }
-      setHasMore(data.hasMore);
-    },
-    []
+      return (await response.json()) as InvoiceResponse;
+    }
   );
 
-  useEffect(() => {
-    async function load(): Promise<void> {
-      try {
-        await fetchInvoices();
-      } finally {
-        setLoading(false);
-      }
-    }
-    load().catch(() => {
-      setLoading(false);
-    });
-  }, [fetchInvoices]);
+  const invoices = [...(firstPage.data?.invoices ?? []), ...extra];
+
+  const loading = firstPage.loading;
+  const hasMore = moreHasMore ?? firstPage.data?.hasMore ?? false;
 
   async function handleLoadMore(): Promise<void> {
     const lastInvoice = invoices.at(-1);
@@ -148,7 +131,18 @@ export function BillingHistory(): React.ReactElement {
 
     setLoadingMore(true);
     try {
-      await fetchInvoices(lastInvoice.id);
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        startingAfter: lastInvoice.id,
+      });
+      const response = await fetch(`${BILLING_API.INVOICES}?${params}`);
+      if (!response.ok) {
+        console.error("[Billing] Failed to fetch invoices:", response.status);
+        return;
+      }
+      const data = (await response.json()) as InvoiceResponse;
+      setExtra((prev) => [...prev, ...data.invoices]);
+      setMoreHasMore(data.hasMore);
     } finally {
       setLoadingMore(false);
     }

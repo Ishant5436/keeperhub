@@ -46,6 +46,8 @@ import { hashWorkflowDefinition } from "@/lib/workflow/content-hash";
 import { workflowReachableConditions } from "@/lib/workflow/executable";
 import { buildExecutorInput } from "@/lib/workflow/executor/build-executor-input";
 import { executeWorkflow } from "@/lib/workflow/executor/executor.workflow";
+import { calculateTotalSteps } from "@/lib/workflow/executor/progress";
+import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -224,6 +226,39 @@ async function startExecutionInBackground(
 ): Promise<void> {
   const { slug: organizationSlug, plan: organizationPlan } =
     await resolveExecutionOrgMetadata(workflow.organizationId);
+
+  // Mirrors keeperhub-executor's initializeExecutionProgress (the K8s Job
+  // and in-process/SQS dispatch paths already do this before running).
+  // Without it, total_steps stays NULL forever and the status endpoint's
+  // progress.percentage is stuck at 0 even after a successful run.
+  // This sits between the committed payment (recordPayment, above) and
+  // start() below -- a display-only column must never be able to abort a
+  // paid dispatch, so a transient DB fault here is caught and logged
+  // rather than thrown, and execution proceeds to start() regardless.
+  await db
+    .update(workflowExecutions)
+    .set({
+      totalSteps: calculateTotalSteps(
+        workflow.nodes as WorkflowNode[],
+        workflow.edges as WorkflowEdge[]
+      ).toString(),
+      completedSteps: "0",
+      executionTrace: [],
+      currentNodeId: null,
+      currentNodeName: null,
+      lastSuccessfulNodeId: null,
+      lastSuccessfulNodeName: null,
+    })
+    .where(eq(workflowExecutions.id, executionId))
+    .catch((err: unknown) => {
+      logSystemError(
+        ErrorCategory.WORKFLOW_ENGINE,
+        "[x402/call] Error initializing execution progress",
+        err,
+        { endpoint: "/api/mcp/workflows/[slug]/call", workflowId: workflow.id }
+      );
+    });
+
   start(executeWorkflow, [
     buildExecutorInput(workflow, {
       triggerInput: body,

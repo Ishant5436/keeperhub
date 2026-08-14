@@ -192,10 +192,10 @@ To check if a balance from a previous "Check Balance" node (ID: `check-balance`)
 
 ## Managing Connections
 
-Before using certain node types, set up connections in your account:
+Before using certain node types, set up connections:
 
-1. Click your profile icon in the top-right
-2. Select **Connections**
+1. Open Settings from the user menu
+2. Under Organization, select **Connections**
 3. Add connections for services you need:
    - Web3 wallets
    - Email providers

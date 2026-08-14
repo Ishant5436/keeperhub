@@ -3,9 +3,10 @@ import { isBillingEnabled } from "@/lib/billing/feature-flag";
 import { getOrgSubscription } from "@/lib/billing/plans-server";
 import { getBillingProvider } from "@/lib/billing/providers";
 import { requireOrgOwner } from "@/lib/billing/require-org-owner";
+import { resolveReturnUrl } from "@/lib/billing/return-url";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 
-export async function POST(_request: Request): Promise<NextResponse> {
+export async function POST(request: Request): Promise<NextResponse> {
   if (!isBillingEnabled()) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -33,9 +34,13 @@ export async function POST(_request: Request): Promise<NextResponse> {
       "http://localhost:3000";
     const provider = getBillingProvider();
 
+    const body = (await request.json().catch(() => null)) as {
+      returnPath?: unknown;
+    } | null;
+
     const { url } = await provider.createPortalSession(
       sub.providerCustomerId,
-      `${appUrl}/billing`
+      resolveReturnUrl(appUrl, body?.returnPath)
     );
 
     return NextResponse.json({ url });

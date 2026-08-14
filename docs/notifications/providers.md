@@ -9,9 +9,12 @@ KeeperHub supports multiple notification channels. Configure connections to enab
 
 ## Accessing Connections
 
-1. Click your profile icon in the top-right corner
-2. Select **Connections**
+1. Open Settings from the user menu
+2. Under Organization, select **Connections**
 3. View existing connections or add new ones
+
+A connection is private to whoever created it unless its visibility is widened
+to specific members or to the whole organization.
 
 ## Available Connection Types
 

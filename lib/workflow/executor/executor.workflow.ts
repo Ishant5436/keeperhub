@@ -231,7 +231,6 @@ export type WorkflowExecutionInput = {
 /**
  * Helper to replace template variables in conditions
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: KEEP-1284 validation requires checking multiple error conditions
 function replaceTemplateVariable(
   _match: string,
   nodeId: string,
@@ -382,7 +381,6 @@ function renderConditionLiteral(value: unknown): string {
  * validated upfront for clear user-facing error messages.
  */
 // Exported for testing - KEEP-1284
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: KEEP-1284 validation requires comprehensive error checking
 export function evaluateConditionExpression(
   conditionExpression: unknown,
   outputs: NodeOutputs,
@@ -1493,7 +1491,6 @@ function nextBodyTargets(
  * In both modes the BFS uses depth tracking so nested For Each / Collect
  * pairs are correctly stepped over.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: BFS with depth tracking + handle-aware seeding requires multiple condition branches
 export function identifyLoopBody(
   forEachNodeId: string,
   edgesBySource: Map<string, string[]>,
@@ -1729,7 +1726,6 @@ export function resolveArraySource(
 /**
  * Main workflow executor function
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Core workflow engine function requires comprehensive logic
 export async function executeWorkflow(input: WorkflowExecutionInput) {
   "use workflow";
 
@@ -2137,7 +2133,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
   // For Each: iteration orchestrator
   // -------------------------------------------------------------------
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Orchestrates loop iteration with error handling and result collection
   async function handleForEachExecution(params: {
     forEachNodeId: string;
     forEachNode: WorkflowNode;
@@ -2222,7 +2217,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     // 3. Single iteration executor
     const mapExpression = processedConfig.mapExpression as string | undefined;
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: iteration logic has inherent complexity from scoped output capture, body execution, and map expression
     async function executeIteration(
       item: unknown,
       index: number

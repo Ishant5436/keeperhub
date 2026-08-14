@@ -181,17 +181,13 @@ export function TotpManageDialog({
         onEscapeKeyDown={(event) => {
           if (locked) {
             event.preventDefault();
-            toast.error(
-              "Finish saving your backup codes before closing."
-            );
+            toast.error("Finish saving your backup codes before closing.");
           }
         }}
         onInteractOutside={(event) => {
           if (locked) {
             event.preventDefault();
-            toast.error(
-              "Finish saving your backup codes before closing."
-            );
+            toast.error("Finish saving your backup codes before closing.");
           }
         }}
       >
@@ -257,10 +253,7 @@ export function TotpManageDialog({
               <Button onClick={attemptClose} variant="outline">
                 Close
               </Button>
-              <Button
-                onClick={() => setMode("disable")}
-                variant="destructive"
-              >
+              <Button onClick={() => setMode("disable")} variant="destructive">
                 Disable
               </Button>
             </DialogFooter>

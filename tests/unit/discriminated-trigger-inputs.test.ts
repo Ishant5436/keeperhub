@@ -54,7 +54,6 @@ function makeNodes(triggerType: string): unknown[] {
 }
 
 function expectParseThrows(schema: ZodTypeAny, payload: unknown): void {
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper wrapper used exclusively inside it() callbacks
   expect(() => schema.parse(payload)).toThrow();
 }
 

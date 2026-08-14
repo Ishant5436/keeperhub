@@ -15,6 +15,8 @@ type TruncatedTooltipProps = {
   /** Classes applied to the truncating span (the `truncate` class is added). */
   className?: string;
   side?: React.ComponentProps<typeof TooltipContent>["side"];
+  /** Distance from the text, for clearing anything drawn beside it. */
+  sideOffset?: number;
   tooltipClassName?: string;
 };
 
@@ -27,6 +29,7 @@ export function TruncatedTooltip({
   text,
   className,
   side = "top",
+  sideOffset,
   tooltipClassName,
 }: TruncatedTooltipProps): React.ReactNode {
   const spanRef = useRef<HTMLSpanElement>(null);
@@ -57,8 +60,13 @@ export function TruncatedTooltip({
           {text}
         </span>
       </TooltipTrigger>
+      {/* A label must never swallow a click meant for what it covers. */}
       {isTruncated && (
-        <TooltipContent className={tooltipClassName} side={side}>
+        <TooltipContent
+          className={cn("pointer-events-none", tooltipClassName)}
+          side={side}
+          sideOffset={sideOffset}
+        >
           {text}
         </TooltipContent>
       )}

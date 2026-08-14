@@ -96,17 +96,12 @@ function makeRequest(
 }
 
 async function expectOAuthChallenge(response: Response): Promise<void> {
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(response.status).toBe(401);
   const challenge = response.headers.get("WWW-Authenticate") ?? "";
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(challenge).toContain('Bearer realm="OAuth"');
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(challenge).toContain("resource_metadata=");
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(challenge).toContain('error="invalid_token"');
   const json = (await response.json()) as Record<string, unknown>;
-  // biome-ignore lint/suspicious/noMisplacedAssertion: helper called exclusively from inside test() blocks
   expect(json).toEqual({
     error: "invalid_token",
     error_description: "Missing or invalid access token",

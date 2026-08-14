@@ -2,6 +2,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import { init } from "@sentry/nextjs";
+import { scrubSentryEvent } from "@/lib/rpc/scrub-rpc-urls";
 
 const { SENTRY_DSN, SENTRY_ENVIRONMENT } = process.env;
 
@@ -24,5 +25,12 @@ if (SENTRY_DSN) {
     // Enable sending user PII (Personally Identifiable Information)
     // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
     sendDefaultPii: true,
+
+    // Same reasoning as sentry.server.config.ts: strip provider keys that an
+    // SDK error inlined into its message before the event leaves the process.
+    beforeSend(event) {
+      scrubSentryEvent(event);
+      return event;
+    },
   });
 }

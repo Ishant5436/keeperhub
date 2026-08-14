@@ -1,11 +1,14 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { Suspense } from "react";
-import { BillingPage } from "@/components/billing/billing-page";
 import { auth } from "@/lib/auth";
 import { isBillingEnabled } from "@/lib/billing/feature-flag";
+import { getActiveOrgId } from "@/lib/middleware/org-context";
 
-export default async function BillingRoute(): Promise<React.ReactElement> {
+/**
+ * Billing lives in settings now. This route stays because links to it are
+ * already out in the world, in emails and in the app, and sends them on.
+ */
+export default async function BillingRoute(): Promise<never> {
   if (!isBillingEnabled()) {
     notFound();
   }
@@ -16,14 +19,6 @@ export default async function BillingRoute(): Promise<React.ReactElement> {
     redirect("/?returnTo=%2Fbilling");
   }
 
-  const activeMember = await auth.api.getActiveMember({ headers: hdrs });
-  if (activeMember?.role !== "owner") {
-    redirect("/");
-  }
-
-  return (
-    <Suspense>
-      <BillingPage />
-    </Suspense>
-  );
+  const orgId = getActiveOrgId(session);
+  redirect(orgId ? `/settings/${orgId}/billing` : "/settings");
 }

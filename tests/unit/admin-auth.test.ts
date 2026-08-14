@@ -17,7 +17,6 @@ function createRequest(token?: string): Request {
 
 describe("authenticateAdmin", () => {
   beforeEach(() => {
-    // biome-ignore lint/performance/noDelete: delete is required to remove env vars (undefined assignment coerces to string)
     delete process.env.TEST_API_KEY;
     vi.stubEnv("NODE_ENV", "");
     vi.stubEnv("ALLOW_TEST_ENDPOINTS", "");
@@ -143,7 +142,6 @@ describe("rateLimitBypassRule", () => {
   }
 
   beforeEach(() => {
-    // biome-ignore lint/performance/noDelete: delete is required to remove env vars (undefined assignment coerces to string)
     delete process.env.TEST_API_KEY;
     vi.stubEnv("NODE_ENV", "");
     vi.stubEnv("ALLOW_TEST_ENDPOINTS", "");

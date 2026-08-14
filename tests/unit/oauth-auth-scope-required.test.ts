@@ -14,6 +14,27 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/schema", () => ({ users: { id: "id" } }));
 
+// The auth path reads the scope epoch and records liveness. Neither is what
+// this test is about, so both are stubbed to their no-change answers.
+vi.mock("@/lib/mcp/scope-policy", () => ({
+  DEFAULT_EPOCH: 0,
+  effectiveScope: (scope: string) => scope,
+  getScopePolicy: vi.fn().mockResolvedValue({
+    epoch: 0,
+    memberMaxScope: null,
+    orgMaxScope: null,
+  }),
+  getScopePolicyForMint: vi.fn().mockResolvedValue({
+    epoch: 0,
+    memberMaxScope: null,
+    orgMaxScope: null,
+  }),
+}));
+
+vi.mock("@/lib/mcp/connections", () => ({
+  touchConnection: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@sentry/nextjs", () => ({
   captureMessage: vi.fn(),
 }));

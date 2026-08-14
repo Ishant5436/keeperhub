@@ -439,7 +439,6 @@ const BINARY_OPERATORS_UI = new Set([
 /**
  * Tokenizes a condition expression
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Tokenization requires multiple pattern checks
 function tokenizeExpression(
   expression: string
 ): ValidationResult & { tokens?: Token[] } {
@@ -584,7 +583,6 @@ function isValidOperand(token: Token): boolean {
  * Validates spacing around binary operators (must have exactly one space on both sides)
  * Uses regex to find operators directly in the expression string for accurate positioning
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Multiple spacing checks required
 function validateOperatorSpacing(
   expression: string,
   _tokens: Token[]
@@ -734,7 +732,6 @@ function validateOperatorBoundaries(tokens: Token[]): ValidationResult {
 /**
  * Validates consecutive operators
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Multiple operator validation cases needed
 function validateConsecutiveOperators(tokens: Token[]): ValidationResult {
   for (let j = 0; j < tokens.length - 1; j++) {
     const current = tokens[j];
@@ -776,7 +773,6 @@ function validateConsecutiveOperators(tokens: Token[]): ValidationResult {
  * Validates binary operator has operands on both sides
  * Note: `-` can be unary (negative numbers) or binary (subtraction)
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Handles both unary and binary operators
 function validateBinaryOperator(
   token: Token,
   index: number,
@@ -872,7 +868,6 @@ function validateUnaryOperator(
 /**
  * Validates operator placement and operands
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Multiple validation checks required
 function validateOperators(tokens: Token[]): ValidationResult {
   // Check boundaries
   const boundaryCheck = validateOperatorBoundaries(tokens);

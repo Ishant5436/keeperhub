@@ -1,7 +1,6 @@
 import "server-only";
 
 import { ethers } from "ethers";
-// biome-ignore lint/style/useImportType: rolesAbi is a runtime value we feed to ethers.Interface
 import { rolesAbi } from "zodiac-roles-sdk";
 import { getRpcProviderFromUrls } from "@/lib/rpc/provider-factory";
 import { getRpcUrlByChainId } from "@/lib/rpc/rpc-config";

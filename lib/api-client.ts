@@ -1022,6 +1022,13 @@ export type SecurityAuditEvent = {
   // Human label for the affected resource (currently workflows), resolved
   // server-side so the feed can name "which workflow" and link into it.
   resourceName: string | null;
+  /** Set when the thing acted on is a person, so the feed can show them. */
+  resourceUser?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    image: string | null;
+  } | null;
   // The workflow history version this event produced, when one exists, so the
   // feed can deep-link to that exact version. Null for events with no version.
   version: number | null;

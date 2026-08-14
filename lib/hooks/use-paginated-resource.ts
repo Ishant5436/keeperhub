@@ -25,6 +25,16 @@ type UsePaginatedResourceResult<T> = {
  * - `refetchIntervalMs` silently re-fetches the current page on a timer (no
  *   loading flash), so the list stays fresh while open.
  */
+/**
+ * The first page of each query, kept for the tab's lifetime so returning to a
+ * list paints what it last showed instead of an empty table. Keyed by the
+ * caller's resetKey, which already carries the organization.
+ */
+const pageCache = new Map<
+  string,
+  { items: unknown[]; meta: PageMeta | null }
+>();
+
 export function usePaginatedResource<T>(
   fetchPage: (page: number) => Promise<Page<T>>,
   resetKey: string,
@@ -37,9 +47,10 @@ export function usePaginatedResource<T>(
   const enabled = options?.enabled ?? true;
   const refetchIntervalMs = options?.refetchIntervalMs;
   const [page, setPage] = useState(options?.initialPage ?? 1);
-  const [items, setItems] = useState<T[]>([]);
-  const [meta, setMeta] = useState<PageMeta | null>(null);
-  const [loading, setLoading] = useState(enabled);
+  const seeded = pageCache.get(resetKey);
+  const [items, setItems] = useState<T[]>(() => (seeded?.items as T[]) ?? []);
+  const [meta, setMeta] = useState<PageMeta | null>(seeded?.meta ?? null);
+  const [loading, setLoading] = useState(enabled && !seeded);
   const [error, setError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -71,6 +82,9 @@ export function usePaginatedResource<T>(
         if (active) {
           setItems(res.items);
           setMeta(res.meta);
+          if (page === (options?.initialPage ?? 1)) {
+            pageCache.set(resetKey, { items: res.items, meta: res.meta });
+          }
           // The endpoint clamps an out-of-range page (e.g. the page size grew
           // so the current page no longer exists, or rows were deleted) to the
           // last page. Adopt that page so we refetch its real items instead of

@@ -13,6 +13,7 @@ import {
   Info,
   Loader2,
   Plus,
+  Settings,
   Workflow as WorkflowIcon,
   X,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import type { Project, SavedWorkflow, Tag } from "@/lib/api-client";
 import { api } from "@/lib/api-client";
 import { authClient, useSession } from "@/lib/auth-client";
+import { useProjects, useTags } from "@/lib/hooks/use-org-data";
 import { useActiveMember } from "@/lib/hooks/use-organization";
 import type { NavPanelStates } from "@/lib/hooks/use-persisted-nav-state";
 import { usePersistedNavState } from "@/lib/hooks/use-persisted-nav-state";
@@ -597,6 +599,17 @@ const NAV_ITEMS: NavItemDef[] = [
   },
 ];
 
+// Settings is a destination, not a workspace view, so it sits at the foot of
+// the nav column rather than among Hub / Workflows / Analytics -- above the
+// divider that starts the external links, but pushed clear of Activity.
+const SETTINGS_NAV_ITEM: NavItemDef = {
+  id: "settings",
+  icon: Settings,
+  label: "Settings",
+  href: "/settings",
+  requireAuth: true,
+};
+
 export function NavigationSidebar(): React.ReactNode {
   const isMobile = useIsMobile();
   const { data: session, isPending } = useSession();
@@ -610,22 +623,17 @@ export function NavigationSidebar(): React.ReactNode {
 
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
+  // Shared with the toolbar and settings, so the sidebar reads them rather
+  // than fetching its own copy.
+  const { data: projects } = useProjects();
+  const { data: tags } = useTags();
   const [dataLoading, setDataLoading] = useState(true);
   const isDragging = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   const fetchData = useCallback(async (): Promise<void> => {
     try {
-      const [w, p, t] = await Promise.all([
-        api.workflow.getAll().catch(() => [] as SavedWorkflow[]),
-        api.project.getAll().catch(() => [] as Project[]),
-        api.tag.getAll().catch(() => [] as Tag[]),
-      ]);
-      setWorkflows(w);
-      setProjects(p);
-      setTags(t);
+      setWorkflows(await api.workflow.getAll().catch(() => []));
     } finally {
       setDataLoading(false);
     }
@@ -687,6 +695,7 @@ export function NavigationSidebar(): React.ReactNode {
   const isEarningsPage = pathname === "/earnings";
   const isHeldPaymentsPage = pathname === "/held-payments";
   const isActivityPage = pathname === "/activity";
+  const isSettingsPage = pathname.startsWith("/settings");
 
   const expanded = navState.state.sidebar;
   const setExpanded = navState.setSidebar;
@@ -779,7 +788,9 @@ export function NavigationSidebar(): React.ReactNode {
     );
   }, [currentWidth, navState.state.panels]);
 
-  if (isMobile || !navState.hasMounted) {
+  // The settings hub renders its own rail under the shared toolbar, so the
+  // workflow sidebar would be a second, competing navigation there.
+  if (isMobile || !navState.hasMounted || isSettingsPage) {
     return null;
   }
 
@@ -982,6 +993,14 @@ export function NavigationSidebar(): React.ReactNode {
               showLabels={showLabels}
             />
           ))}
+          <div className="mt-auto pb-1">
+            <NavItem
+              active={isSettingsPage}
+              item={SETTINGS_NAV_ITEM}
+              onClick={() => handleNavClick(SETTINGS_NAV_ITEM)}
+              showLabels={showLabels}
+            />
+          </div>
         </nav>
 
         <GettingStartedLauncher compact={!showLabels} />

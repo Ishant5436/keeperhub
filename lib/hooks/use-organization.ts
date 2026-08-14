@@ -1,12 +1,13 @@
 "use client";
 
-import { getDefaultStore, useSetAtom } from "jotai";
+import { useSetAtom } from "jotai";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { invalidateFeatureSnapshot } from "@/hooks/use-features";
 import { api } from "@/lib/api-client";
 import { analyticsProjectIdAtom } from "@/lib/atoms/analytics";
 import { authClient } from "@/lib/auth-client";
+import { useOrganizationsData } from "@/lib/hooks/use-org-data";
 import { registerOrganizationRefetch } from "@/lib/refetch-organizations";
 import { refetchSidebar } from "@/lib/refetch-sidebar";
 import { resetWorkflowStateForOrgSwitchAtom } from "@/lib/workflow/store";
@@ -21,6 +22,12 @@ export function useOrganization() {
   const router = useRouter();
   const pathname = usePathname();
   const setAnalyticsProjectId = useSetAtom(analyticsProjectIdAtom);
+  // Through the hook, not getDefaultStore: the app mounts its own jotai store
+  // in app/layout.tsx, and a write to the default one lands where nothing is
+  // reading, which is why this reset never ran.
+  const resetWorkflowStateForOrgSwitch = useSetAtom(
+    resetWorkflowStateForOrgSwitchAtom
+  );
 
   // Register this hook's refetch callback so it can be triggered externally
   useEffect(
@@ -35,10 +42,24 @@ export function useOrganization() {
   const switchOrganization = async (orgId: string) => {
     await authClient.organization.setActive({ organizationId: orgId });
     // Reset workflow state only after org switch succeeds (safe in hook context)
-    getDefaultStore().set(resetWorkflowStateForOrgSwitchAtom);
+    resetWorkflowStateForOrgSwitch();
     setAnalyticsProjectId(null);
     invalidateFeatureSnapshot();
     refetchSidebar();
+
+    // Org-scoped settings carry the organization in the path, so switching has
+    // to rewrite it. Otherwise the route would keep pointing at the previous
+    // org and immediately switch back to it.
+    if (pathname.startsWith("/settings/")) {
+      const parts = pathname.split("/");
+      if (parts.length > 3) {
+        parts[2] = orgId;
+        router.push(parts.join("/"));
+      } else {
+        router.refresh();
+      }
+      return;
+    }
 
     // Stay on non-workflow pages (e.g. /analytics, /hub, /billing) after switching orgs
     const isWorkflowPage = pathname.startsWith("/workflows/");
@@ -74,54 +95,15 @@ export function useOrganization() {
   };
 }
 
-export type OrganizationWithRole = {
-  id: string;
-  name: string;
-  slug: string;
-  logo: string | null;
-  createdAt: string;
-  metadata: string | null;
-  role: string;
-};
+export type { OrganizationWithRole } from "@/lib/atoms/organization";
 
+/**
+ * The organizations the user belongs to. One shared request no matter how many
+ * components ask; see `lib/atoms/organization.ts`.
+ */
 export function useOrganizations() {
-  const [organizations, setOrganizations] = useState<OrganizationWithRole[]>(
-    []
-  );
-  const [isLoading, setIsLoading] = useState(true);
-
-  const refetch = useCallback(async () => {
-    try {
-      const response = await fetch("/api/organizations");
-      if (response.ok) {
-        const data = (await response.json()) as OrganizationWithRole[];
-        setOrganizations(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch organizations:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
-
-  // Register this hook's refetch callback so it can be triggered externally
-  useEffect(
-    () =>
-      registerOrganizationRefetch(() => {
-        refetch();
-      }),
-    [refetch]
-  );
-
-  return {
-    organizations,
-    isLoading,
-    refetch,
-  };
+  const { data: organizations, isLoading, refetch } = useOrganizationsData();
+  return { organizations, isLoading, refetch };
 }
 
 export function useActiveMember() {

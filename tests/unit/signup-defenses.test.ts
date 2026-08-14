@@ -14,19 +14,12 @@ const TEST_API_KEY = "kha_test_signup_defenses_key";
 const MISSING_CAPTCHA_SECRET_ERROR = /TURNSTILE_SECRET_KEY is required/;
 
 function clearTurnstileEnv(): void {
-  // biome-ignore lint/performance/noDelete: env vars must be removed, not stringified
   delete process.env.TURNSTILE_SECRET_KEY;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.TEST_API_KEY;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.INCLUDE_TEST_ENDPOINTS;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.ALLOW_TEST_ENDPOINTS;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.NEXT_PHASE;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.TURNSTILE_ENFORCE;
-  // biome-ignore lint/performance/noDelete: same
   delete process.env.LOAD_TEST_BYPASS_TOKEN;
 }
 

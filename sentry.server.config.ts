@@ -3,6 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import { init } from "@sentry/nextjs";
+import { scrubSentryEvent } from "@/lib/rpc/scrub-rpc-urls";
 
 const { SENTRY_DSN, SENTRY_ENVIRONMENT } = process.env;
 
@@ -27,5 +28,14 @@ if (SENTRY_DSN) {
     // Enable sending user PII (Personally Identifiable Information)
     // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
     sendDefaultPii: true,
+
+    // captureException receives the raw SDK error, so a provider URL inlined
+    // into its message (viem's HttpRequestError does this) would otherwise
+    // reach Sentry with the API key intact. The Loki path already scrubs via
+    // buildErrPayload; this is the equivalent for the Sentry path.
+    beforeSend(event) {
+      scrubSentryEvent(event);
+      return event;
+    },
   });
 }

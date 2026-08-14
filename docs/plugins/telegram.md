@@ -19,7 +19,7 @@ Send messages to Telegram chats or groups using a bot token.
 2. Copy the bot token
 3. Add the bot to your target chat/group
 4. Get the chat ID (message the bot, then check `https://api.telegram.org/bot<token>/getUpdates`)
-5. In KeeperHub, go to **Connections > Add Connection > Telegram**
+5. In KeeperHub, go to **Settings > Organization > Connections** and add a Telegram connection
 6. Enter the bot token and save
 
 ## Send Message

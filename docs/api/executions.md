@@ -87,13 +87,17 @@ Returns real-time execution status with progress tracking.
 
 ### Status Values
 
-| Status | Description |
-|--------|-------------|
-| `pending` | Execution queued |
-| `running` | Currently executing |
-| `success` | Completed successfully |
-| `error` | Failed with error |
-| `cancelled` | Manually cancelled |
+| Status | Description | Terminal |
+|--------|-------------|----------|
+| `pending` | Execution queued | no |
+| `running` | Currently executing | no |
+| `unconfirmed` | On-chain writes were submitted but their receipts could not be read conclusively. Keep polling | **no** |
+| `success` | Completed successfully | yes |
+| `error` | Failed with error | yes |
+| `system_error` | Failed for an infrastructure reason, or was reaped after going stale | yes |
+| `cancelled` | Manually cancelled | yes |
+
+Treat this list as a lower bound rather than a closed set, and decide terminality from the `X-Poll-Interval-Hint` response header rather than from the status string. The server computes that header from its own terminal set, so it stays correct for statuses added after your client shipped; `0` means terminal. A client that routes an unrecognised status into a failing `default` branch reports a failure for a run that is still settling.
 
 ### Transaction Hashes
 

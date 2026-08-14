@@ -3,12 +3,13 @@
 import { ChevronRight, Minus, Pencil, Plus } from "lucide-react";
 import { relativeTime } from "@/components/settings/session-format";
 import type { SecurityAuditEvent } from "@/lib/api-client";
+import { scopeLabel } from "@/lib/mcp/oauth-scopes";
 import {
   type AuditActionKind,
   describeAuditAction,
 } from "@/lib/security/audit-actions";
 import { SENSITIVE_FIELD } from "@/lib/security/audit-redaction";
-import { ActorAvatarBadge, actorLabel } from "./actor-avatar";
+import { ActorAvatarBadge, ActorIdentity, actorLabel } from "./actor-avatar";
 
 const KIND_ICON: Record<AuditActionKind, typeof Plus> = {
   add: Plus,
@@ -79,8 +80,35 @@ function formatValue(value: unknown, sensitive: boolean): string | null {
   return "[changed]";
 }
 
+type FieldRule = { label: string; isScope?: boolean };
+
+/**
+ * Field names that only mean something inside their own subsystem. `scope` and
+ * `maxScope` say nothing about agents on their own, and the raw `mcp:write`
+ * value is the wire name rather than the one the settings page shows, so both
+ * the label and the value are translated. Keyed by resource type, because the
+ * same field name means different things elsewhere.
+ */
+const FIELD_RULES: Record<string, Record<string, FieldRule>> = {
+  mcp_connection: {
+    clientName: { label: "Agent" },
+    scope: { isScope: true, label: "Agent access" },
+  },
+  mcp_member_scope: {
+    scope: { isScope: true, label: "Agent access" },
+  },
+  mcp_policy: {
+    maxScope: { isScope: true, label: "Organization agent limit" },
+  },
+};
+
+/** An unset limit permits everything, which is what full access means. */
+function scopeText(value: unknown): string {
+  return typeof value === "string" ? scopeLabel(value) : "Full access";
+}
+
 // Turn the stored deep-diff array into readable "Field: old -> new" rows.
-function diffEntries(diff: unknown): DiffEntry[] {
+function diffEntries(diff: unknown, resourceType: string | null): DiffEntry[] {
   if (!Array.isArray(diff)) {
     return [];
   }
@@ -107,7 +135,22 @@ function diffEntries(diff: unknown): DiffEntry[] {
       continue;
     }
     const sensitive = SENSITIVE_FIELD.test(fieldKey);
-    const label = humanizeField(path);
+    const rule = resourceType ? FIELD_RULES[resourceType]?.[fieldKey] : null;
+    const label = rule?.label ?? humanizeField(path);
+    // Only an edit has both sides, so only there does an absent value mean
+    // "was unlimited" rather than "there was nothing here".
+    if (rule?.isScope && c.kind === "E") {
+      entries.push({ from: scopeText(c.lhs), label, to: scopeText(c.rhs) });
+      continue;
+    }
+    if (rule?.isScope) {
+      entries.push({
+        from: c.kind === "D" ? scopeText(c.lhs) : null,
+        label,
+        to: c.kind === "N" ? scopeText(c.rhs) : null,
+      });
+      continue;
+    }
     if (c.kind === "E") {
       entries.push({
         label,
@@ -138,8 +181,14 @@ function ValuePiece({ value }: { value: string }): React.ReactElement {
   return <>{value}</>;
 }
 
-function DiffLines({ diff }: { diff: unknown }): React.ReactElement | null {
-  const entries = diffEntries(diff);
+function DiffLines({
+  diff,
+  resourceType,
+}: {
+  diff: unknown;
+  resourceType: string | null;
+}): React.ReactElement | null {
+  const entries = diffEntries(diff, resourceType);
   if (entries.length === 0) {
     return null;
   }
@@ -238,7 +287,7 @@ export function ActivityRow({
           )}
         </span>
       </div>
-      {resourceName && (
+      {resourceName && !event.resourceUser && (
         <div className="mt-0.5 truncate font-medium text-foreground/90 text-sm">
           {resourceName}
         </div>
@@ -265,19 +314,31 @@ export function ActivityRow({
         ) : (
           header
         )}
-        <DiffLines diff={event.diff} />
-        {definitionChanged(event.diff) && (
-          <p className="mt-1 text-muted-foreground text-xs">
-            Definition updated
-          </p>
-        )}
-        {email && (
-          <p className="truncate text-muted-foreground text-xs">{email}</p>
-        )}
-        <p className="text-muted-foreground text-xs">
-          {relativeTime(event.createdAt)}
-          {meta ? ` · ${meta}` : ""}
-        </p>
+        {/* Fixed track for the subject so the rule lands in the same place on
+            every row, whatever the change above it says. */}
+        <div className="grid grid-cols-1 gap-y-2 sm:grid-cols-[minmax(0,24rem)_minmax(0,14rem)] sm:gap-x-6 sm:gap-y-0">
+          <div className="min-w-0">
+            <DiffLines diff={event.diff} resourceType={event.resourceType} />
+            {definitionChanged(event.diff) && (
+              <p className="mt-1 text-muted-foreground text-xs">
+                Definition updated
+              </p>
+            )}
+            {email && (
+              <p className="truncate text-muted-foreground text-xs">{email}</p>
+            )}
+            <p className="text-muted-foreground text-xs">
+              {relativeTime(event.createdAt)}
+              {meta ? ` · ${meta}` : ""}
+            </p>
+          </div>
+          {event.resourceUser && (
+            <div className="flex min-w-0 flex-col gap-1 border-border sm:border-l sm:pl-6">
+              <span className="text-muted-foreground text-xs">Applied to</span>
+              <ActorIdentity actor={event.resourceUser} />
+            </div>
+          )}
+        </div>
       </div>
     </li>
   );

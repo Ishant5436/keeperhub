@@ -24,6 +24,14 @@ permissions:
   # which is why this nightly never once ran since the reusable call was added.
   id-token: write
 
+env:
+  # MUST match e2e-tests-ephemeral.yml's FOUNDRY_IMAGE, which carries the
+  # rationale. The fork cache this job warms is mounted into the anvil
+  # that e2e-tests-ephemeral starts, and the consumer only checks that
+  # storage.json exists - a version skew degrades silently to full
+  # upstream refetch rather than failing. Bump both together.
+  FOUNDRY_IMAGE: ghcr.io/foundry-rs/foundry:v1.7.1@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd
+
 jobs:
   e2e-full:
     uses: ./.github/workflows/e2e-tests-ephemeral.yml
@@ -83,7 +91,7 @@ jobs:
           chmod 777 fork-cache
           docker run -d --name fork-cache-anvil-mainnet -p 8548:8545 \
             -v "$PWD/fork-cache:/home/foundry/.foundry/cache" \
-            --entrypoint anvil ghcr.io/foundry-rs/foundry:latest \
+            --entrypoint anvil "$FOUNDRY_IMAGE" \
             --host 0.0.0.0 --fork-url "$UPSTREAM" --fork-block-number "$PIN" \
             --chain-id 1 --block-time 1
           retries=0

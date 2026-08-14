@@ -26,20 +26,31 @@ Your profile contains:
 
 ## Account Settings
 
-Access your account settings to:
+Open Settings from the user menu. Your own account lives under the Account
+group, which is split in two:
+
+**Profile** holds who you are and the organizations inviting you:
 
 - Update display name
 - Change email address
-- Manage authentication methods
-- Change your password
-- View wallet information
+- Accept or decline organization invitations
 - Deactivate your account
+
+**Account security** holds how you sign in:
+
+- Change your password
+- Two-factor authentication
+- Wallet step-up confirmation
+- Review and revoke active sessions
+
+Your organization's wallet is not part of your personal account. It sits under
+Settings > Organization > Wallets.
 
 ## Password Management
 
 ### Changing Your Password
 
-You can change your password from account settings. Enter your current password, then provide and confirm a new password. Passwords must be at least 8 characters. You will be signed out after changing your password and must sign in again.
+You can change your password from Settings > Account > Account security. Enter your current password, then provide and confirm a new password. Passwords must be at least 8 characters. You will be signed out after changing your password and must sign in again.
 
 ### Forgot Password
 
@@ -85,4 +96,4 @@ See [API Authentication](/api/authentication) for details.
 
 ### Account Deactivation
 
-You can deactivate your account from account settings. To confirm, you must type **DEACTIVATE** in the confirmation dialog. Deactivation is a soft delete -- your data is preserved, but you will be signed out and unable to sign in. All active sessions are invalidated immediately. To reactivate a deactivated account, contact an administrator.
+You can deactivate your account from Settings > Account > Profile. To confirm, you must type **DEACTIVATE** in the confirmation dialog. Deactivation is a soft delete: your data is preserved, but you will be signed out and unable to sign in. All active sessions are invalidated immediately. To reactivate a deactivated account, contact an administrator.

@@ -7,7 +7,10 @@ import {
   gasSponsorshipMonthly,
   type NewGasSponsorshipMonthly,
 } from "@/lib/db/schema-extensions";
-import { SPONSORSHIP_CHAINS } from "@/lib/web3/sponsorship-chains-meta";
+import {
+  SPONSORSHIP_CHAINS,
+  type SponsorshipChain,
+} from "@/lib/web3/sponsorship-chains-meta";
 
 export type ChainSponsorship = {
   chainId: number;
@@ -26,7 +29,11 @@ export type MonthlySponsorship = {
   byChain: ChainSponsorship[];
 };
 
-const CHAIN_META = new Map(SPONSORSHIP_CHAINS.map((c) => [c.chainId, c]));
+// Keyed as `number`, not the literal chain ids: lookups come from DB rows,
+// which can name a chain no longer on the sponsorship list.
+const CHAIN_META: ReadonlyMap<number, SponsorshipChain> = new Map(
+  SPONSORSHIP_CHAINS.map((c) => [c.chainId, c])
+);
 
 function chainName(chainId: number): string {
   return CHAIN_META.get(chainId)?.name ?? `Chain ${chainId}`;

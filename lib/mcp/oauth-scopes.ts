@@ -175,6 +175,67 @@ const SCOPE_RANK: Record<OAuthScope, number> = {
 };
 
 /**
+ * The strongest level a scope string carries. A scope is a set, and
+ * scopeSatisfies passes when any member reaches the bar, so the set's effective
+ * power is its maximum rather than any one entry.
+ */
+export function highestScopeRank(scopeString: string): number {
+  return parseScopes(scopeString)
+    .filter((s) => isScopeValid(s))
+    .reduce((top, s) => Math.max(top, SCOPE_RANK[s as OAuthScope]), 0);
+}
+
+/**
+ * The single level a scope set amounts to. A grant of "mcp:read mcp:write" can
+ * do everything mcp:write can, so that is what it is, and that is what a
+ * picker showing one value has to show.
+ */
+export function effectiveScope(scopeString: string): OAuthScope {
+  const rank = highestScopeRank(scopeString);
+  if (rank >= SCOPE_RANK[SCOPE_MCP_ADMIN]) {
+    return SCOPE_MCP_ADMIN;
+  }
+  if (rank >= SCOPE_RANK[SCOPE_MCP_WRITE]) {
+    return SCOPE_MCP_WRITE;
+  }
+  return SCOPE_MCP_READ;
+}
+
+/** What each level is called wherever a person reads it, not just the picker. */
+export const SCOPE_LABELS: Record<string, string> = {
+  [SCOPE_MCP_ADMIN]: "Full access",
+  [SCOPE_MCP_READ]: "Read only",
+  [SCOPE_MCP_WRITE]: "Read and write",
+};
+
+export function scopeLabel(scope: string): string {
+  return SCOPE_LABELS[scope] ?? scope;
+}
+
+/** True when `scope` reaches beyond what `ceiling` permits. */
+export function scopeExceeds(scope: string, ceiling: string | null): boolean {
+  if (!ceiling) {
+    return false;
+  }
+  return highestScopeRank(scope) > highestScopeRank(ceiling);
+}
+
+/**
+ * Lowers a scope to what a ceiling permits, and never raises it.
+ *
+ * The levels are a hierarchy, so a grant that reaches past the ceiling lands on
+ * the ceiling rather than being discarded: admin under a write ceiling is
+ * write, not read. A grant already at or below the ceiling is returned
+ * untouched, so a ceiling can only ever take away.
+ */
+export function clampScope(scope: string, ceiling: string | null): string {
+  if (!ceiling) {
+    return scope;
+  }
+  return scopeExceeds(scope, ceiling) ? ceiling : scope;
+}
+
+/**
  * True when `grantedScope` satisfies the `required` scope level.
  * `undefined` means no scope restriction (kh_ API key / cookie session /
  * internal service) and always passes -- those callers are intentionally

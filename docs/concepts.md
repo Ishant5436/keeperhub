@@ -94,7 +94,7 @@ Every KeeperHub organization includes a Turnkey wallet:
 - **Secure custody**: Private keys are generated and held inside secure hardware enclaves (TEEs)
 - **Key export**: Export your private key at any time to migrate elsewhere
 - **Funding**: Top up with ETH to enable gas-consuming operations
-- **Management**: View balance, withdraw funds, and export your key via Settings > Wallet
+- **Management**: View balance, withdraw funds, and export your key via Settings > Organization > Wallets
 
 ## Networks
 

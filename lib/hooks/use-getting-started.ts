@@ -91,6 +91,13 @@ function readPersisted(userId: string | undefined): Persisted {
   if (typeof window === "undefined") {
     return fallback;
   }
+  // Checked before the stored state, not only in place of it. A saved
+  // Playwright session carries the localStorage written when the launcher
+  // expanded during sign-in, so honouring the cookie only on a missing entry
+  // left the card open in every test that reused that session.
+  if (gettingStartedSuppressed()) {
+    return fallback;
+  }
   try {
     const raw = localStorage.getItem(storageKey(userId));
     if (!raw) {
@@ -101,9 +108,7 @@ function readPersisted(userId: string | undefined): Persisted {
       // (userId undefined) stays collapsed and existing users do not flash open
       // before their stored collapsed state loads. Playwright suppresses the
       // auto-expand by cookie so the card never covers the canvas.
-      return userId && !gettingStartedSuppressed()
-        ? { ...fallback, state: "expanded" }
-        : fallback;
+      return userId ? { ...fallback, state: "expanded" } : fallback;
     }
     const parsed = JSON.parse(raw) as Partial<Persisted>;
     return {

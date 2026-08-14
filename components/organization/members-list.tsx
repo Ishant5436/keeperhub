@@ -1,7 +1,6 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
-import Image from "next/image";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -14,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -111,15 +111,17 @@ export function MembersList({
           <TableRow key={member.id}>
             <TableCell>
               <div className="flex items-center gap-2">
-                {member.user.image && (
-                  <Image
+                {/* Avatars come from arbitrary OAuth CDNs, which next/image
+                    rejects unless every host is allow-listed. */}
+                <Avatar className="size-8">
+                  <AvatarImage
                     alt={member.user.name}
-                    className="h-8 w-8 rounded-full"
-                    height={32}
-                    src={member.user.image}
-                    width={32}
+                    src={member.user.image ?? ""}
                   />
-                )}
+                  <AvatarFallback className="text-xs">
+                    {member.user.name?.slice(0, 2).toUpperCase() ?? "??"}
+                  </AvatarFallback>
+                </Avatar>
                 <div>
                   <div className="font-medium">{member.user.name}</div>
                   <div className="text-muted-foreground text-sm">

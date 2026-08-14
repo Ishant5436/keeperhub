@@ -159,7 +159,6 @@ describe.skipIf(SKIP_INFRA_TESTS)(
     /**
      * Helper to run the workflow-runner script
      */
-    // biome-ignore lint/suspicious/useAwait: async needed for return type Promise, implementation uses new Promise
     async function runWorkflowRunner(
       workflowId: string,
       executionId: string,

@@ -35,6 +35,7 @@ import { checkRateLimit } from "../_lib/rate-limit";
 import { parseNativeValueWei } from "../_lib/reserved-value";
 import { parseSimulateFlag } from "../_lib/simulate-flag";
 import { checkAndReserveExecution } from "../_lib/spending-cap";
+import type { ExecuteResponse } from "../_lib/types";
 import { validateContractCallInput } from "../_lib/validate";
 import { requireWallet } from "../_lib/wallet-check";
 
@@ -225,16 +226,32 @@ async function handleWriteCall(
     outcome = { status: settled.status, error: result.error };
   }
 
+  // The hash is returned whenever one exists, not only when the write
+  // succeeded. A call that broadcast and then reverted comes back with
+  // success: false and a hash (write-contract-core.ts sets it from
+  // revertedTransactionHash), and that is exactly the case where the caller
+  // needs it -- to look up what the chain said about a write it has already
+  // paid for. The failure branch above already reads that hash and records it
+  // against the execution, so withholding it from the response leaves the
+  // caller with less than the row it just wrote.
+  //
+  // transactionLink stays on the success arm because the failure return does
+  // not set one.
+  const responseBody: ExecuteResponse = {
+    executionId,
+    status: outcome.status,
+    ...(result.transactionHash
+      ? { transactionHash: result.transactionHash }
+      : {}),
+    ...(result.success && result.transactionLink
+      ? { transactionLink: result.transactionLink }
+      : {}),
+    ...(outcome.error ? { error: outcome.error } : {}),
+  };
+
   return recordIdempotentResponse(
     idem,
-    NextResponse.json(
-      {
-        executionId,
-        status: outcome.status,
-        ...(outcome.error ? { error: outcome.error } : {}),
-      },
-      { status: HttpStatus.ACCEPTED }
-    ),
+    NextResponse.json(responseBody, { status: HttpStatus.ACCEPTED }),
     outcome.status === "completed" ? "success" : "failed"
   );
 }

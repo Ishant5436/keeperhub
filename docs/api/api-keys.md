@@ -20,7 +20,7 @@ For typical programmatic API access use organization (`kh_`) keys.
 
 ## Organization Keys (`kh_`)
 
-Issued per-organization. Create them from Settings > API Keys > Organisation in the dashboard, or via the endpoints below.
+Issued per-organization. Create them from Settings > Developer > API keys > Organisation keys in the dashboard, or via the endpoints below.
 
 ### List Organization Keys
 

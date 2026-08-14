@@ -19,7 +19,7 @@ Send messages to Slack channels using a bot token and the Slack `chat.postMessag
 2. Under **OAuth & Permissions**, add the `chat:write` bot token scope
 3. Install the app to your workspace and copy the **Bot User OAuth Token** (starts with `xoxb-`)
 4. Invite the bot to the target channel (`/invite @your-bot-name` in Slack)
-5. In KeeperHub, go to **Connections > Add Connection > Slack**
+5. In KeeperHub, go to **Settings > Organization > Connections** and add a Slack connection
 6. Paste the Bot Token and save
 
 ## Send Slack Message

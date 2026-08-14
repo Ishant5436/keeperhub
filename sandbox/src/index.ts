@@ -123,7 +123,6 @@ function decodeRunRequest(raw: Buffer): RunRequest | null {
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a single dispatcher handling body-size cap, concurrency gate, cancellation, and error mapping
 async function handlePostRun(
   req: IncomingMessage,
   res: ServerResponse
@@ -269,7 +268,6 @@ async function main(): Promise<void> {
   });
 
   const shutdown = async (signal: string): Promise<void> => {
-    // biome-ignore lint/suspicious/noConsole: operator needs to see shutdown signals in pod logs
     console.log(`[Shutdown] received ${signal}`);
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
@@ -291,7 +289,6 @@ async function main(): Promise<void> {
       resolve();
     });
   });
-  // biome-ignore lint/suspicious/noConsole: startup banner for operator visibility
   console.log(`[Sandbox] listening on :${SANDBOX_PORT}`);
 }
 

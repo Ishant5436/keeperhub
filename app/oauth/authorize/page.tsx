@@ -6,9 +6,11 @@ import {
   logAnonymousExecutionBlock,
 } from "@/lib/auth-anonymous-guard";
 import {
+  clampScope,
   normalizeScope,
   parseScopes,
   SUPPORTED_SCOPES,
+  scopeExceeds,
 } from "@/lib/mcp/oauth-scopes";
 import {
   AUTH_CODE_TTL_MS,
@@ -16,6 +18,7 @@ import {
   storeAuthCode,
 } from "@/lib/mcp/oauth-store";
 import { isAllowedRedirectUri } from "@/lib/mcp/redirect-uri";
+import { getScopePolicyForMint, policyCeiling } from "@/lib/mcp/scope-policy";
 import { getOrgContext } from "@/lib/middleware/org-context";
 import { ConsentForm } from "./_components/consent-form";
 import { isConsentOrgMismatch } from "./_lib/consent-binding";
@@ -101,12 +104,20 @@ async function handleApprove(formData: FormData): Promise<void> {
     errorRedirect(redirectUri, "access_denied", state ?? undefined);
   }
 
+  // The organization's ceiling applies at consent, not only afterwards.
+  // Without this a member could tick every box and connect above the limit,
+  // leaving the setting to be enforced only on connections that already exist.
+  const grantedScope = clampScope(
+    scope,
+    policyCeiling(await getScopePolicyForMint(session.user.id, organizationId))
+  );
+
   const code = crypto.randomUUID().replace(/-/g, "");
   await storeAuthCode({
     code,
     clientId,
     redirectUri,
-    scope,
+    scope: grantedScope,
     userId: session.user.id,
     organizationId,
     codeChallenge,
@@ -285,7 +296,21 @@ export default async function AuthorizePage({
     "mcp:admin": "Full access to all existing and future actions",
   };
 
-  const scopeOptions = SUPPORTED_SCOPES.map((s) => ({
+  // An organization can cap what its agents may do. Offering a box that the
+  // grant would strip on approval would be a promise the connection cannot
+  // keep, so the capped levels are not shown at all.
+  const consentCeiling = consentOrgContext.organization?.id
+    ? policyCeiling(
+        await getScopePolicyForMint(
+          session.user.id,
+          consentOrgContext.organization.id
+        )
+      )
+    : null;
+
+  const scopeOptions = SUPPORTED_SCOPES.filter(
+    (s) => !scopeExceeds(s, consentCeiling)
+  ).map((s) => ({
     id: s,
     label: scopeDescriptions[s] ?? s,
   }));

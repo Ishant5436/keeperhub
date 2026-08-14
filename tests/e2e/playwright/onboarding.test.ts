@@ -2,8 +2,9 @@ import { expect, test } from "./fixtures";
 
 // Re-enable the onboarding tours for this file. The rest of the suite disables
 // them by default (see fixtures.ts) so the driver.js overlay never blocks
-// unrelated tests.
-test.use({ disableTours: false });
+// unrelated tests. The launcher comes back too, since the tour starts from its
+// "Take a tour" button.
+test.use({ disableGettingStarted: false, disableTours: false });
 
 const WORKFLOW_EDITOR_URL_REGEX = /\/workflows\/[^/]+/;
 

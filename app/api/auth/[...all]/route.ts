@@ -271,7 +271,6 @@ async function interceptOauthCallback(
       "Set-Cookie",
       buildPendingOauthMfaSetCookie(pendingValue)
     );
-    // biome-ignore lint/suspicious/noConsole: success-path trace; Sentry warn would be noise on every login
     console.info("[oauth-callback] pending_oauth_mfa_path", {
       provider,
       user_id: user.id,
@@ -298,7 +297,6 @@ async function interceptOauthCallback(
     "Set-Cookie",
     buildPendingSignupSetCookie(pendingSignupValue)
   );
-  // biome-ignore lint/suspicious/noConsole: success-path trace; Sentry warn would be noise on every login
   console.info("[oauth-callback] pending_signup_mfa_path", {
     provider,
     user_id: user.id,

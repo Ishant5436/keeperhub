@@ -24,6 +24,7 @@ import {
   oauthAuthorizationCodeSchema,
   oauthRefreshTokenSchema,
 } from "@/lib/schemas/oauth";
+import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
 import { isUserMemberOfOrganization } from "@/lib/workflow/access";
 
 export const dynamic = "force-dynamic";
@@ -255,6 +256,7 @@ async function handleAuthorizationCode(
     sub: authCode.userId,
     org: authCode.organizationId,
     scope: authCode.scope,
+    cid: clientId,
   });
 
   const refreshToken = randomBytes(32).toString("hex");
@@ -265,6 +267,23 @@ async function handleAuthorizationCode(
     organizationId: authCode.organizationId,
     scope: authCode.scope,
     expiresAt: Date.now() + REFRESH_TOKEN_TTL_MS,
+  });
+
+  // A client completing consent is the moment a connection starts existing,
+  // and the organization should be able to see that it did.
+  await recordAuditEvent({
+    action: "mcp_connection.created",
+    actor: {
+      authMethod: "oauth",
+      organizationId: authCode.organizationId,
+      userId: authCode.userId,
+    },
+    after: { clientId, scope: authCode.scope },
+    metadata: { ...buildAuditMetadata(request), clientId },
+    resourceId: `${clientId}::${authCode.userId}`,
+    resourceType: "mcp_connection",
+  }).catch(() => {
+    // Never fail a token grant because the trail could not be written.
   });
 
   return Response.json({
@@ -357,12 +376,16 @@ async function handleRefreshToken(
     organizationId: entry.organizationId,
     scope: entry.scope,
     expiresAt: Date.now() + REFRESH_TOKEN_TTL_MS,
+    // Rotation replaces the row, so the original consent time rides along
+    // rather than resetting to now on every refresh.
+    connectedAt: entry.connectedAt,
   });
 
   const accessToken = await createAccessToken({
     sub: entry.userId,
     org: entry.organizationId,
     scope: entry.scope,
+    cid: clientId,
   });
 
   return Response.json({

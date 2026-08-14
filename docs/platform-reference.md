@@ -44,7 +44,7 @@ key — a `kh_` value fails client authentication as an invalid secret.
 | Auth method | Credential | Best for |
 |-------------|------------|----------|
 | OAuth (browser) | Short-lived Bearer access token | Interactive agents, Claude Code `/mcp` |
-| Organization API key (`kh_`) | Long-lived org key from avatar > API Keys > Organisation | Headless CI, scripts, Docker |
+| Organization API key (`kh_`) | Long-lived org key from Settings > Developer > API keys > Organisation keys | Headless CI, scripts, Docker |
 
 For programmatic REST and MCP access without a browser redirect, create an
 organization key from your avatar, then **API Keys**, then the **Organisation**

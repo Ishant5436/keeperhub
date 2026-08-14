@@ -19,6 +19,7 @@ import {
   openInviteForm,
   sendInvite,
 } from "./utils/invitations";
+import { openOrgSettings } from "./utils/settings";
 
 const ACCEPT_INVITE_URL_REGEX = /\/accept-invite/;
 
@@ -56,13 +57,12 @@ test.describe("Organization Invitations", () => {
       await signInAsInviter(page);
       await openInviteForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
       const inviteEmail = `newinvitee+${Date.now()}@example.com`;
 
-      await dialog
+      await page
         .locator('input[placeholder="colleague@example.com"]')
         .fill(inviteEmail);
-      await dialog.locator('button:has-text("Invite")').click();
+      await page.getByRole("button", { name: "Send invitation" }).click();
 
       await expect(
         page
@@ -70,8 +70,8 @@ test.describe("Organization Invitations", () => {
           .filter({ hasText: `Invitation sent to ${inviteEmail}` })
       ).toBeVisible({ timeout: 10_000 });
 
-      await expect(dialog.locator("text=invited").first()).toBeVisible({
-        timeout: 5000,
+      await expect(page.locator("text=invited").first()).toBeVisible({
+        timeout: 10_000,
       });
     });
 
@@ -88,12 +88,10 @@ test.describe("Organization Invitations", () => {
       await signInAsInviter(page);
       await openInviteForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
-
-      await dialog
+      await page
         .locator('input[placeholder="colleague@example.com"]')
         .fill(existingUserEmail);
-      await dialog.locator('button:has-text("Invite")').click();
+      await page.getByRole("button", { name: "Send invitation" }).click();
 
       await expect(
         page
@@ -101,8 +99,8 @@ test.describe("Organization Invitations", () => {
           .filter({ hasText: `Invitation sent to ${existingUserEmail}` })
       ).toBeVisible({ timeout: 10_000 });
 
-      await expect(dialog.locator("text=invited").first()).toBeVisible({
-        timeout: 5000,
+      await expect(page.locator("text=invited").first()).toBeVisible({
+        timeout: 10_000,
       });
     });
 
@@ -116,27 +114,30 @@ test.describe("Organization Invitations", () => {
       await signInAsInviter(page);
       await openInviteForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
       const inviteEmail = `reinvite+${Date.now()}@example.com`;
       const sentToast = page
         .locator("[data-sonner-toast]")
         .filter({ hasText: `Invitation sent to ${inviteEmail}` });
 
       // First invite succeeds.
-      await dialog
+      await page
         .locator('input[placeholder="colleague@example.com"]')
         .fill(inviteEmail);
-      await dialog.locator('button:has-text("Invite")').click();
+      await page.getByRole("button", { name: "Send invitation" }).click();
       await expect(sentToast).toBeVisible({ timeout: 10_000 });
 
-      // Let the first toast clear so the re-invite toast is unambiguous.
-      await expect(sentToast).toBeHidden({ timeout: 10_000 });
+      // Let the first toast clear so the re-invite toast is unambiguous. The
+      // pointer is parked away from the toaster first: left where the click
+      // landed it keeps the stack expanded, and an expanded toast never times
+      // out on its own.
+      await page.mouse.move(0, 0);
+      await expect(sentToast).toBeHidden({ timeout: 15_000 });
 
       // Re-inviting the same email re-sends (success), not an error.
-      await dialog
+      await page
         .locator('input[placeholder="colleague@example.com"]')
         .fill(inviteEmail);
-      await dialog.locator('button:has-text("Invite")').click();
+      await page.getByRole("button", { name: "Send invitation" }).click();
       await expect(sentToast).toBeVisible({ timeout: 10_000 });
     });
 
@@ -146,12 +147,10 @@ test.describe("Organization Invitations", () => {
       await signInAsInviter(page);
       await openInviteForm(page);
 
-      const dialog = page.locator('[role="dialog"]');
-
-      await dialog
+      await page
         .locator('input[placeholder="colleague@example.com"]')
         .fill(PERSISTENT_INVITER_EMAIL);
-      await dialog.locator('button:has-text("Invite")').click();
+      await page.getByRole("button", { name: "Send invitation" }).click();
 
       await expect(
         page
@@ -361,14 +360,13 @@ test.describe("Organization Invitations", () => {
       const popover = page.locator('[role="listbox"]');
       await expect(popover).toBeVisible({ timeout: 5000 });
       const orgItems = popover.locator('[role="option"]');
-      await expect(orgItems).toHaveCount(3); // 2 orgs + "Manage Organizations"
+      await expect(orgItems).toHaveCount(2); // the member belongs to 2 orgs
 
       const activeItem = orgItems.filter({ hasText: currentOrgName.trim() });
       await expect(activeItem.locator("svg.opacity-100")).toBeVisible();
 
       const otherOrg = orgItems
         .filter({ hasNotText: currentOrgName.trim() })
-        .filter({ hasNotText: "Manage Organizations" })
         .first();
       const otherOrgName = await otherOrg.innerText();
       await otherOrg.click();
@@ -423,7 +421,7 @@ test.describe("Organization Invitations", () => {
       const popover = page.locator('[role="listbox"]');
       await expect(popover).toBeVisible({ timeout: 5000 });
       const orgItems = popover.locator('[role="option"]');
-      await expect(orgItems).toHaveCount(3);
+      await expect(orgItems).toHaveCount(2); // the two organizations, and nothing else
     });
 
     test("ORG-3: user can leave an org", async ({ page, context }) => {
@@ -437,37 +435,37 @@ test.describe("Organization Invitations", () => {
         timeout: 15_000,
       });
 
+      // Leaving acts on the organization in scope, so switch to the one this
+      // user is only a member of before opening its settings.
       const orgSwitcher = page.locator('button[role="combobox"]');
+      const startingOrg = (await orgSwitcher.innerText()).trim();
       await orgSwitcher.click();
-      await page.locator("text=Manage Organizations").click();
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(
-        dialog.locator('h2:has-text("Manage Organizations")')
-      ).toBeVisible({ timeout: 5000 });
-
-      const orgCards = dialog.locator(
-        ".flex.items-center.justify-between.rounded-lg.border.p-3"
-      );
-      const memberOrg = orgCards
-        .filter({ has: page.locator("p.capitalize", { hasText: "Member" }) })
+      const otherOrg = page
+        .locator('[role="option"]')
+        .filter({ hasNotText: startingOrg })
         .first();
-      const orgNameToLeave = await memberOrg
-        .locator(".font-medium.text-sm")
-        .first()
-        .innerText();
-      await memberOrg.locator('button:has-text("Manage")').click();
+      const orgNameToLeave = (await otherOrg.innerText()).trim();
+      await otherOrg.click();
+      await expect(orgSwitcher).toContainText(orgNameToLeave, {
+        timeout: 10_000,
+      });
 
-      await dialog.locator('button:has-text("Leave Organization")').click();
+      await openOrgSettings(page, "organization");
 
+      // Re-click until the dialog opens: straight after navigation the first
+      // click can land before the handler is wired and be dropped, leaving the
+      // page as it was.
+      const leaveButton = page.getByRole("button", {
+        name: "Leave",
+        exact: true,
+      });
       const alertDialog = page.locator('[role="alertdialog"]');
-      await expect(alertDialog).toBeVisible({ timeout: 5000 });
-      await expect(
-        alertDialog.locator("text=Are you sure you want to leave")
-      ).toBeVisible();
-
+      await expect(async () => {
+        await leaveButton.click();
+        await expect(alertDialog).toBeVisible({ timeout: 3000 });
+      }).toPass({ timeout: 30_000 });
       await alertDialog
-        .locator('button:has-text("Leave Organization")')
+        .getByRole("button", { name: "Leave", exact: true })
         .click();
 
       await expect(

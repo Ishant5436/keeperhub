@@ -28,7 +28,6 @@
       "!app/api/workflow",
       "!app/api/workflows",
       "!lib/workflow-executor.workflow.ts",
-      "!components/settings",
       "!components/workflow",
       "!lib/atoms",
       "!keeperhub-events",
@@ -43,6 +42,12 @@
   },
   "linter": {
     "rules": {
+      "correctness": {
+        // Errors, not warnings: an unused import survives every local check
+        // and is only caught in review, which had happened four times.
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
+      },
       "complexity": {
         "useMaxParams": "off",
         "noUselessUndefined": "off",

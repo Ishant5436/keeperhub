@@ -27,10 +27,15 @@ type ProjectsAndTagsOverlayProps = {
   initialTab?: "projects" | "tags";
 };
 
-export function ProjectsAndTagsOverlay({
-  overlayId,
+/**
+ * Project and tag management. Rendered inline on the settings route; the
+ * overlay below is the thin legacy wrapper around the same panel.
+ */
+export function ProjectsAndTagsPanel({
   initialTab = "projects",
-}: ProjectsAndTagsOverlayProps): React.ReactElement {
+}: {
+  initialTab?: "projects" | "tags";
+}): React.ReactElement {
   const { open: openOverlay, push } = useOverlay();
   const { isAdmin } = useActiveMember();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -151,12 +156,7 @@ export function ProjectsAndTagsOverlay({
 
   return (
     <>
-      <Overlay
-        description="Organize and categorize your workflows"
-        overlayId={overlayId}
-        title="Projects and Tags"
-      >
-        <Tabs className="w-full" defaultValue={initialTab}>
+      <Tabs className="w-full" defaultValue={initialTab}>
           <TabsList className="mb-4 w-full">
             <TabsTrigger value="projects">Projects</TabsTrigger>
             <TabsTrigger value="tags">Tags</TabsTrigger>
@@ -361,8 +361,7 @@ export function ProjectsAndTagsOverlay({
               </div>
             )}
           </TabsContent>
-        </Tabs>
-      </Overlay>
+      </Tabs>
       <ProjectFormDialog
         onCreated={handleProjectCreated}
         onOpenChange={setShowProjectDialog}
@@ -378,5 +377,20 @@ export function ProjectsAndTagsOverlay({
         tag={editingTag}
       />
     </>
+  );
+}
+
+export function ProjectsAndTagsOverlay({
+  overlayId,
+  initialTab = "projects",
+}: ProjectsAndTagsOverlayProps): React.ReactElement {
+  return (
+    <Overlay
+      description="Organize and categorize your workflows"
+      overlayId={overlayId}
+      title="Projects and Tags"
+    >
+      <ProjectsAndTagsPanel initialTab={initialTab} />
+    </Overlay>
   );
 }
