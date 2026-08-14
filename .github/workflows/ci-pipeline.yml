@@ -46,15 +46,18 @@ jobs:
       caller_action: ${{ github.event.action }}
       has_e2e_label: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-e2e-tests-ephemeral') || false }}
       label_name: ${{ github.event.label.name || '' }}
-      # Pass build outputs only on staging; '' must be the `||` fallthrough since
-      # an empty string is falsy (`cond && '' || x` would always yield x).
-      image_tag: ${{ github.ref_name == 'staging' && (needs.build-images.outputs.image_tag || '') || '' }}
-      # Prebuilt sandbox ref, staging only (same fallthrough rule as image_tag);
-      # empty on PRs/prod makes the e2e jobs build the sandbox locally.
-      sandbox_image: ${{ github.ref_name == 'staging' && (needs.build-images.outputs.sandbox_image || '') || '' }}
-      ecr_registry: ${{ github.ref_name == 'staging' && (needs.build-images.outputs.ecr_registry || '') || '' }}
-      ecr_repo: ${{ github.ref_name == 'staging' && (needs.build-images.outputs.ecr_repo || '') || '' }}
-      ecr_region: ${{ github.ref_name == 'staging' && (needs.build-images.outputs.ecr_region || '') || '' }}
+      # Pass the build outputs whenever build-images produced them, which is
+      # every event except a pull request. Restricting this to staging left prod
+      # rebuilding the app from source on the runner while the image it had just
+      # pushed went unused. '' must be the `||` fallthrough since an empty
+      # string is falsy (`cond && '' || x` would always yield x).
+      image_tag: ${{ github.event_name != 'pull_request' && (needs.build-images.outputs.image_tag || '') || '' }}
+      # Prebuilt sandbox ref (same fallthrough rule as image_tag); empty on PRs
+      # makes the e2e jobs build the sandbox locally.
+      sandbox_image: ${{ github.event_name != 'pull_request' && (needs.build-images.outputs.sandbox_image || '') || '' }}
+      ecr_registry: ${{ github.event_name != 'pull_request' && (needs.build-images.outputs.ecr_registry || '') || '' }}
+      ecr_repo: ${{ github.event_name != 'pull_request' && (needs.build-images.outputs.ecr_repo || '') || '' }}
+      ecr_region: ${{ github.event_name != 'pull_request' && (needs.build-images.outputs.ecr_region || '') || '' }}
     secrets: inherit
 
   # Sentry source-map upload, fanned out from build-images alongside e2e so it
