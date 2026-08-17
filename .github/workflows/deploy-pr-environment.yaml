@@ -464,10 +464,28 @@ jobs:
     if: needs.check-labels.outputs.should-build-executor == 'true'
     runs-on: ubuntu-latest
     environment: staging
+    # The executor and workflow-runner images each run a full production build
+    # from the same Dockerfile. Building both in one job exhausted the runner
+    # and the VM was terminated mid-build, so they are split across runners the
+    # same way build-images splits app and migrator.
+    strategy:
+      fail-fast: true
+      matrix:
+        image:
+          - name: executor
+            target: executor
+            tag_prefix: executor
+            ecr: keeperhub-executor-staging
+            cache_from_staging: true
+            cache_key: cache-pr
+          - name: workflow-runner
+            target: workflow-runner
+            tag_prefix: workflow-runner
+            ecr: keeperhub-staging
+            cache_from_staging: false
+            cache_key: workflow-runner-cache-pr
     env:
       REGION: ${{ vars.TO_REGION }}
-      EXECUTOR_ECR_NAME: keeperhub-executor-staging
-      RUNNER_ECR_NAME: keeperhub-staging
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -491,69 +509,40 @@ jobs:
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Check if executor image exists
+      - name: Check if image exists
         id: check-image
         run: |
           IMAGE_TAG="${{ steps.vars.outputs.sha_short }}"
           if aws ecr describe-images \
-            --repository-name ${{ env.EXECUTOR_ECR_NAME }} \
-            --image-ids imageTag=executor-${IMAGE_TAG} \
+            --repository-name ${{ matrix.image.ecr }} \
+            --image-ids imageTag=${{ matrix.image.tag_prefix }}-${IMAGE_TAG} \
             --region ${{ env.REGION }} >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build and push executor image
+      - name: Build and push image
         if: steps.check-image.outputs.exists != 'true'
-        # Read from staging cache (warm start) and PR cache, but only write to
-        # :cache-pr. Prevents PR builds from poisoning the staging :cache layer
-        # used by deploy-executor.yaml.
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          target: executor
-          push: true
-          provenance: false
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.EXECUTOR_ECR_NAME }}:executor-${{ steps.vars.outputs.sha_short }}
-          cache-from: |
-            type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.EXECUTOR_ECR_NAME }}:cache
-            type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.EXECUTOR_ECR_NAME }}:cache-pr
-          cache-to: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.EXECUTOR_ECR_NAME }}:cache-pr,mode=max
-
-      - name: Check if runner image exists
-        id: check-runner-image
-        run: |
-          IMAGE_TAG="${{ steps.vars.outputs.sha_short }}"
-          if aws ecr describe-images \
-            --repository-name ${{ env.RUNNER_ECR_NAME }} \
-            --image-ids imageTag=workflow-runner-${IMAGE_TAG} \
-            --region ${{ env.REGION }} >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push runner image
-        if: steps.check-runner-image.outputs.exists != 'true'
         # The workflow steps run in a per-execution Job using RUNNER_IMAGE, so a
-        # PR-specific runner is required to exercise executor.workflow.ts changes.
-        # Same Dockerfile as the executor (target: workflow-runner). Uses a
-        # runner-scoped PR cache so it never writes the app's :cache layer.
+        # PR-specific runner is required alongside the executor to exercise
+        # executor.workflow.ts changes. Both come from the same Dockerfile.
+        # Reads the staging cache for a warm start where one exists, but only
+        # ever writes a PR-scoped cache so a PR build cannot poison the staging
+        # :cache layer used by deploy-executor.yaml.
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
-          target: workflow-runner
+          target: ${{ matrix.image.target }}
           push: true
           provenance: false
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.RUNNER_ECR_NAME }}:workflow-runner-${{ steps.vars.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ matrix.image.ecr }}:${{ matrix.image.tag_prefix }}-${{ steps.vars.outputs.sha_short }}
           cache-from: |
-            type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.RUNNER_ECR_NAME }}:workflow-runner-cache-pr
-          cache-to: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.RUNNER_ECR_NAME }}:workflow-runner-cache-pr,mode=max
+            type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ matrix.image.ecr }}:${{ matrix.image.cache_key }}
+            ${{ matrix.image.cache_from_staging && format('type=registry,ref={0}/{1}:cache', steps.login-ecr.outputs.registry, matrix.image.ecr) || '' }}
+          cache-to: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ matrix.image.ecr }}:${{ matrix.image.cache_key }},mode=max
 
   deploy:
     permissions:
