@@ -114,8 +114,8 @@ describe("mergeFromAuthority (KEEP-395 cross-process DB fallback)", () => {
     expect(mockFetchBatch).not.toHaveBeenCalled();
   });
 
-  describe("fast path: tracker hit (same process)", () => {
-    it("uses tracker data without querying DB when tracker has the predecessor", async () => {
+  describe("tracker hit (same process)", () => {
+    it("uses tracker data but still issues the batch step so replays match", async () => {
       recordStepSuccess(executionId, "predA", { rate: 4.5 });
 
       const outputs: NodeOutputs = {
@@ -131,7 +131,10 @@ describe("mergeFromAuthority (KEEP-395 cross-process DB fallback)", () => {
       });
 
       expect(result.predA.data).toEqual({ rate: 4.5 });
-      expect(mockFetchBatch).not.toHaveBeenCalled();
+      // The tracker is process-local and empty on a cold pod, so letting it
+      // decide whether the step runs makes the step sequence differ between
+      // replays of the same convergence.
+      expect(mockFetchBatch).toHaveBeenCalledTimes(1);
     });
   });
 

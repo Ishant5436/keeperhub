@@ -641,6 +641,115 @@ describe("runWorkflowSimulation", () => {
       code: "SIMULATION_INVALID_TRANSACTION",
       fieldKey: "amount",
     });
+    // An uncoded validation failure has no attributed cause to report, so the
+    // generic input guidance is still the right answer for it.
+    expect(result.warnings[0]?.message).toContain(
+      "has invalid transaction inputs"
+    );
+  });
+
+  it("surfaces an attributed shortfall instead of generic input guidance", async () => {
+    // The real underfunded-sender shape: gas estimation rejects the call
+    // before the EVM returns revert data, so failureKind stays "validation"
+    // while `code` carries the attributed cause.
+    spies.simulateNativeTransfer.mockResolvedValueOnce({
+      success: false,
+      status: "simulated",
+      from: "0xaa0000000000000000000000000000000000aa00",
+      to: "0xbb0000000000000000000000000000000000bb00",
+      value: "1000000000000000000",
+      failureKind: "validation",
+      wouldRevert: true,
+      revertReason:
+        "Insufficient ETH balance. Have: 0.25, Need: 1.0. Fund 0xaa0000000000000000000000000000000000aa00 with at least 0.75 ETH on this chain and retry.",
+      error: "Insufficient ETH balance. Have: 0.25, Need: 1.0.",
+      code: "insufficient_balance",
+      balanceWei: "250000000000000000",
+      requiredWei: "1000000000000000000",
+      shortfallWei: "750000000000000000",
+      nativeSymbol: "ETH",
+    });
+
+    const result = await runWorkflowSimulation({
+      organizationId: "org_test",
+      nodes: [
+        actionNode("transfer-1", "web3/transfer-funds", {
+          amount: "1",
+          recipientAddress: "0xbb0000000000000000000000000000000000bb00",
+        }),
+      ],
+    });
+
+    expect(result.warnings[0]).toMatchObject({
+      code: "SIMULATION_PREFLIGHT_FAILED",
+    });
+    // The address to fund and the amount to fund it by are the two facts the
+    // editor cannot derive on its own, so both have to survive.
+    expect(result.warnings[0]?.message).toContain(
+      "Fund 0xaa0000000000000000000000000000000000aa00 with at least 0.75 ETH"
+    );
+    expect(result.warnings[0]?.message).not.toContain(
+      "has invalid transaction inputs"
+    );
+    // The wallet is short; no configured field is wrong. The overlay renders
+    // parameterPath under the message and points its Fix button at fieldKey,
+    // so naming a field here would send the user to an input that is fine.
+    expect(result.warnings[0]?.fieldKey).toBeUndefined();
+    expect(result.warnings[0]?.parameterPath).toBe("nodes[0].data.config");
+    // Gas estimation rejected the call, so it is not reported as a revert.
+    expect(result.warnings[0]?.message).not.toContain("would revert");
+  });
+
+  it("softens an attributed shortfall when an earlier step may fund it", async () => {
+    spies.simulateNativeTransfer
+      .mockResolvedValueOnce(SUCCESS_RESULT)
+      .mockResolvedValueOnce({
+        success: false,
+        status: "simulated",
+        from: "0xaa0000000000000000000000000000000000aa00",
+        to: "0xcc0000000000000000000000000000000000cc00",
+        value: "2000000000000000000",
+        failureKind: "validation",
+        wouldRevert: true,
+        revertReason:
+          "Insufficient ETH balance. Have: 0.25, Need: 2.0. Fund 0xaa0000000000000000000000000000000000aa00 with at least 1.75 ETH on this chain and retry.",
+        error: "Insufficient ETH balance. Have: 0.25, Need: 2.0.",
+        code: "insufficient_balance",
+        balanceWei: "250000000000000000",
+        requiredWei: "2000000000000000000",
+        shortfallWei: "1750000000000000000",
+        nativeSymbol: "ETH",
+      });
+
+    const result = await runWorkflowSimulation({
+      organizationId: "org_test",
+      nodes: [
+        triggerNode(),
+        actionNode("write-1", "web3/transfer-funds", {
+          amount: "1",
+          recipientAddress: "0xbb0000000000000000000000000000000000bb00",
+        }),
+        actionNode("write-2", "web3/transfer-funds", {
+          amount: "2",
+          recipientAddress: "0xcc0000000000000000000000000000000000cc00",
+        }),
+      ],
+      edges: [
+        { source: "trigger-1", target: "write-1" },
+        { source: "write-1", target: "write-2" },
+      ],
+    });
+
+    expect(result.warnings[0]).toMatchObject({
+      code: "SIMULATION_PREFLIGHT_FAILED",
+      nodeId: "write-2",
+    });
+    expect(result.warnings[0]?.message).toContain(
+      "This may depend on an earlier step in this workflow."
+    );
+    // The shortfall reason already ends in a period, so the appended sentence
+    // must not double it.
+    expect(result.warnings[0]?.message).not.toContain("retry.. This may");
   });
 
   it("warns that a later write may depend on an earlier workflow step", async () => {

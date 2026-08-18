@@ -111,13 +111,15 @@ reverts without signing or broadcasting:
 `simulate` must be the JSON boolean `true`. The string `"true"` is rejected, deliberately,
 so a typo cannot fall through to a real broadcast.
 
-A dry run that would revert answers **HTTP 400 with `wouldRevert: true`**. That status
-describes the transaction, not your request: the simulation ran, and the body carries the
-decoded reason. A wrapper that treats every non-2xx as "bad request" throws away the
-answer. Read `wouldRevert` before classifying a 400 from these endpoints.
+A deterministic dry-run failure answers HTTP 400 with `wouldRevert: true`. Classify the
+body by a string `code` first, then by `failureKind`: `insufficient_balance` is an
+attributed preflight failure, while `failureKind: "revert"` means the EVM call reverted.
+Other validation failures are not confirmed reverts. A wrapper that treats every non-2xx
+as "bad request" throws away these diagnostics.
 
-Over MCP the same information arrives as an error whose text names the stage, the decoded
-reason, any machine-readable `code`, and the account the dry run used as sender.
+Over MCP the two actionable cases arrive as an augmented error whose text names the
+stage, reason, machine-readable `code` when present, simulated sender, and
+low-level call target.
 
 A successful dry run is not a guarantee of execution. It proves the call does not revert
 against current state, at the sender the simulator chose. State can change, and for a
@@ -178,7 +180,7 @@ What each stage licenses you to say:
 | Signal | What it proves |
 | --- | --- |
 | `202 Accepted` | the request was queued |
-| `status: "simulated"`, `wouldRevert: false` | the call did not revert against current state |
+| `success: true`, `status: "simulated"`, `wouldRevert: false` | the call did not revert against current state |
 | `transactionHash` present | a transaction was claimed |
 | `status: "unconfirmed"` | it was broadcast but its receipt is not yet readable — not a failure |
 | `status: "completed"` | every claimed hash verified onchain |
@@ -210,10 +212,10 @@ Never convert absence of evidence into a success.
 ## 10. Troubleshooting
 
 **HTTP 400 on a dry run.** Symptom: a non-2xx that a generic wrapper reports as a bad
-request. Likely cause: the simulation ran and the call would revert. How to inspect: read
-`wouldRevert` and `revertReason` in the body; over MCP, read the diagnostic lines on the
-error. Safe next step: fix the cause and re-simulate. Do not broadcast to "see what
-happens".
+request. Likely cause: a deterministic simulation failure. How to inspect: read `code`
+first, then `failureKind`, `wouldRevert`, and `revertReason`; over MCP, read the appended
+diagnostic lines when present. Safe next step: fix the attributed cause and re-simulate.
+Do not broadcast to "see what happens".
 
 **The reported balance does not match what you expect.** Symptom: a shortfall or
 insufficient-balance reason naming an address that looks wrong. Likely cause: the dry run
@@ -238,7 +240,7 @@ Broadcasting needs `mcp:write`; a dry run only needs `mcp:read`.
 3. Addresses identified: signer, Safe, Roles modifier, token holder, recipient
 4. Token address correct for that chain, amount in human-readable units
 5. The account that actually holds the token is funded
-6. Dry run returns `wouldRevert: false`
+6. Dry run returns `success: true` and `wouldRevert: false`
 7. Same body broadcast, `simulate` removed, `Idempotency-Key` set
 8. `executionId` saved
 9. `status: "completed"` with `verified: true` and `receiptStatus: "success"`

@@ -1,3 +1,4 @@
+import { splitTemplateRef } from "@/lib/workflow/template-ref";
 import { findActionById } from "@/plugins/registry";
 import { BUILTIN_NODE_ID } from "./builtin-variables";
 
@@ -64,17 +65,15 @@ export function getDisplayTextForTemplate(
     }
   }
 
-  const dotIndex = rest.indexOf(".");
+  const { fieldPath } = splitTemplateRef(rest, displayLabel);
 
-  if (dotIndex === -1) {
+  if (!fieldPath) {
     return displayLabel ?? rest;
   }
-
-  const field = rest.substring(dotIndex + 1);
 
   if (!displayLabel) {
     return rest;
   }
 
-  return `${displayLabel}.${field}`;
+  return `${displayLabel}.${fieldPath}`;
 }

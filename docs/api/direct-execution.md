@@ -477,7 +477,15 @@ All three execute endpoints (`/api/execute/transfer`, `/api/execute/contract-cal
 
 No row is inserted into the execution audit table, no funds are reserved against the spending cap, and no transaction hash is produced. Use it to pre-flight a transaction (catch reverts, allowance mismatches, balance shortfalls, ABI mistakes) before spending gas.
 
-A simulation that reports the call would revert answers with HTTP `400` and `wouldRevert: true`. That status describes the transaction, not the request: the simulation itself ran, and the body carries the decoded reason your client wants. Read `wouldRevert` before classifying a `400` from these endpoints, so a generic "non-2xx means the call failed" wrapper does not discard the answer. The distinguishing marker is the `wouldRevert` field, which is present only on simulate responses.
+A deterministic failed simulation answers with HTTP `400`. Do not classify every such body as an EVM
+revert: read a string `code` first, then `failureKind`, then `wouldRevert`. A `code` is an
+attributed preflight failure such as `insufficient_balance`; `failureKind: "revert"`
+with `wouldRevert: true` is a confirmed call revert; an uncoded
+`failureKind: "validation"` is not. Route-level parameter errors may carry none of these
+fields. This ordering keeps a generic "non-2xx means the request is malformed" wrapper
+from discarding actionable chain-state diagnostics without mislabelling input errors as
+reverts. A simulator infrastructure failure uses `failureKind: "unavailable"`,
+`wouldRevert: false`, and HTTP `503` instead.
 
 ### Request
 
@@ -514,6 +522,8 @@ Because a dry run never signs or broadcasts, an OAuth token scoped `mcp:read` ma
 ```
 
 - `from`: the org's wallet address used as the sender (see "Known limitation" below)
+- `to`: the low-level call target. For an ERC-20 transfer this is the token contract,
+  not the transfer recipient
 - `value`: native value in wei sent with the call
 - `gasEstimate`: estimated gas units required by the call, as a decimal string
 - `simulatedReturnValue`: the decoded return value of the call (e.g. `true` for ERC-20 `transfer`, the read value for view functions, `null` for native transfers to an EOA recipient)
@@ -530,11 +540,17 @@ When the chain would have rejected the transaction, the endpoint returns HTTP 40
   "from": "0x...orgWallet",
   "to": "0x...target",
   "value": "0",
+  "failureKind": "revert",
   "wouldRevert": true,
   "revertReason": "Error(ERC20: transfer amount exceeds balance)",
   "error": "Error(ERC20: transfer amount exceeds balance)"
 }
 ```
+
+- `failureKind`: `"revert"` confirms that the call produced a revert rather than an
+  input or preflight failure
+- `wouldRevert`: `true` on this failure path; use it together with `failureKind`, not as
+  a revert discriminator by itself
 
 Revert decoding tries (in order): the contract's own ABI custom errors, common OpenZeppelin / standard errors, then the standard `Error(string)` revert (which is surfaced as `Error(<message>)`). If none match, the failure is either attributed to a funding shortfall (see below) or the raw RPC error message is surfaced.
 
@@ -549,6 +565,7 @@ A node asked to estimate gas for a transfer the sender cannot pay for rejects it
   "from": "0x...orgWallet",
   "to": "0x...recipient",
   "value": "1000000000000000000",
+  "failureKind": "validation",
   "wouldRevert": true,
   "revertReason": "Insufficient ETH balance. Have: 0.25, Need: 1.0. Fund 0x...orgWallet with at least 0.75 ETH on this chain and retry.",
   "error": "Insufficient ETH balance. Have: 0.25, Need: 1.0. Fund 0x...orgWallet with at least 0.75 ETH on this chain and retry.",
@@ -561,7 +578,9 @@ A node asked to estimate gas for a transfer the sender cannot pay for rejects it
 }
 ```
 
-- `code`: `"insufficient_balance"` — branch on this rather than string-matching `revertReason`. Absent when the simulator could not attribute the failure to anything more specific than "the call reverted"
+- `failureKind`: `"validation"` here means no EVM revert was decoded. It does not mean
+  the request data is malformed; inspect `code` before interpreting this discriminator
+- `code`: `"insufficient_balance"` — branch on this rather than string-matching `revertReason`. Absent when the simulator has no more specific machine-readable cause
 - `balanceWei` / `requiredWei` / `shortfallWei`: the sender's native balance, the native value the call would move, and the difference, all in wei
 - `nativeSymbol`: the chain's native currency symbol (`ETH`, `BNB`, `POL`); falls back to `native` if the chain is not seeded
 - `originalError`: the node's own message, kept verbatim. Attribution only ever adds — nothing the chain said is discarded
@@ -787,7 +806,7 @@ Broadcasting requires `mcp:write`. A dry run (`simulate: true`) neither signs no
 
 Before an interactive Run, the workflow editor calls `POST /api/workflows/{workflowId}/simulate` to perform a read-only preflight of reachable EVM write nodes.
 
-The simulation is advisory and never blocks execution. Reverts, invalid simulation inputs, unsupported signers, RPC failures, timeouts, and unavailable simulation services are shown in the issues overlay with **Run Anyway** available.
+The simulation is advisory and never blocks execution. Reverts, funding shortfalls, invalid simulation inputs, unsupported signers, RPC failures, timeouts, and unavailable simulation services are shown in the issues overlay with **Run Anyway** available. A funding shortfall reports the account to fund and the amount it is short by, and names no configured field, because no configured field is wrong.
 
 Only write nodes reachable from a trigger are simulated. Disconnected write nodes are ignored.
 

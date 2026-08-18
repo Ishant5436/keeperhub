@@ -19,14 +19,15 @@ kh execute transfer [flags]
 ### Options
 
 ```
-      --amount string          Amount to transfer (required)
-      --chain string           Chain ID (required)
-  -h, --help                   help for transfer
-      --timeout duration       Timeout when using --wait (default 5m0s)
-      --to string              Recipient address (required)
-      --token string           Token symbol (default "ETH")
-      --token-address string   ERC-20 token contract address
-      --wait                   Wait for completion
+      --amount string            Amount to transfer (required)
+      --chain string             Chain ID (required)
+  -h, --help                     help for transfer
+      --idempotency-key string   Stable Idempotency-Key for this write intent (auto-generated if empty)
+      --timeout duration         Timeout when using --wait (default 5m0s)
+      --to string                Recipient address (required)
+      --token string             Token symbol (default "ETH")
+      --token-address string     ERC-20 token contract address
+      --wait                     Wait for completion
 ```
 
 ### Options inherited from parent commands

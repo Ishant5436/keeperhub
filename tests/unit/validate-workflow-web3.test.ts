@@ -43,6 +43,116 @@ describe("validateWorkflow — unknown-chain-id (VALID-05)", () => {
     expect(err?.message).toContain("9999");
   });
 
+  it("skips a network supplied by a template reference", () => {
+    // A marketplace workflow takes its chain from the caller, which the
+    // Marketplace docs explicitly instruct. The value is a template resolved at
+    // execution time, so there is no chain id to check statically — the address
+    // checks in this module already skip these for the same reason.
+    const wf = makeWorkflow({
+      nodes: [
+        triggerNode(),
+        actionNode("a1", { network: "{{@trigger-1:Manual.network}}" }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    const result = validateWorkflow(wf, { chainIds: new Set([1, 8453]) });
+    expect(
+      result.errors.find((e) => e.code === "unknown-chain-id")
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ["an unclosed template", "{{ not closed"],
+    ["an empty template body", "{{}}"],
+    [
+      "a template that is only part of the value",
+      "1{{@trigger-1:Manual.network}}",
+    ],
+  ])("still errors on %s", (_label, network) => {
+    // The skip covers a value that is entirely one reference.
+    const wf = makeWorkflow({
+      nodes: [triggerNode(), actionNode("a1", { network })],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    expect(
+      validateWorkflow(wf, { chainIds: new Set([1, 8453]) }).errors.find(
+        (e) => e.code === "unknown-chain-id"
+      )
+    ).toBeDefined();
+  });
+
+  it("still errors on a templated network on the trigger itself", () => {
+    // Nothing resolves a trigger's own network. The event listener parses it
+    // with Number() and skips the workflow when that fails, so a templated
+    // trigger network registers no listener and the workflow never fires -
+    // and this error is the only static signal that says why.
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "trigger-1",
+          type: "trigger",
+          data: {
+            label: "Trigger",
+            type: "trigger",
+            config: {
+              triggerType: "Event",
+              network: "{{@trigger-1:Event.chainId}}",
+            },
+          },
+        },
+        actionNode("a1", { network: "1" }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    expect(
+      validateWorkflow(wf, { chainIds: new Set([1, 8453]) }).errors.find(
+        (e) => e.code === "unknown-chain-id"
+      )
+    ).toBeDefined();
+  });
+
+  it("still errors on a trigger that carries no triggerType", () => {
+    // sanitize-nodes only injects triggerType for Schedule nodes, so a trigger
+    // created or imported without one keeps its trigger identity through
+    // data.type alone. Reading it as an action would take the skip and report
+    // clean on the one node whose network nothing resolves.
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: "trigger-1",
+          type: "trigger",
+          data: {
+            label: "Trigger",
+            type: "trigger",
+            config: { network: "{{@x:Y.chainId}}" },
+          },
+        },
+        actionNode("a1", { network: "1" }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    expect(
+      validateWorkflow(wf, { chainIds: new Set([1, 8453]) }).errors.find(
+        (e) => e.code === "unknown-chain-id"
+      )
+    ).toBeDefined();
+  });
+
+  it("skips a reference whose body contains an opening brace", () => {
+    // TEMPLATE_PATTERN is /\{\{([^}]+)\}\}/g, so "{{a{b}}" resolves at
+    // execution time. Rejecting it here would be the false positive this skip
+    // exists to remove.
+    const wf = makeWorkflow({
+      nodes: [triggerNode(), actionNode("a1", { network: "{{a{b}}" })],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    expect(
+      validateWorkflow(wf, { chainIds: new Set([1, 8453]) }).errors.find(
+        (e) => e.code === "unknown-chain-id"
+      )
+    ).toBeUndefined();
+  });
+
   it("errors when network value is a non-numeric string", () => {
     const wf = makeWorkflow({
       nodes: [triggerNode(), actionNode("a1", { network: "abc" })],

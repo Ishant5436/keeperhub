@@ -18,7 +18,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatGasSplit, walletShareWei } from "@/lib/analytics/format-gas";
+import {
+  formatGasExactEth,
+  formatGasSplit,
+  walletShareWei,
+} from "@/lib/analytics/format-gas";
 import type { TimeRange } from "@/lib/analytics/types";
 import {
   analyticsLoadingAtom,
@@ -136,7 +140,42 @@ type KpiBreakdownLine = {
   key: string;
   text: string;
   highlighted?: boolean;
+  /** Shown on hover, for figures the headline rounds. */
+  exact?: string;
 };
+
+function BreakdownLine({ line }: { line: KpiBreakdownLine }): ReactNode {
+  const className = cn(
+    "text-xs font-medium",
+    line.highlighted ? "text-green-600 dark:text-green-400" : "text-foreground"
+  );
+  if (!line.exact) {
+    return (
+      <p className={className} data-kpi-line={line.key}>
+        {line.text}
+      </p>
+    );
+  }
+  // A button, not a <p> with tabIndex: Radix needs a focusable trigger, so the
+  // exact figure has to be reachable by keyboard and not only by hover.
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={cn(className, "block cursor-help text-left")}
+          data-exact={line.exact}
+          data-kpi-line={line.key}
+          type="button"
+        >
+          {line.text}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs font-mono text-xs">
+        {line.exact}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 type KpiCardProps = {
   cardKey: string;
@@ -149,6 +188,8 @@ type KpiCardProps = {
   iconClassName?: string;
   breakdown?: readonly KpiBreakdownLine[];
   tooltip?: string;
+  /** Shown on hover over the headline, for values the display rounds. */
+  exactValue?: string;
 };
 
 function KpiCard({
@@ -162,6 +203,7 @@ function KpiCard({
   iconClassName,
   breakdown,
   tooltip,
+  exactValue,
 }: KpiCardProps): ReactNode {
   return (
     <Card data-kpi={cardKey} data-testid="kpi-card">
@@ -188,12 +230,30 @@ function KpiCard({
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <p
-                className="whitespace-nowrap font-bold text-2xl tracking-tight xl:text-xl"
-                data-testid="kpi-value"
-              >
-                {value}
-              </p>
+              {exactValue ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="cursor-help whitespace-nowrap text-left font-bold text-2xl tracking-tight xl:text-xl"
+                      data-exact={exactValue}
+                      data-testid="kpi-value"
+                      type="button"
+                    >
+                      {value}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs font-mono text-xs">
+                    {exactValue}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <p
+                  className="whitespace-nowrap font-bold text-2xl tracking-tight xl:text-xl"
+                  data-testid="kpi-value"
+                >
+                  {value}
+                </p>
+              )}
               <DeltaDisplay
                 delta={delta}
                 invertColor={invertDeltaColor}
@@ -203,18 +263,7 @@ function KpiCard({
             {breakdown && breakdown.length > 0 ? (
               <div className="space-y-0.5">
                 {breakdown.map((line) => (
-                  <p
-                    className={cn(
-                      "text-xs font-medium",
-                      line.highlighted
-                        ? "text-green-600 dark:text-green-400"
-                        : "text-foreground"
-                    )}
-                    data-kpi-line={line.key}
-                    key={line.key}
-                  >
-                    {line.text}
-                  </p>
+                  <BreakdownLine key={line.key} line={line} />
                 ))}
               </div>
             ) : null}
@@ -318,16 +367,19 @@ export function KpiCards(): ReactNode {
         deltaTooltip: deltaTooltip("total gas spent"),
         invertDeltaColor: true,
         iconClassName: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+        exactValue: formatGasExactEth(totalGasWei),
         breakdown: hasSponsoredGas
           ? ([
               {
                 key: "wallet",
                 text: `${gas.wallet} from wallet`,
+                exact: formatGasExactEth(walletGasWei),
               },
               {
                 key: "sponsored",
                 text: `${gas.sponsored} sponsored`,
                 highlighted: true,
+                exact: formatGasExactEth(sponsoredGasWei),
               },
             ] as const)
           : undefined,
@@ -371,6 +423,7 @@ export function KpiCards(): ReactNode {
           cardKey={card.key}
           delta={card.delta}
           deltaTooltip={card.deltaTooltip}
+          exactValue={"exactValue" in card ? card.exactValue : undefined}
           icon={card.icon}
           iconClassName={card.iconClassName}
           invertDeltaColor={card.invertDeltaColor}

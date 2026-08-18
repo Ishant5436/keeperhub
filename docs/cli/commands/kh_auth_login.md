@@ -8,7 +8,10 @@ Authenticate with KeeperHub using the device code flow.
 Prints a URL and a one-time code. Open the URL in any browser (the browser
 does not open automatically — copy the URL from the terminal) and enter the
 code to complete sign-in. Codes expire after 15 minutes.
-Use --with-token to read an API key from stdin for non-interactive automation.
+Use --with-token to supply an API key. In a terminal it is prompted for without
+echo; piped or redirected input is read from stdin for non-interactive
+automation. Passing the key inline records it in your shell history, where it
+stays after the session ends.
 
 See also: kh auth status, kh auth logout
 
@@ -22,8 +25,13 @@ kh auth login [flags]
   # Log in (device code flow)
   kh auth login
 
-  # Log in with an API key (non-interactive)
-  echo "kh_xxx" | kh auth login --with-token
+  # Log in with an API key (prompted, not echoed)
+  kh auth login --with-token
+
+  # Non-interactive, for CI. Use a variable or a file so the key stays out of
+  # shell history.
+  printf '%s' "$KEEPERHUB_API_KEY" | kh auth login --with-token
+  kh auth login --with-token < api-key.txt
 ```
 
 ### Options

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { DEFAULT_HTTP_METHOD } from "@/lib/workflow/nodes/http-request/constants";
+import { splitTemplateRef } from "@/lib/workflow/template-ref";
 import { findActionById } from "@/plugins/registry";
 import { synthesiseProtocolForSDK } from "./protocol-synthesiser";
 // System action codegen templates (not in plugin registry)
@@ -67,7 +68,11 @@ function loadStepImplementation(actionType: string): string | null {
 /**
  * Process new format ID references (@nodeId:DisplayName)
  */
-function processNewFormatID(trimmed: string, match: string): string {
+function processNewFormatID(
+  trimmed: string,
+  match: string,
+  nodeLabels?: ReadonlyMap<string, string>
+): string {
   const withoutAt = trimmed.substring(1);
   const colonIndex = withoutAt.indexOf(":");
 
@@ -77,8 +82,7 @@ function processNewFormatID(trimmed: string, match: string): string {
 
   const nodeId = withoutAt.substring(0, colonIndex);
   const rest = withoutAt.substring(colonIndex + 1);
-  const dotIndex = rest.indexOf(".");
-  const fieldPath = dotIndex === -1 ? "" : rest.substring(dotIndex + 1);
+  const { fieldPath } = splitTemplateRef(rest, nodeLabels?.get(nodeId));
 
   const sanitizedNodeId = nodeId.replace(/[^a-zA-Z0-9]/g, "_");
 
@@ -138,7 +142,10 @@ function processLegacyDollarRef(trimmed: string): string {
  * Convert template variables to JavaScript expressions
  * Converts {{@nodeId:DisplayName.field}} to ${outputs?.['nodeId']?.data?.field}
  */
-function convertTemplateToJS(template: string): string {
+function convertTemplateToJSWithLabels(
+  template: string,
+  nodeLabels?: ReadonlyMap<string, string>
+): string {
   if (!template || typeof template !== "string") {
     return template;
   }
@@ -149,7 +156,7 @@ function convertTemplateToJS(template: string): string {
     const trimmed = expression.trim();
 
     if (trimmed.startsWith("@")) {
-      return processNewFormatID(trimmed, match);
+      return processNewFormatID(trimmed, match, nodeLabels);
     }
 
     if (trimmed.startsWith("$")) {
@@ -229,6 +236,11 @@ export function generateWorkflowSDKCode(
   // Build a map of node connections
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const edgesBySource = buildEdgeMap(edges);
+
+  // Labels are needed to split `Label.field` refs whose label contains dots.
+  const nodeLabels = new Map(nodes.map((n) => [n.id, n.data.label ?? ""]));
+  const convertTemplateToJS = (template: string): string =>
+    convertTemplateToJSWithLabels(template, nodeLabels);
 
   // Find trigger nodes
   const triggerNodes = findTriggerNodes(nodes, edges);

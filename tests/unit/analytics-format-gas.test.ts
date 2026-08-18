@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatGasAsEth,
+  formatGasExactEth,
   formatGasSplit,
   gasDecimals,
   walletShareWei,
@@ -100,6 +101,41 @@ describe("formatGasAsEth", () => {
   it("returns -- for missing input and 0 ETH for zero", () => {
     expect(formatGasAsEth(null)).toBe("--");
     expect(formatGasAsEth("0")).toBe("0 ETH");
+  });
+});
+
+describe("formatGasExactEth", () => {
+  // The value the headline renders as "0.0002 ETH", taken off a real receipt.
+  it("keeps every wei the headline rounds away", () => {
+    expect(formatGasExactEth("244920726760244")).toBe(
+      "0.000244920726760244 ETH"
+    );
+    expect(formatGasAsEth("244920726760244", 4)).toBe("0.0002 ETH");
+  });
+
+  it("trims trailing zeros but keeps interior ones", () => {
+    expect(formatGasExactEth("2374215600000000")).toBe("0.0023742156 ETH");
+    expect(formatGasExactEth("1000000000000000000")).toBe("1 ETH");
+    expect(formatGasExactEth("1000000000000000001")).toBe(
+      "1.000000000000000001 ETH"
+    );
+  });
+
+  it("renders a single wei rather than collapsing it to zero", () => {
+    expect(formatGasExactEth("1")).toBe("0.000000000000000001 ETH");
+  });
+
+  it("stays exact past float53", () => {
+    expect(formatGasExactEth("9007199254740993123456789")).toBe(
+      "9007199.254740993123456789 ETH"
+    );
+  });
+
+  it("returns -- for missing input and 0 ETH for zero", () => {
+    expect(formatGasExactEth(null)).toBe("--");
+    expect(formatGasExactEth("")).toBe("--");
+    expect(formatGasExactEth("nonsense")).toBe("--");
+    expect(formatGasExactEth("0")).toBe("0 ETH");
   });
 });
 

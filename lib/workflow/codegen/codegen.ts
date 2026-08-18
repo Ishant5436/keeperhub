@@ -3,6 +3,7 @@ import { resolveConditionExpression } from "@/lib/workflow/nodes/condition/resol
 import { isSafeConditionExpression } from "@/lib/workflow/nodes/condition/safe-eval";
 import { DEFAULT_HTTP_METHOD } from "@/lib/workflow/nodes/http-request/constants";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
+import { splitTemplateRef } from "@/lib/workflow/template-ref";
 import { findActionById, flattenConfigFields } from "@/plugins/registry";
 import {
   analyzeNodeUsage,
@@ -98,6 +99,9 @@ export function generateWorkflowCode(
 
   // Build a map of nodeId to variable name for template references
   const nodeIdToVarName = new Map<string, string>();
+  const nodeIdToLabel = new Map<string, string>(
+    nodes.map((n) => [n.id, n.data.label ?? ""])
+  );
   const usedVarNames = new Set<string>();
 
   for (const node of nodes) {
@@ -134,8 +138,7 @@ export function generateWorkflowCode(
 
     const nodeId = withoutAt.substring(0, colonIndex);
     const rest = withoutAt.substring(colonIndex + 1);
-    const dotIndex = rest.indexOf(".");
-    const fieldPath = dotIndex === -1 ? "" : rest.substring(dotIndex + 1);
+    const { fieldPath } = splitTemplateRef(rest, nodeIdToLabel.get(nodeId));
 
     const varName = nodeIdToVarName.get(nodeId);
     if (!varName) {
@@ -183,8 +186,7 @@ export function generateWorkflowCode(
 
     const nodeId = withoutAt.substring(0, colonIndex);
     const rest = withoutAt.substring(colonIndex + 1);
-    const dotIndex = rest.indexOf(".");
-    const fieldPath = dotIndex === -1 ? "" : rest.substring(dotIndex + 1);
+    const { fieldPath } = splitTemplateRef(rest, nodeIdToLabel.get(nodeId));
 
     const varName = nodeIdToVarName.get(nodeId);
     if (!varName) {

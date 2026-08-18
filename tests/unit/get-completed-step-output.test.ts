@@ -425,7 +425,7 @@ describe("getCompletedStepOutputs (batch helper)", () => {
     }
   });
 
-  it("tracker hits are resolved without a DB call; only misses go to DB", async () => {
+  it("DB rows win; tracker fills only what the DB has not committed", async () => {
     recordStepSuccess(executionId, "p1", { fromTracker: true });
     recordStepSuccess(executionId, "p2", { fromTracker: true });
 
@@ -445,13 +445,17 @@ describe("getCompletedStepOutputs (batch helper)", () => {
     expect(mockFetchBatch).toHaveBeenCalledTimes(1);
   });
 
-  it("all tracker hits: no DB call issued", async () => {
+  it("issues the batch step for the full predecessor list even when the tracker has every entry", async () => {
     recordStepSuccess(executionId, "p1", { a: 1 });
     recordStepSuccess(executionId, "p2", { b: 2 });
 
     const result = await getCompletedStepOutputs(executionId, ["p1", "p2"]);
 
-    expect(mockFetchBatch).not.toHaveBeenCalled();
+    // Replay determinism: gating the step on tracker contents made a warm
+    // replay skip a step the cold pass created, which the DevKit rejects as an
+    // unconsumed step_created event and aborts the whole run over.
+    expect(mockFetchBatch).toHaveBeenCalledTimes(1);
+    expect(mockFetchBatch).toHaveBeenCalledWith(executionId, ["p1", "p2"]);
     expect(result.size).toBe(2);
   });
 

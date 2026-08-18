@@ -421,6 +421,7 @@ describe("/api/execute/transfer simulate", () => {
       from: FROM_ADDRESS,
       to: "0xcc0000000000000000000000000000000000cc00",
       value: "100000000000000000",
+      failureKind: "validation",
       wouldRevert: true,
       revertReason: "Insufficient ETH balance. Have: 0.0, Need: 0.1.",
       error: "Insufficient ETH balance. Have: 0.0, Need: 0.1.",
@@ -444,6 +445,7 @@ describe("/api/execute/transfer simulate", () => {
 
     expect(res.status).toBe(400);
     const body = await res.json();
+    expect(body.failureKind).toBe("validation");
     expect(body.code).toBe("insufficient_balance");
     expect(body.balanceWei).toBe("0");
     expect(body.requiredWei).toBe("100000000000000000");

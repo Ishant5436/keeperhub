@@ -43,7 +43,15 @@ export function buildPaymentConfig(
   workflow: CallRouteWorkflow,
   creatorWalletAddress: string
 ): RouteConfig {
-  const price = Number(workflow.priceUsdcPerCall);
+  // Passed through at the precision it was stored with. `toFixed(2)` rounded
+  // every sub-cent listing to whole cents, while buildPaymentRequired() in
+  // ../router.ts advertises the true amount at USDC's six decimals -- so a
+  // workflow listed at $0.005 quoted 5000 in its 402 and then demanded 10000 at
+  // the gate. The caller signs the advertised amount, the gate finds no
+  // requirement matching it, and every payment fails with "No matching payment
+  // requirements". @x402/evm parsePrice() resolves "$0.005" to 5000 correctly,
+  // so nothing downstream needed the rounding.
+  const price = workflow.priceUsdcPerCall ?? "0";
   const publicHost =
     process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com";
   return {
@@ -51,7 +59,7 @@ export function buildPaymentConfig(
       scheme: "exact",
       network: "eip155:8453",
       payTo: creatorWalletAddress,
-      price: `$${price.toFixed(2)}`,
+      price: `$${price}`,
       // extra.name and extra.version are required by @x402/evm verifyEIP3009 to
       // reconstruct the EIP-712 domain. Without these fields the CDP facilitator
       // throws "EIP-712 domain parameters (name, version) are required" and the

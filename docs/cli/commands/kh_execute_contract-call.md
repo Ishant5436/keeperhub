@@ -19,14 +19,15 @@ kh execute contract-call [flags]
 ### Options
 
 ```
-      --abi-file string    Path to local ABI JSON file
-      --args string        Method arguments as JSON array: '["arg1","arg2"]'
-      --chain string       Chain ID (required)
-      --contract string    Contract address (required)
-  -h, --help               help for contract-call
-      --method string      Method name (required)
-      --timeout duration   Timeout when using --wait (default 5m0s)
-      --wait               Wait for completion
+      --abi-file string          Path to local ABI JSON file
+      --args string              Method arguments as JSON array: '["arg1","arg2"]'
+      --chain string             Chain ID (required)
+      --contract string          Contract address (required)
+  -h, --help                     help for contract-call
+      --idempotency-key string   Stable Idempotency-Key for write intents (auto-generated if empty)
+      --method string            Method name (required)
+      --timeout duration         Timeout when using --wait (default 5m0s)
+      --wait                     Wait for completion
 ```
 
 ### Options inherited from parent commands

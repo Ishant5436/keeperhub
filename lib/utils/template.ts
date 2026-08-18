@@ -12,6 +12,7 @@ import {
   recordUnresolved,
   type TemplateResolutionTracker,
 } from "@/lib/workflow/executor/template-resolution";
+import { splitTemplateRef } from "@/lib/workflow/template-ref";
 
 // Regex constants for performance
 const TEMPLATE_PATTERN = /\{\{([^}]+)\}\}/g;
@@ -73,8 +74,7 @@ function processNewFormatReference(
 
   const nodeId = withoutAt.substring(0, colonIndex);
   const rest = withoutAt.substring(colonIndex + 1);
-  const dotIndex = rest.indexOf(".");
-  const fieldPath = dotIndex === -1 ? "" : rest.substring(dotIndex + 1);
+  const { fieldPath } = splitTemplateRef(rest, nodeOutputs[nodeId]?.label);
 
   if (!fieldPath) {
     const nodeOutput = nodeOutputs[nodeId];

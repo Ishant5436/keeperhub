@@ -18,6 +18,7 @@ type Web3Issue = {
 type NodeLike = {
   id?: unknown;
   data?: {
+    type?: unknown;
     config?: Record<string, unknown>;
   } | null;
 };
@@ -45,6 +46,24 @@ export function chainExists(
   for (const [idx, rawNode] of nodes.entries()) {
     const network = readStringConfig(rawNode as NodeLike, "network");
     if (network === null) {
+      continue;
+    }
+    // A network supplied by the caller arrives as a template reference and is
+    // resolved at execution time, so there is no chain id to check statically.
+    // Two limits on the skip, both cases where a template is wrong rather than
+    // unresolvable: a trigger's own network is never resolved by anything, and
+    // the reference has to be the whole value.
+    //
+    // A trigger is identified the same way this module's caller identifies one
+    // — by data.type — and not by the presence of triggerType, which
+    // sanitize-nodes only injects for Schedule nodes. A trigger imported
+    // without it would otherwise be read as an action, take the skip, and
+    // validate clean while the event listener drops the workflow for a
+    // non-numeric chain id and it never fires.
+    const isTriggerNode =
+      (rawNode as NodeLike)?.data?.type === "trigger" ||
+      readStringConfig(rawNode as NodeLike, "triggerType") !== null;
+    if (!isTriggerNode && isWholeTemplateReference(network)) {
       continue;
     }
     const parsed = Number(network);
@@ -135,6 +154,31 @@ const TEMPLATE_REFERENCE_RE = /\{\{.*?\}\}/;
 
 export function isTemplateReference(value: string): boolean {
   return TEMPLATE_REFERENCE_RE.test(value);
+}
+
+/**
+ * True when the value is a single template reference and nothing else.
+ *
+ * Stricter than isTemplateReference, which matches a `{{...}}` anywhere in the
+ * value. That is right for an address, whose resolved value is re-checked with
+ * ethers.isAddress before use, and wrong for a chain id, which is substituted
+ * whole and never re-validated: "1{{@a:B.c}}" would skip the check and then
+ * resolve into a chain the author never chose.
+ *
+ * An empty or whitespace-only body is not a reference any resolver in the repo
+ * recognises. A closing brace inside the body is not either: TEMPLATE_PATTERN
+ * in lib/utils/template.ts is /\{\{([^}]+)\}\}/g, so the body it accepts may
+ * contain "{" but never "}". Rejecting "{" here would flag "{{a{b}}", which
+ * resolves at execution time — exactly the false positive this skip exists to
+ * remove.
+ */
+export function isWholeTemplateReference(value: string): boolean {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("{{") && trimmed.endsWith("}}"))) {
+    return false;
+  }
+  const body = trimmed.slice(2, -2);
+  return body.trim().length > 0 && !body.includes("}");
 }
 
 function readStringConfig(node: NodeLike, key: string): string | null {

@@ -72,6 +72,33 @@ export function formatGasAsEth(
   return renderUnits(toDisplayUnits(wei, decimals), decimals);
 }
 
+const WEI_DECIMALS = 18;
+const TRAILING_ZEROS = /0+$/;
+
+/**
+ * Every wei the value holds, rendered as ETH with nothing rounded away.
+ *
+ * The headline figures round to 4 significant places, which is unreadable to
+ * compare against a block explorer. This is the number to show on hover so the
+ * two can be reconciled digit for digit. Trailing zeros are trimmed because
+ * they carry no information.
+ */
+export function formatGasExactEth(
+  weiString: string | null | undefined
+): string {
+  const wei = parseWei(weiString);
+  if (wei === null) {
+    return "--";
+  }
+  if (wei === ZERO) {
+    return "0 ETH";
+  }
+  const digits = wei.toString().padStart(WEI_DECIMALS + 1, "0");
+  const whole = digits.slice(0, -WEI_DECIMALS);
+  const fraction = digits.slice(-WEI_DECIMALS).replace(TRAILING_ZEROS, "");
+  return fraction ? `${whole}.${fraction} ETH` : `${whole} ETH`;
+}
+
 /**
  * The wallet-paid share of a period's gas.
  *

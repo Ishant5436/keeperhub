@@ -432,5 +432,32 @@ All tools return errors in this format:
 |------|---------|
 | 401 | Invalid or missing API key |
 | 404 | Workflow or execution not found |
-| 400 | Invalid parameters |
+| 400 | Invalid parameters -- or a dry-run failure; inspect `code`, then `failureKind` and `wouldRevert` (see below) |
 | 500 | Server error |
+
+### Actionable dry-run failures
+
+A `400` from `execute_transfer`, `execute_contract_call`, or
+`execute_check_and_execute` with `simulate: true` is not always a bad request. Classify
+the body in this order:
+
+1. A string `code` together with `wouldRevert: true` is an attributed preflight failure. Currently
+   `insufficient_balance` means the simulated sender lacks the native value needed for
+   the call. This remains `failureKind: "validation"` because preflight did not produce
+   a decoded EVM revert.
+2. Both `failureKind: "revert"` and `wouldRevert: true` mean the simulated call reverted.
+3. Other `failureKind: "validation"` bodies are deterministic simulation failures
+   without an attributed code. They can reflect call construction or chain state, and
+   the MCP layer leaves them unchanged.
+
+The tools augment the first two cases. A coded failure starts with
+`Simulation preflight failed`; a true revert starts with `Simulation reverted`. Both
+diagnostics name the stage, reason, machine-readable code when present, sender, and
+low-level call target. For an ERC-20 transfer, the call target is the token contract,
+not the transfer recipient, which is encoded in calldata. Uncoded validation failures
+are left untouched. The original `API call failed: 400 ...` line is kept first, so callers
+that match on it are unaffected.
+
+The simulated sender is the organization wallet. If your org routes writes through a
+Safe, that is not the account the broadcast spends from -- see
+[Known limitation](/api/direct-execution#known-limitation).

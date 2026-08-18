@@ -202,6 +202,17 @@ export function getCompletedStepOutput(
  * Same kill-switch, error containment, and iteration-row exclusion semantics as
  * getCompletedStepOutput. This is the preferred path for mergeFromAuthority to
  * reduce sequential DB round-trips on cold-pod 9-fan-in convergence.
+ *
+ * Replay determinism: the batch step is issued for the full `nodeIds` list on
+ * every call, never for "the subset the tracker is missing". The tracker is
+ * process-local memory populated by step bodies, and step bodies do not re-run
+ * on replay -- so a cold process sees a miss and creates the step while a warm
+ * replay of the same convergence sees a hit and skips it. The DevKit records
+ * that step_created event on the first pass, finds no matching call on the
+ * second, and aborts the run with "Unconsumed event in event log". Keeping the
+ * call unconditional keeps the step sequence identical across replays. The
+ * tracker is still consulted, but only to fill values the DB has not committed
+ * yet -- never to decide whether the step happens.
  */
 export async function getCompletedStepOutputs(
   executionId: string,
@@ -214,22 +225,26 @@ export async function getCompletedStepOutputs(
 
   const trackerSteps = getSuccessfulSteps(executionId);
 
-  const dbNodeIds: string[] = [];
-  for (const nodeId of nodeIds) {
-    if (trackerSteps?.has(nodeId)) {
-      result.set(nodeId, {
-        output: trackerSteps.get(nodeId),
-        source: "tracker",
-      });
-    } else {
-      dbNodeIds.push(nodeId);
+  const fillFromTracker = (): void => {
+    for (const nodeId of nodeIds) {
+      if (!result.has(nodeId) && trackerSteps?.has(nodeId)) {
+        result.set(nodeId, {
+          output: trackerSteps.get(nodeId),
+          source: "tracker",
+        });
+      }
     }
-  }
+  };
 
-  if (dbNodeIds.length === 0 || !DB_FALLBACK_ENABLED) {
+  // Seeded before the query so tracker entries keep the precedence they had
+  // when they were what decided the query's node list.
+  fillFromTracker();
+
+  if (!DB_FALLBACK_ENABLED) {
     return result;
   }
 
+  const dbNodeIds = [...nodeIds];
   const startMs = Date.now();
   try {
     const rows = await fetchCompletedStepOutputsBatchStep(
