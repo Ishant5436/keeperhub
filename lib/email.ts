@@ -5,12 +5,14 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PLANS } from "@/lib/billing/plans";
 import {
   ErrorCategory,
   logSystemError,
   logUserError,
   logWarn,
 } from "@/lib/logging";
+import { SUPPORT_EMAIL } from "@/lib/social-links";
 
 const isTestEnv = !!process.env.CI || process.env.NODE_ENV === "test";
 
@@ -1254,6 +1256,528 @@ ${socialText}
       new Error("Failed to send account suspension email"),
       {
         service: "sendgrid",
+      }
+    );
+  }
+
+  return success;
+}
+
+/**
+ * Pay-as-you-go settlement details, present only for orgs that can run past
+ * their quota on it. Decimal USDC strings straight from the billing config, so
+ * the figures quoted here are the figures shown in Billing.
+ */
+export type ExecutionQuotaPaygDetails = {
+  priceUsdc: string;
+  dailyCapUsdc: string;
+  periodCapUsdc: string;
+  // Settlement network, "Base" today.
+  chainName: string;
+  // Block explorer page for the exact token charges settle in, so the reader
+  // can confirm which USDC contract is meant without being told to be careful.
+  assetUrl: string;
+};
+
+type ExecutionQuotaEmailData = {
+  email: string;
+  orgName: string;
+  planLabel: string;
+  // 80 = approaching the limit, 100 = limit reached.
+  threshold: number;
+  used: number;
+  limit: number;
+  usagePercent: number;
+  // When the monthly count resets to zero (start of the next UTC month).
+  resetDate: Date;
+  // Deep links into the org's own settings pages.
+  plansUrl: string;
+  billingUrl: string;
+  // Set when the org can keep running past the limit by paying per execution.
+  payg: ExecutionQuotaPaygDetails | null;
+  // Dollars per 1,000 executions past the limit, or null when not billed.
+  overageRatePerThousand: number | null;
+};
+
+function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+/** Match the Billing UI's USDC rendering so quoted figures agree with it. */
+function formatUsdcAmount(decimal: string): string {
+  return `$${Number(decimal).toLocaleString("en-US", {
+    maximumFractionDigits: 6,
+  })}`;
+}
+
+type TierRung = {
+  planName: string;
+  executions: number;
+  monthlyPrice: number;
+};
+
+/**
+ * The closing pitch and the action that goes with it. The action is part of the
+ * pitch because it is not always the same: an org that has outgrown every
+ * published tier is offered a conversation, not a pricing page.
+ */
+type UpgradePitch = {
+  text: string;
+  html: string;
+  ctaLabel: string;
+  ctaUrl: string;
+};
+
+/**
+ * Every published tier, smallest to largest, Pro then Business. An org over its
+ * quota moves up this ladder one rung at a time, which crosses from Pro into
+ * Business at the top of Pro rather than jumping plans.
+ */
+const TIER_LADDER: TierRung[] = [
+  ...PLANS.pro.tiers.map((tier) => ({
+    planName: PLANS.pro.name,
+    executions: tier.executions,
+    monthlyPrice: tier.monthlyPrice,
+  })),
+  ...PLANS.business.tiers.map((tier) => ({
+    planName: PLANS.business.name,
+    executions: tier.executions,
+    monthlyPrice: tier.monthlyPrice,
+  })),
+];
+
+/** "2x" for a whole multiple, "2.5x" where the step is not a round one. */
+function formatMultiple(ratio: number): string {
+  return Number.isInteger(ratio) ? `${ratio}x` : `${ratio.toFixed(1)}x`;
+}
+
+/** "$2" and "$1.50", never "$1.5", which reads as a typo in a price. */
+function formatDollars(amount: number): string {
+  return Number.isInteger(amount) ? `$${amount}` : `$${amount.toFixed(2)}`;
+}
+
+/**
+ * How a link reads in the plain-text body. A mailto: with a subject query is
+ * correct in an href and unreadable as text, so it degrades to the address.
+ */
+function plainLinkTarget(url: string): string {
+  return url.startsWith("mailto:")
+    ? url.slice("mailto:".length).split("?")[0]
+    : url;
+}
+
+/**
+ * The next tier up from an org's current included quota, and the point at which
+ * paying for it beats paying overage.
+ *
+ * Overage is priced per execution and a tier step is a flat monthly amount, so
+ * there is an exact crossover. Naming the tier, its price and that crossover is
+ * more use than telling someone a bigger plan exists. Falls back to a plain
+ * suggestion when the org's quota does not match a published tier (a custom
+ * contract), and to an Enterprise pointer at the top of the ladder.
+ */
+function overageUpgradeComparison(
+  currentLimit: number,
+  overageRatePerThousand: number,
+  plansUrl: string
+): UpgradePitch {
+  const next = TIER_LADDER.find((rung) => rung.executions > currentLimit);
+
+  if (!next) {
+    // Past the published tiers there is nothing to self-serve, and an org at
+    // this volume is not helped by being pointed at a pricing page. Offer the
+    // conversation instead.
+    const top =
+      "You are past our largest published tier, so the next step is a plan shaped around how you actually run: pricing, limits and support set to match. Tell us what you need and we will put numbers to it.";
+    return {
+      text: top,
+      html: top,
+      ctaLabel: "Talk to us",
+      ctaUrl: `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+        "Custom plan enquiry"
+      )}`,
+    };
+  }
+
+  const gain = `${next.planName} ${formatCount(
+    next.executions
+  )} gets you ${formatMultiple(next.executions / currentLimit)} the executions`;
+
+  const current = TIER_LADDER.find((rung) => rung.executions === currentLimit);
+  const perExecution = overageRatePerThousand / 1000;
+  let rest = `${formatDollars(next.monthlyPrice)} a month.`;
+
+  if (current && perExecution > 0) {
+    // Rounded to the nearest hundred: a "roughly where it flips" figure, not a
+    // quote.
+    const breakEven =
+      currentLimit +
+      Math.round(
+        (next.monthlyPrice - current.monthlyPrice) / perExecution / 100
+      ) *
+        100;
+    rest = `${formatDollars(next.monthlyPrice)} a month. That is roughly what overage costs you at ${formatCount(
+      breakEven
+    )} executions.`;
+  }
+
+  return {
+    text: `At this rate, ${gain}: ${rest}`,
+    html: `At this rate, <strong style="color:#1a1a2e;">${gain}</strong>: ${rest}`,
+    ctaLabel: "See plans",
+    ctaUrl: plansUrl,
+  };
+}
+
+/**
+ * The concrete case for a plan over pay-as-you-go.
+ *
+ * A free org paying per execution hits the entry Pro price at a knowable
+ * number of executions, and past that point it is spending Pro money for a
+ * fraction of Pro's quota. Saying where that crossover falls is more use than
+ * a general nudge to upgrade, so the arithmetic is done here rather than left
+ * to the reader. Falls back to the generic line if the plan data cannot
+ * support the comparison.
+ */
+function paygUpgradeComparison(
+  payg: ExecutionQuotaPaygDetails,
+  currentLimit: number,
+  plansUrl: string
+): UpgradePitch {
+  const entryTier = PLANS.pro.tiers[0];
+  const perExecution = Number(payg.priceUsdc);
+
+  if (!entryTier || perExecution <= 0 || entryTier.executions <= currentLimit) {
+    const fallback =
+      "If this is your new normal, moving to a plan with a larger included quota costs less per execution than running over.";
+    return {
+      text: fallback,
+      html: fallback,
+      ctaLabel: "See plans",
+      ctaUrl: plansUrl,
+    };
+  }
+
+  // Rounded to the nearest hundred: this is a "roughly where it flips" figure,
+  // not a quote.
+  const breakEven =
+    currentLimit +
+    Math.round(entryTier.monthlyPrice / perExecution / 100) * 100;
+  const headroom = Math.round(entryTier.executions / currentLimit);
+
+  // The gain is the point of the paragraph, so it carries the emphasis in HTML
+  // while the plain-text alternative stays free of markup.
+  const gain = `${PLANS.pro.name} gets you ${headroom}x your ${formatCount(
+    currentLimit
+  )} free executions`;
+  const rest = `${formatCount(entryTier.executions)} a month for ${formatDollars(
+    entryTier.monthlyPrice
+  )}. That is roughly what pay-as-you-go costs you at ${formatCount(
+    breakEven
+  )} executions.`;
+
+  return {
+    text: `At this rate, ${gain}: ${rest}`,
+    html: `At this rate, <strong style="color:#1a1a2e;">${gain}</strong>: ${rest}`,
+    ctaLabel: "See plans",
+    ctaUrl: plansUrl,
+  };
+}
+
+/** Format a date as "1 September 2026" for the quota reset line. */
+function formatUtcDate(date: Date): string {
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Tell an organization owner they are approaching (80%) or have reached (100%)
+ * their plan's monthly execution quota, and what they can do about it: keep
+ * running on pay-as-you-go, or move to a plan with a bigger included quota.
+ *
+ * Sent at most once per organization per threshold per quota month. The
+ * debounce lives in the execution_quota_notifications table, not here.
+ */
+export async function sendExecutionQuotaEmail(
+  data: ExecutionQuotaEmailData
+): Promise<boolean> {
+  const {
+    email,
+    orgName,
+    planLabel,
+    threshold,
+    used,
+    limit,
+    usagePercent,
+    resetDate,
+    plansUrl,
+    billingUrl,
+    payg,
+    overageRatePerThousand,
+  } = data;
+
+  const logoUrl =
+    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+
+  const atLimit = threshold >= 100;
+  // On an overage plan nothing is actually limited, so "limit reached" would
+  // read as an outage the org needs to fix. Those get "included executions"
+  // wording instead.
+  const billsOverage = !payg && overageRatePerThousand !== null;
+
+  let subject: string;
+  let heading: string;
+  if (!atLimit) {
+    subject = `${orgName} has used ${usagePercent}% of its monthly executions - KeeperHub`;
+    heading = "You're approaching your monthly execution limit";
+  } else if (billsOverage) {
+    subject = `${orgName} has used all its included monthly executions - KeeperHub`;
+    heading = "You've used all your included executions";
+  } else {
+    subject = `${orgName} has reached its monthly execution limit - KeeperHub`;
+    heading = "You've reached your monthly execution limit";
+  }
+
+  const usedLabel = formatCount(used);
+  const limitLabel = formatCount(limit);
+  const resetLabel = formatUtcDate(resetDate);
+
+  // On Pay per execution the allowance is the free part of the plan, so it is
+  // named as such rather than as "executions included in the Pay per execution
+  // plan", which reads as a contradiction.
+  const allowance = payg
+    ? `${limitLabel} free executions`
+    : `${limitLabel} executions`;
+  const lead = atLimit
+    ? `${orgName} has used all ${allowance} included in ${planLabel} this month. The quota resets on ${resetLabel}.`
+    : `${orgName} has used ${usedLabel} of the ${allowance} included in ${planLabel} this month. The quota resets on ${resetLabel}.`;
+
+  // What happens next depends on how the plan handles running past the limit:
+  // pay-as-you-go charges per execution, overage plans bill the excess, and a
+  // plan with neither stops until the quota resets.
+  let continuityText: string;
+  if (payg) {
+    const priceLabel = formatUsdcAmount(payg.priceUsdc);
+    // Deliberately not "nothing stops". Past the quota a run needs a funded
+    // wallet and room under the caps, so an unqualified promise is wrong for
+    // anyone whose wallet is empty. The two conditions follow immediately.
+    continuityText = atLimit
+      ? `Past your included executions, workflows run on pay-as-you-go at ${priceLabel} each, charged to your organization wallet.`
+      : `Past your included executions, workflows carry on with pay-as-you-go at ${priceLabel} each, charged to your organization wallet.`;
+  } else if (overageRatePerThousand === null) {
+    continuityText = atLimit
+      ? `Further executions are refused until the quota resets on ${resetLabel}. A plan with a larger included quota restores them straight away.`
+      : "Once the included quota is used up, further executions are refused until it resets.";
+  } else {
+    continuityText = atLimit
+      ? `Nothing has stopped, and there is nothing you need to do. Executions past your included quota are billed as overage at ${formatDollars(overageRatePerThousand)} per 1,000 on your next invoice.`
+      : `Nothing stops when you reach it. Executions past your included quota are billed as overage at ${formatDollars(overageRatePerThousand)} per 1,000 on your next invoice.`;
+  }
+
+  // Both conditions gate a pay-as-you-go run. Naming only the wallet balance
+  // leaves a capped org wondering why it stopped despite having funds. Labelled
+  // with the words Billing uses on screen so the two line up.
+  const runConditions = payg
+    ? [
+        {
+          label: "Wallet balance",
+          detail: `Executions are paid in USDC on ${payg.chainName} from your organization wallet. When it runs out, they stop.`,
+        },
+        {
+          label: "Spend caps",
+          detail: `You cap what we can charge: ${formatUsdcAmount(
+            payg.dailyCapUsdc
+          )} a day and ${formatUsdcAmount(
+            payg.periodCapUsdc
+          )} a month. Hit a cap and executions stop until the next day or month, even if the wallet still has funds.`,
+        },
+      ]
+    : [];
+
+  // The wallet address is deliberately not printed here. Users should copy a
+  // deposit address from the app, never from an email, or we train them into
+  // exactly the swap an address-substitution phish relies on.
+  const topUpText = payg
+    ? `Top up by sending USDC on ${payg.chainName} to the wallet address in Billing. No ETH needed, we cover gas.`
+    : "";
+
+  const genericUpgradeText =
+    "If this is your new normal, a larger tier costs less per execution than running over.";
+  let upgradePitch: UpgradePitch;
+  if (payg) {
+    upgradePitch = paygUpgradeComparison(payg, limit, plansUrl);
+  } else if (overageRatePerThousand === null) {
+    upgradePitch = {
+      text: genericUpgradeText,
+      html: genericUpgradeText,
+      ctaLabel: "See plans",
+      ctaUrl: plansUrl,
+    };
+  } else {
+    upgradePitch = overageUpgradeComparison(
+      limit,
+      overageRatePerThousand,
+      plansUrl
+    );
+  }
+
+  // Each call to action sits directly under the paragraph that motivates it,
+  // rather than stacking both at the foot of the mail.
+  const ctaButton = (
+    url: string,
+    label: string,
+    filled: boolean
+  ): string => `<div style="text-align:center; margin:20px 0 28px;">
+      <a href="${url}" style="display:inline-block; ${
+        filled
+          ? "background:#1a1a2e; color:#fff; border:1px solid #1a1a2e;"
+          : "background:#ffffff; color:#1a1a2e; border:1px solid #d4d4d4;"
+      } padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600;">${label}</a>
+    </div>`;
+
+  const topUpHtmlBlock = payg
+    ? `
+    <p style="margin:24px 0 12px; font-weight:600; color:#1a1a2e;">Two things keep them running</p>
+    <table role="presentation" width="100%" style="border-collapse:collapse; border:1px solid #e5e5e5; border-radius:8px;">
+      ${runConditions
+        .map(
+          (row, i) =>
+            `<tr><td style="padding:14px 16px; ${
+              i > 0 ? "border-top:1px solid #eee;" : ""
+            } font-size:14px; color:#444;"><strong style="color:#1a1a2e;">${escapeHtml(
+              row.label
+            )}</strong><br>${escapeHtml(row.detail)}</td></tr>`
+        )
+        .join("")}
+    </table>
+
+    <p style="margin:20px 0 0;">${escapeHtml(topUpText)}</p>
+    <p style="margin:8px 0 0; color:#999; font-size:13px;">Only <a href="${payg.assetUrl}" style="color:#666;" target="_blank" rel="noopener">USDC on ${escapeHtml(payg.chainName)}</a> pays for executions. Anything else you send stays in the wallet, unused.</p>
+    ${ctaButton(billingUrl, "Top up your wallet", true)}`
+    : "";
+
+  const socialText = DIGEST_SOCIAL_LINKS.map((s) => `${s.name}: ${s.url}`).join(
+    "\n"
+  );
+
+  const topUpTextBlock = payg
+    ? `
+Two things keep them running
+${runConditions.map((row) => `  ${row.label}: ${row.detail}`).join("\n")}
+
+${topUpText}
+
+Only USDC on ${payg.chainName} pays for executions (${payg.assetUrl}). Anything else you send stays in the wallet, unused.
+
+Top up your wallet: ${billingUrl}
+`
+    : "";
+
+  // Mirrors the HTML: each link follows the paragraph that motivates it. The
+  // closing action comes from the pitch, so an org past every published tier
+  // gets a way to reach us rather than a pricing page. Orgs with no top-up path
+  // keep the billing link at the foot instead.
+  const closingLinks = payg
+    ? `${upgradePitch.ctaLabel}: ${plainLinkTarget(upgradePitch.ctaUrl)}`
+    : `${upgradePitch.ctaLabel}: ${plainLinkTarget(
+        upgradePitch.ctaUrl
+      )}\nManage billing: ${billingUrl}`;
+
+  const text = `
+Hi,
+
+${lead}
+
+${continuityText}
+${topUpTextBlock}
+${upgradePitch.text}
+
+${closingLinks}
+
+You're receiving this as an owner of ${orgName}.
+
+---
+KeeperHub - Blockchain Workflow Automation
+${socialText}
+`.trim();
+
+  // Clamp the meter so a pay-as-you-go org running well past its quota renders
+  // a full bar rather than overflowing the track.
+  const barPercent = Math.min(100, Math.max(0, usagePercent));
+  const barColor = atLimit ? "#c0392b" : "#e67e22";
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+  </div>
+
+  <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
+    <div style="text-align:center; margin:0 0 14px;">
+      <div style="color:#999; font-size:11px; font-weight:600; letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px;">Organization</div>
+      <span style="display:inline-block; background:#f5f5f5; border:1px solid #e5e5e5; border-radius:999px; padding:6px 14px; color:#1a1a2e; font-weight:600; font-size:14px;">${escapeHtml(orgName)}</span>
+    </div>
+
+    <h2 style="color: #1a1a2e; margin-top: 0;">${heading}</h2>
+
+    <p>${escapeHtml(lead)}</p>
+
+    <div style="background:#f5f5f5; border-radius:8px; padding:20px; margin:24px 0;">
+      <div style="display:block; font-size:24px; font-weight:bold; color:${barColor};">${usagePercent}%</div>
+      <div style="color:#666; font-size:13px; margin-bottom:12px;">${usedLabel} of ${limitLabel} executions used</div>
+      <table role="presentation" width="100%" style="border-collapse:collapse; background:#e5e5e5; border-radius:999px;">
+        <tr><td style="width:${barPercent}%; background:${barColor}; border-radius:999px; font-size:0; line-height:8px; height:8px;">&nbsp;</td><td style="font-size:0; line-height:8px; height:8px;">&nbsp;</td></tr>
+      </table>
+      <div style="color:#999; font-size:12px; margin-top:12px;">Plan: ${escapeHtml(planLabel)} &nbsp;&middot;&nbsp; Quota resets ${resetLabel}</div>
+    </div>
+
+    <p>${continuityText}</p>
+
+    ${topUpHtmlBlock}
+
+    <p>${upgradePitch.html}</p>
+
+    ${ctaButton(upgradePitch.ctaUrl, upgradePitch.ctaLabel, !payg)}
+  </div>
+
+  <div style="text-align: center; padding: 24px 20px; color: #999; font-size: 12px;">
+    <table role="presentation" align="center" style="margin:0 auto 12px;"><tr>${DIGEST_SOCIAL_LINKS.map(
+      (s) =>
+        `<td style="padding:0 8px;"><a href="${s.url}" target="_blank" rel="noopener"><img src="cid:${s.icon}" alt="${s.name}" width="20" height="20" style="display:block;" /></a></td>`
+    ).join("")}</tr></table>
+    <p style="margin: 0 0 6px;">You're receiving this as an owner of <strong>${escapeHtml(orgName)}</strong>.</p>
+    <p style="margin: 0;">KeeperHub - Blockchain Workflow Automation</p>
+  </div>
+</body>
+</html>
+`.trim();
+
+  const success = await sendEmail({
+    to: email,
+    subject,
+    text,
+    html,
+    attachments: getDigestSocialAttachments(),
+  });
+
+  if (!(success || isTestEnv)) {
+    logUserError(
+      ErrorCategory.EXTERNAL_SERVICE,
+      `[Email] Failed to send quota notification to ${email}`,
+      new Error("Failed to send execution quota notification"),
+      {
+        service: "sendgrid",
+        threshold: String(threshold),
       }
     );
   }

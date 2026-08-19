@@ -3,6 +3,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { organizationSubscriptions } from "@/lib/db/schema";
+import { maybeNotifyQuotaThreshold } from "@/lib/notifications/quota-threshold";
 import { getActiveDebtExecutions } from "./execution-debt";
 import {
   countMonthlyExecutionsForAdmission,
@@ -256,6 +257,20 @@ export async function checkExecutionLimit(
   const used = await countMonthlyExecutionsForAdmission(db, organizationId, {
     maxExecutionsPerMonth: limits.maxExecutionsPerMonth,
     overageEnabled: planDef.overage.enabled,
+  });
+
+  // Warn on the execution that crosses 80% or 100% rather than making the org
+  // wait for the next scheduled scan. Everything it needs was just counted, so
+  // this adds no query, and it is fire and forget: a notification problem must
+  // never delay or refuse an execution. Redis holds a cooldown for the rest of
+  // the quota month so this is a no-op on every later run.
+  maybeNotifyQuotaThreshold({
+    organizationId,
+    plan,
+    tier,
+    planOverrides: sub?.planOverrides,
+    used,
+    debtExecutions,
   });
 
   const outcome = decideExecutionLimit({

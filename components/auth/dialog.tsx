@@ -17,7 +17,7 @@ export type AuthPromptIntent = {
 };
 
 // --- Auth-flow-in-progress tracking --------------------------------------
-// ConnectAuthPanel flips connectPanelActive during its email / OTP steps so
+// ConnectAuthPanel flips connectPanelActive for as long as it is mounted so
 // surfaces like the user menu know an auth flow is mid-air and must not be
 // torn down by a session refetch. Kept here so importers have one source.
 let connectPanelActive = false;

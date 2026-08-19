@@ -2,18 +2,25 @@
 
 import { useAtom, useAtomValue } from "jotai";
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   ExternalLink,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type {
   NormalizedStatus,
   StepLog,
@@ -219,6 +226,69 @@ function getStepStatusColor(status: string): string {
   return "bg-gray-400";
 }
 
+const COPIED_FOR_MS = 1500;
+
+// The default tooltip surface inverts the page; an error blob reads better on
+// the same panel the rest of the run details use. The arrow goes with it.
+const ERROR_TOOLTIP_SURFACE =
+  "border bg-popover text-popover-foreground shadow-md [&>span]:hidden";
+
+function CopyErrorButton({ text }: { text: string }): ReactNode {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(
+    (event: MouseEvent): void => {
+      event.stopPropagation();
+      navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPIED_FOR_MS);
+    },
+    [text]
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label="Copy error message"
+          className="shrink-0 rounded p-0.5 text-muted-foreground transition hover:text-foreground"
+          onClick={handleCopy}
+          type="button"
+        >
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className={ERROR_TOOLTIP_SURFACE}>
+        {copied ? "Copied" : "Copy error"}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The clipped one-liner in the row; hovering it reveals the whole message. */
+function StepErrorMessage({ message }: { message: string }): ReactNode {
+  return (
+    <span className="flex min-w-0 shrink items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="min-w-0 max-w-md truncate rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-700 leading-tight dark:text-red-400">
+            {message}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          className={cn(
+            ERROR_TOOLTIP_SURFACE,
+            "max-w-sm text-left font-mono text-[11px] leading-relaxed wrap-anywhere"
+          )}
+        >
+          {message}
+        </TooltipContent>
+      </Tooltip>
+      <CopyErrorButton text={message} />
+    </span>
+  );
+}
+
 type StepLogRowProps = {
   step: StepLog;
 };
@@ -240,14 +310,7 @@ function StepLogRow({ step }: StepLogRowProps): ReactNode {
               ({step.nodeType})
             </span>
           </span>
-          {step.error ? (
-            <span
-              className="max-w-[40%] truncate rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] leading-tight text-red-700 dark:text-red-400"
-              title={step.error}
-            >
-              {step.error}
-            </span>
-          ) : null}
+          {step.error ? <StepErrorMessage message={step.error} /> : null}
         </div>
       </td>
       <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-muted-foreground">
@@ -315,8 +378,29 @@ function ExpandedStepRows({
   const errorMessage = getCustomerRunErrorMessage(run);
   return (
     <tr>
-      <td className="py-2 pl-10 text-xs text-muted-foreground" colSpan={8}>
-        {errorMessage ?? "No step logs available"}
+      <td className="py-2 pl-10 pr-3 text-xs text-muted-foreground" colSpan={8}>
+        <div className="flex items-start gap-2">
+          {errorMessage ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="line-clamp-3 wrap-anywhere">
+                  {errorMessage}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent
+                className={cn(
+                  ERROR_TOOLTIP_SURFACE,
+                  "max-w-sm text-left font-mono text-[11px] leading-relaxed wrap-anywhere"
+                )}
+              >
+                {errorMessage}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span>No step logs available</span>
+          )}
+          {errorMessage ? <CopyErrorButton text={errorMessage} /> : null}
+        </div>
       </td>
     </tr>
   );

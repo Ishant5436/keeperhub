@@ -172,13 +172,15 @@ export function ConnectAuthPanel({
   const [captchaToken, setCaptchaToken] = useState("");
   const captchaRef = useRef<TurnstileInstance | null>(null);
 
-  const inCodeStep =
-    view === "verify" || view === "mfa-email" || view === "mfa-totp";
-
+  // While this panel is on screen the visitor is mid auth flow. Better Auth
+  // refetches the session on tab focus and UserMenu drops to a skeleton while
+  // that is pending, which unmounts the dialog owning this panel and discards
+  // whatever was typed. Users leave the tab to copy an emailed code, so the
+  // panel has to survive that round trip on every view, not just code steps.
   useEffect(() => {
-    setConnectPanelActive(loading || inCodeStep);
+    setConnectPanelActive(true);
     return () => setConnectPanelActive(false);
-  }, [loading, inCodeStep]);
+  }, []);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number | "auto">("auto");

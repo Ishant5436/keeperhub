@@ -2,9 +2,14 @@
 
 import { Info, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { QuotaBanner } from "@/components/billing/quota-banner";
 import { useSession } from "@/lib/auth-client";
 import { isBillingEnabled } from "@/lib/billing/feature-flag";
+import {
+  quotaBannerStorageKey,
+  useQuotaStatus,
+} from "@/lib/hooks/use-quota-status";
 import { isAnonymousUser } from "@/lib/is-anonymous";
 
 const STORAGE_KEY = "kh-billing-announce-v1";
@@ -16,22 +21,55 @@ export function AppBanner(): React.ReactElement | null {
   return <BillingBanner />;
 }
 
+/**
+ * Owns the single fixed banner slot at the top of the app. A quota warning
+ * outranks the plan announcement, so at most one banner renders and
+ * `--app-banner-height` is set once for whichever won.
+ */
 function BillingBanner(): React.ReactElement | null {
   const [mounted, setMounted] = useState(false);
-  const [dismissed, setDismissed] = useState(true);
+  const [announceDismissed, setAnnounceDismissed] = useState(true);
+  const [quotaDismissedKey, setQuotaDismissedKey] = useState<string | null>(
+    null
+  );
   const { data: session, isPending } = useSession();
   const isAnonymous = isAnonymousUser(session?.user);
-  const visible = mounted && !dismissed && !isPending && !isAnonymous;
+  const signedIn = mounted && !isPending && !isAnonymous;
+
+  const { status } = useQuotaStatus(signedIn);
+  const quotaKey =
+    status && status.threshold !== null ? quotaBannerStorageKey(status) : null;
+
+  const quotaVisible = Boolean(
+    signedIn && quotaKey && quotaDismissedKey !== quotaKey
+  );
+  const announceVisible = signedIn && !(announceDismissed || quotaVisible);
+  const visible = quotaVisible || announceVisible;
 
   useEffect(() => {
     setMounted(true);
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
-      setDismissed(stored === "1");
+      setAnnounceDismissed(stored === "1");
     } catch {
-      setDismissed(false);
+      setAnnounceDismissed(false);
     }
   }, []);
+
+  // Re-read on every key change so crossing 100% (a new key) resurfaces the
+  // banner even though the 80% one was dismissed.
+  useEffect(() => {
+    if (!quotaKey) {
+      return;
+    }
+    try {
+      if (window.localStorage.getItem(quotaKey) === "1") {
+        setQuotaDismissedKey(quotaKey);
+      }
+    } catch {
+      // localStorage unavailable; the banner stays visible this session
+    }
+  }, [quotaKey]);
 
   useEffect(() => {
     if (visible) {
@@ -44,16 +82,32 @@ function BillingBanner(): React.ReactElement | null {
     };
   }, [visible]);
 
-  function handleDismiss(): void {
+  const handleDismissQuota = useCallback((): void => {
+    if (!quotaKey) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(quotaKey, "1");
+    } catch {
+      // localStorage unavailable; dismissal only lasts this session
+    }
+    setQuotaDismissedKey(quotaKey);
+  }, [quotaKey]);
+
+  function handleDismissAnnounce(): void {
     try {
       window.localStorage.setItem(STORAGE_KEY, "1");
     } catch {
       // localStorage unavailable; dismissal only lasts this session
     }
-    setDismissed(true);
+    setAnnounceDismissed(true);
   }
 
-  if (!visible) {
+  if (quotaVisible && status) {
+    return <QuotaBanner onDismiss={handleDismissQuota} status={status} />;
+  }
+
+  if (!announceVisible) {
     return null;
   }
 
@@ -72,7 +126,7 @@ function BillingBanner(): React.ReactElement | null {
           credits. Free stays free forever.{" "}
           <Link
             className="font-medium text-keeperhub-green-dark underline-offset-4 hover:underline"
-            href="/billing#plans-section"
+            href="/billing"
           >
             See plans
           </Link>
@@ -81,7 +135,7 @@ function BillingBanner(): React.ReactElement | null {
       <button
         aria-label="Dismiss announcement"
         className="absolute right-3 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-keeperhub-green/10 hover:text-foreground"
-        onClick={handleDismiss}
+        onClick={handleDismissAnnounce}
         type="button"
       >
         <X className="size-3.5" />

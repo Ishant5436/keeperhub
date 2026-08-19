@@ -164,6 +164,50 @@ async function getEncryptedOtpFromDb(identifier: string): Promise<string> {
   }
 }
 
+/**
+ * Read and decrypt the forgot-password reset code. The route stores it under the
+ * bare email identifier, not a prefixed one.
+ */
+export async function getResetOtpFromDb(email: string): Promise<string> {
+  return await getEncryptedOtpFromDb(email);
+}
+
+/**
+ * Read and decrypt a dual-factor email OTP, keyed `mfa:<action>:<userId>` by
+ * lib/mfa/dual-factor.ts. Resolves the user id from the email first.
+ */
+export async function getDualFactorOtpFromDb(
+  email: string,
+  action: string
+): Promise<string> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required");
+  }
+  const sql = postgres(databaseUrl, { max: 1 });
+  let userId: string;
+  try {
+    const rows = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
+    if (rows.length === 0) {
+      throw new Error(`No user found for ${email}`);
+    }
+    userId = rows[0].id as string;
+  } finally {
+    await sql.end();
+  }
+  // The row is written as the challenge is issued, so poll briefly.
+  let lastError: unknown;
+  for (let i = 0; i < 10; i++) {
+    try {
+      return await getEncryptedOtpFromDb(`mfa:${action}:${userId}`);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw lastError;
+}
+
 async function getOtpViaDb(email: string): Promise<string> {
   return await getEncryptedOtpFromDb(`email-verification-otp-${email}`);
 }
@@ -249,7 +293,7 @@ function base32Decode(input: string): Buffer {
  * server's RFC 6238 implementation (HMAC-SHA1, 30s period, dynamic truncation).
  * Validated against the app's generateTotp for byte-identical output.
  */
-function generateTotpCode(manualEntryKey: string): string {
+export function generateTotpCode(manualEntryKey: string): string {
   const step = Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS);
   const counter = Buffer.alloc(8);
   counter.writeBigUInt64BE(BigInt(step));

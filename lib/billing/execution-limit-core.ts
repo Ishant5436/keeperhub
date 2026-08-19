@@ -161,6 +161,30 @@ async function readCount<TSchema extends Record<string, unknown>>(
 }
 
 /**
+ * The count to show a user. Never decides anything.
+ *
+ * Always serves the TTL cache and never forces the re-read that admission does
+ * near the limit. A usage figure being up to TTL stale only delays a banner,
+ * whereas re-reading here would put an uncached O(org monthly executions)
+ * aggregate on every dashboard load by an org sitting in the recount band,
+ * which is precisely the org most likely to be reloading it.
+ *
+ * Do not admit or refuse an execution on this: an under-limit stale count is
+ * what let free-tier bursts through unbilled. Admission uses
+ * countMonthlyExecutionsForAdmission, which closes that window.
+ */
+export async function countMonthlyExecutionsForDisplay<
+  TSchema extends Record<string, unknown>,
+>(
+  db: PostgresJsDatabase<TSchema>,
+  organizationId: string,
+  since: Date = startOfCurrentMonthUtc()
+): Promise<number> {
+  const read = await readCount(db, organizationId, since, getCountCacheTtlMs());
+  return read.count;
+}
+
+/**
  * How far from the limit admission stops trusting a cached count. Sized above
  * the largest burst one org has fitted into a single TTL window, so a burst
  * cannot jump the band from underneath it.

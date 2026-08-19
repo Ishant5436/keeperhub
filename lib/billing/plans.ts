@@ -195,6 +195,18 @@ export function billsOverage(plan: PlanName): boolean {
   return PLANS[plan].overage.enabled;
 }
 
+/**
+ * What a plan is called in front of a user.
+ *
+ * The free plan is presented as "Pay per execution": it includes a monthly
+ * allowance and then charges per execution, so "Free" undersells it and reads
+ * as wrong to anyone who has been billed. `PLANS.free.name` stays "Free" as the
+ * internal key. Use this anywhere a plan name is shown or sent.
+ */
+export function getPlanDisplayName(plan: PlanName): string {
+  return plan === PAYG_PLAN_NAME ? "Pay per execution" : PLANS[plan].name;
+}
+
 // Whether `value` is a Pro tier that may be configured as the trial tier.
 // Guards the TRIAL_TIER env against a plan/tier that does not exist.
 export function isConfigurableTrialTier(value: unknown): value is TierKey {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetExecutionCountCacheForTest,
   countMonthlyExecutionsForAdmission,
+  countMonthlyExecutionsForDisplay,
   decideExecutionLimit,
   statusAllowsOverage,
 } from "@/lib/billing/execution-limit-core";
@@ -351,6 +352,55 @@ describe("countMonthlyExecutionsForAdmission", () => {
       )
     ).toBe(400_000);
     expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("countMonthlyExecutionsForDisplay", () => {
+  const FREE = { maxExecutionsPerMonth: 5000, overageEnabled: false };
+
+  it("serves the cache at the limit, where admission would re-read", async () => {
+    const db = fakeDb();
+    db.execute.mockResolvedValue([{ count: 4900 }]);
+
+    // 4900 is inside admission's recount band for a 5000 free plan, so the
+    // guard re-reads there. A banner refreshed on every dashboard load must
+    // not put that uncached aggregate on the same orgs.
+    expect(
+      await countMonthlyExecutionsForDisplay(asDb(db), "org_1", SINCE)
+    ).toBe(4900);
+    expect(
+      await countMonthlyExecutionsForDisplay(asDb(db), "org_1", SINCE)
+    ).toBe(4900);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses a count the guard already fetched for the same window", async () => {
+    const db = fakeDb();
+    db.execute.mockResolvedValue([{ count: 4000 }]);
+
+    await countMonthlyExecutionsForAdmission(asDb(db), "org_1", FREE, SINCE);
+    expect(
+      await countMonthlyExecutionsForDisplay(asDb(db), "org_1", SINCE)
+    ).toBe(4000);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not serve one month's total into the next", async () => {
+    const db = fakeDb();
+    db.execute
+      .mockResolvedValueOnce([{ count: 4900 }])
+      .mockResolvedValue([{ count: 12 }]);
+
+    expect(
+      await countMonthlyExecutionsForDisplay(asDb(db), "org_1", SINCE)
+    ).toBe(4900);
+    expect(
+      await countMonthlyExecutionsForDisplay(
+        asDb(db),
+        "org_1",
+        new Date("2026-08-01T00:00:00.000Z")
+      )
+    ).toBe(12);
   });
 });
 

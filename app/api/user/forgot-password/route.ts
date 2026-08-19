@@ -10,7 +10,6 @@ import {
   mcpOauthAuthCodes,
   mcpOauthRefreshTokens,
   sessions,
-  twoFactor as twoFactorTable,
   users,
   verifications,
 } from "@/lib/db/schema";
@@ -18,7 +17,6 @@ import { sendOAuthPasswordResetEmail, sendVerificationOTP } from "@/lib/email";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { hashPassword } from "@/lib/password";
 import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
-import { verifyUserTotp } from "@/lib/security/totp-verify";
 import { resolveTrustedClientIp } from "@/lib/security/trusted-proxies";
 import { generateId } from "@/lib/utils/id";
 import { checkForgotPasswordRateLimit } from "./_lib/rate-limit";
@@ -71,7 +69,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       email?: string;
       otp?: string;
       newPassword?: string;
-      code?: string;
     };
 
     const { action, email } = body;
@@ -105,13 +102,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     if (action === "reset") {
-      return handleReset(
-        normalizedEmail,
-        body.otp,
-        body.newPassword,
-        body.code,
-        request
-      );
+      return handleReset(normalizedEmail, body.otp, body.newPassword, request);
     }
 
     // Default to request action
@@ -239,7 +230,6 @@ async function handleReset(
   email: string,
   otp: string | undefined,
   newPassword: string | undefined,
-  code: string | undefined,
   request: Request
 ): Promise<NextResponse> {
   if (!(otp && newPassword)) {
@@ -312,62 +302,9 @@ async function handleReset(
     );
   }
 
-  // Step-up gate: users with TOTP enrolled must additionally prove
-  // possession of the second factor before the reset is honored. This
-  // closes the well-known reset-as-takeover vector — an attacker with
-  // mailbox access alone (or who can read plaintext OTPs from the DB,
-  // KEEP-625) can otherwise mint a new password and walk into the
-  // account. Users without MFA enrolled keep the email-OTP-only flow.
-  if (user.twoFactorEnabled === true) {
-    const totpCode = typeof code === "string" ? code.trim() : "";
-    if (totpCode.length !== 6) {
-      return NextResponse.json(
-        {
-          error:
-            "This account has two-factor enabled. Enter a code from your authenticator to continue.",
-          code: "mfa_code_required",
-        },
-        { status: 400 }
-      );
-    }
-    const [totpRow] = await db
-      .select({ secret: twoFactorTable.secret })
-      .from(twoFactorTable)
-      .where(eq(twoFactorTable.userId, user.id))
-      .limit(1);
-    if (!totpRow) {
-      logSystemError(
-        ErrorCategory.AUTH,
-        "[Forgot Password] user marked two-factor enabled but no row in two_factor table",
-        new Error("twoFactor row missing"),
-        { user_id: user.id }
-      );
-      return NextResponse.json(
-        { error: "Two-factor configuration is inconsistent" },
-        { status: 500 }
-      );
-    }
-    const serverSecret = process.env.BETTER_AUTH_SECRET;
-    if (!serverSecret) {
-      logSystemError(
-        ErrorCategory.CONFIGURATION,
-        "[Forgot Password] BETTER_AUTH_SECRET is not configured",
-        new Error("BETTER_AUTH_SECRET missing"),
-        { endpoint: "/api/user/forgot-password" }
-      );
-      return NextResponse.json(
-        { error: "Server misconfigured" },
-        { status: 500 }
-      );
-    }
-    const ok = await verifyUserTotp(totpRow.secret, totpCode, serverSecret);
-    if (!ok) {
-      return NextResponse.json(
-        { error: "Invalid verification code", code: "mfa_code_invalid" },
-        { status: 401 }
-      );
-    }
-  }
+  // TOTP is deliberately not required here. The reset mints no session and
+  // leaves the user's enrolled factor intact, so the login gate in lib/auth.ts
+  // still demands the second factor before any usable session is issued.
 
   // Hash the new password, drop the consumed reset code, and revoke every
   // user-scoped credential in a single transaction. A reset is a recovery
