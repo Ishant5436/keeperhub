@@ -14,6 +14,7 @@ const DOWNLOAD_BUTTON_NAME_REGEX = /export workflow as json/i;
 const SELECTED_TEXT_REGEX = /Selected:/i;
 const IMPORT_BUTTON_NAME_REGEX = /import workflow/i;
 const WORKFLOW_URL_REGEX = /\/workflows?\/[^/]+/;
+const IMPORT_ENDPOINT = "/api/workflows/import";
 
 // MODAL-06 imports a fixture containing an HTTP Request action, which is
 // Pro-gated (lib/features/registry.ts) and otherwise blocked at import for a
@@ -109,7 +110,17 @@ test.describe("Workflow I/O modal (MODAL-04, MODAL-05, MODAL-06, MODAL-08)", () 
       name: IMPORT_BUTTON_NAME_REGEX,
     });
     await expect(importButton).toBeEnabled({ timeout: 10_000 });
+
+    // Wait on the import request itself rather than guessing how long a cold
+    // route takes under CI load, so a slow import does not read as a missing toast.
+    const importResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes(IMPORT_ENDPOINT) &&
+        response.request().method() === "POST",
+      { timeout: 60_000 }
+    );
     await importButton.click();
+    expect((await importResponse).ok()).toBe(true);
 
     // The component contract (plan 42-07) is: toast.success -> onOpenChange(false)
     // -> router.push. We assert all three end states are reached.

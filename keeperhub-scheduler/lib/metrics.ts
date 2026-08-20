@@ -182,6 +182,13 @@ export const sqsEnqueueTotal = new Counter({
   registers: [registry],
 });
 
+export const dispatchRefusedTotal = new Counter({
+  name: `${PREFIX}_dispatch_refused_total`,
+  help: "Block triggers refused at admission (over plan limit or gated action) and skipped without enqueueing, per chain. Not an error: the block matched, the org may not run it.",
+  labelNames: ["chain", "reason"] as const,
+  registers: [registry],
+});
+
 export const unhandledRejectionsTotal = new Counter({
   name: `${PREFIX}_unhandled_rejections_total`,
   help: "Process-level unhandled promise rejections absorbed by the dispatcher's safety-net handler. The most common source is ethers v6 destroyProvider eth_unsubscribe cancellation during reconnect. A sustained increase is fine for those; anything else warrants log investigation.",
@@ -288,6 +295,9 @@ export const metrics = {
   },
   recordSqsEnqueue(chain: string, outcome: "success" | "error"): void {
     sqsEnqueueTotal.inc({ chain, outcome });
+  },
+  recordDispatchRefused(chain: string, reason: string): void {
+    dispatchRefusedTotal.inc({ chain, reason });
   },
   recordUnhandledRejection(): void {
     unhandledRejectionsTotal.inc();

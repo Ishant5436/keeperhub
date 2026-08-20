@@ -4,7 +4,17 @@
  */
 import "server-only";
 
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
@@ -53,7 +63,9 @@ import {
 import { getTransactionHashes } from "@/lib/workflow/executor/step-success-tracker";
 import { computeTrulyFailedNodes } from "@/lib/workflow/executor/truly-failed-nodes";
 
-const TERMINAL_STATUSES = new Set(["cancelled"]);
+// Statuses a late step write must never resurrect: the user stopped the run,
+// or the platform refused it before it started.
+const TERMINAL_STATUSES = new Set(["cancelled", "skipped"]);
 
 /**
  * KEEP-431 follow-up: matches the same SDK spurious error shapes that the
@@ -936,7 +948,7 @@ export async function logWorkflowCompleteDb(
       and(
         eq(workflowExecutions.id, params.executionId),
         eq(prevExecution.id, workflowExecutions.id),
-        ne(workflowExecutions.status, "cancelled"),
+        notInArray(workflowExecutions.status, ["cancelled", "skipped"]),
         // KEEP-431 follow-up: defense in depth. If selfHealWorkflowAfterLateStepCommit
         // already CAS-flipped status to 'success', a stray late call to
         // logWorkflowCompleteDb (e.g. a duplicate triggerStep _workflowComplete from
@@ -1041,7 +1053,7 @@ export async function updateCurrentStep(
     .where(
       and(
         eq(workflowExecutions.id, params.executionId),
-        ne(workflowExecutions.status, "cancelled")
+        notInArray(workflowExecutions.status, ["cancelled", "skipped"])
       )
     );
 }
@@ -1086,7 +1098,7 @@ export async function incrementCompletedSteps(
     .where(
       and(
         eq(workflowExecutions.id, params.executionId),
-        ne(workflowExecutions.status, "cancelled")
+        notInArray(workflowExecutions.status, ["cancelled", "skipped"])
       )
     );
 }

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     throw new Error("matcher produced no fire for the injected block");
   }
 
-  const executionId = await createPhantomExecution(
+  const { executionId } = await createPhantomExecution(
     fire.workflowId,
     fire.userId,
     "block",

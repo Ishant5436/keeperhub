@@ -76,6 +76,11 @@ export type TransferTokenCoreInput = {
   _context?: {
     executionId?: string;
     organizationId?: string;
+    // Populated directly by the workflow executor's StepContext on every
+    // real workflow execution (see executor.workflow.ts). When present,
+    // skip the DB lookup below entirely; it exists only as a fallback for
+    // callers that supply executionId without it.
+    workflowId?: string;
   };
 };
 
@@ -361,9 +366,16 @@ export async function transferTokenCore(
     };
   }
 
-  // Get workflow ID for transaction tracking (only for workflow executions)
-  let workflowId: string | undefined;
-  if (_context.executionId && !_context.organizationId) {
+  // Get workflow ID for transaction tracking. The executor already puts
+  // workflowId directly on _context for every real workflow execution, so
+  // only fall back to a DB lookup when a caller supplies executionId
+  // without it. The organizationId check matters separately: a direct
+  // execution (app/api/execute/node/route.ts) sets both executionId and
+  // organizationId but its executionId is not a workflowExecutions row, so
+  // without this guard every direct execution fires a lookup that can never
+  // return anything.
+  let workflowId: string | undefined = _context.workflowId;
+  if (!workflowId && _context.executionId && !_context.organizationId) {
     try {
       const execution = await db
         .select({ workflowId: workflowExecutions.workflowId })

@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { SettingsAccessGate } from "./settings-access-gate";
 import { SettingsRail } from "./settings-rail";
 
 export function SettingsShell({
@@ -33,7 +34,7 @@ export function SettingsShell({
               wide ? "max-w-7xl" : "max-w-5xl"
             )}
           >
-            {children}
+            <SettingsAccessGate>{children}</SettingsAccessGate>
           </div>
         </main>
       </div>

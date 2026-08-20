@@ -8,7 +8,7 @@ import {
   claimPhantomForExecution,
   type DbSchema,
   discardPhantomRow,
-  resolvePhantomToError,
+  resolveToSkipped,
 } from "../../../keeperhub-executor/lib/db-helpers";
 import {
   organization,
@@ -320,18 +320,22 @@ describe.skipIf(SKIP)("consume-path claim helpers", () => {
     expect((await readExecution(id))?.status).toBe("running");
   });
 
-  it("resolvePhantomToError marks a phantom as a billing/user error", async () => {
+  it("resolveToSkipped marks a phantom as refused, not failed", async () => {
     const id = `${PREFIX}resolve`;
     await seedExecution(id, "phantom");
 
-    await resolvePhantomToError(execDb, id, {
+    await resolveToSkipped(execDb, id, {
       error: "over quota",
       errorCategory: "billing",
       errorType: "user",
+      reason: "execution_limit",
     });
 
     const row = await readExecution(id);
-    expect(row.status).toBe("error");
+    // 'skipped', not 'error': the run never executed, so it must stay out of
+    // the error count and the success-rate denominator.
+    expect(row.status).toBe("skipped");
+    expect(row.billable).toBe(false);
     expect(row.error).toBe("over quota");
     expect(row.errorCategory).toBe("billing");
     expect(row.errorType).toBe("user");
@@ -339,14 +343,15 @@ describe.skipIf(SKIP)("consume-path claim helpers", () => {
     expect(row.errorCode).toBeNull();
   });
 
-  it("resolvePhantomToError leaves a non-phantom row intact", async () => {
+  it("resolveToSkipped leaves a non-phantom row intact", async () => {
     const id = `${PREFIX}resolve_running`;
     await seedExecution(id, "running");
 
-    await resolvePhantomToError(execDb, id, {
+    await resolveToSkipped(execDb, id, {
       error: "x",
       errorCategory: "billing",
       errorType: "user",
+      reason: "execution_limit",
     });
 
     expect((await readExecution(id))?.status).toBe("running");

@@ -248,8 +248,11 @@ function PaygWalletFunding({
  */
 export function PaygSection({
   plan,
+  canManageCaps = true,
 }: {
   plan: PlanName;
+  /** The caps are the owner's to set, so everyone else reads usage only. */
+  canManageCaps?: boolean;
 }): React.ReactElement | null {
   const { organization } = useOrganization();
   const orgId = organization?.id;
@@ -393,40 +396,48 @@ export function PaygSection({
         />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <CapField
-          hint="Resets daily at 00:00 UTC"
-          id="payg-daily-cap"
-          label="Daily spend cap"
-          onChange={setDaily}
-          value={daily}
-        />
-        <CapField
-          hint="Resets at the start of each billing month"
-          id="payg-period-cap"
-          label="Monthly spend cap"
-          onChange={setPeriod}
-          value={period}
-        />
-        <Button
-          disabled={saving || !(dirty && available)}
-          onClick={() => {
-            saveCaps().catch(() => undefined);
-          }}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {saving && <Loader2 className="size-4 animate-spin" />}
-          Save caps
-        </Button>
-      </div>
+      {canManageCaps ? (
+        <>
+          <div className="flex flex-wrap items-end gap-3">
+            <CapField
+              hint="Resets daily at 00:00 UTC"
+              id="payg-daily-cap"
+              label="Daily spend cap"
+              onChange={setDaily}
+              value={daily}
+            />
+            <CapField
+              hint="Resets at the start of each billing month"
+              id="payg-period-cap"
+              label="Monthly spend cap"
+              onChange={setPeriod}
+              value={period}
+            />
+            <Button
+              disabled={saving || !(dirty && available)}
+              onClick={() => {
+                saveCaps().catch(() => undefined);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {saving && <Loader2 className="size-4 animate-spin" />}
+              Save caps
+            </Button>
+          </div>
 
-      <p className="text-muted-foreground text-xs">
-        Amounts in USDC. A cap of 0 spends nothing. Executions that would exceed
-        a cap are blocked with a clear reason and recorded as a billing error on
-        the run.
-      </p>
+          <p className="text-muted-foreground text-xs">
+            Amounts in USDC. A cap of 0 spends nothing. Executions that would
+            exceed a cap are blocked with a clear reason and recorded as a
+            billing error on the run.
+          </p>
+        </>
+      ) : (
+        <p className="text-muted-foreground text-xs">
+          Spend caps are set by the owner of this organization.
+        </p>
+      )}
 
       <PaygChargesTable key={orgId} />
     </div>

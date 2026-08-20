@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   onBlock: null as ((block: unknown) => Promise<void>) | null,
   enqueueEvent: vi.fn(() => Promise.resolve()),
   enqueueBlock: vi.fn(() => Promise.resolve()),
-  createPhantom: vi.fn(() => Promise.resolve("exec-1")),
+  createPhantom: vi.fn(() => Promise.resolve({ executionId: "exec-1" })),
   failPhantom: vi.fn(() => Promise.resolve()),
 }));
 
@@ -125,6 +125,9 @@ async function startIngestor(dedup: DedupStore): Promise<void> {
 beforeEach(() => {
   mocks.onBlock = null;
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations, so restore the admitted default for
+  // every test that does not override it.
+  mocks.createPhantom.mockResolvedValue({ executionId: "exec-1" });
 });
 
 describe("BlockIngestor end-to-end fan-out", () => {
@@ -146,6 +149,22 @@ describe("BlockIngestor end-to-end fan-out", () => {
     expect(eventArg.workflowId).toBe("wf-event");
     expect(eventArg.triggerData.chainType).toBe("solana");
     expect(eventArg.triggerData.programId).toBe(PROGRAM);
+  });
+
+  it("skips both enqueues when the dispatch is refused on plan grounds", async () => {
+    mocks.createPhantom.mockResolvedValue({ refused: "execution_limit" });
+    const dedup = fakeDedup(false);
+    await startIngestor(dedup);
+
+    await mocks.onBlock?.(block());
+
+    expect(mocks.enqueueEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueBlock).not.toHaveBeenCalled();
+    // A refusal is settled, so it is marked: re-processing the block would
+    // otherwise pay for the admission round-trip again and reach the same
+    // answer.
+    expect(dedup.markProcessed).toHaveBeenCalledWith("wf-event", "sig-1");
+    expect(dedup.markProcessed).toHaveBeenCalledWith("wf-block", "block:10");
   });
 
   it("skips the event enqueue when its signature is already processed", async () => {

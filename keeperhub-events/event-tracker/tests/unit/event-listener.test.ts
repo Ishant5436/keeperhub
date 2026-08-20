@@ -156,6 +156,7 @@ describe("EventListener", () => {
   beforeEach(() => {
     clearInterfaceCache();
     createPhantomExecution.mockReset();
+    createPhantomExecution.mockResolvedValue({});
     failPhantomExecution.mockReset();
   });
 
@@ -252,7 +253,7 @@ describe("EventListener", () => {
 
     // KEEP-693: phantom pre-creation wiring.
     it("pre-creates a phantom and carries its id on the event message", async () => {
-      createPhantomExecution.mockResolvedValue("exec_ph");
+      createPhantomExecution.mockResolvedValue({ executionId: "exec_ph" });
       const providerMock = makeProviderManagerMock();
       const sqs = makeSqsMock();
       const listener = new EventListener(
@@ -279,8 +280,37 @@ describe("EventListener", () => {
       expect(JSON.parse(command.input.MessageBody).executionId).toBe("exec_ph");
     });
 
+    it("skips the enqueue entirely when the dispatch is refused", async () => {
+      createPhantomExecution.mockResolvedValue({ refused: "execution_limit" });
+      const providerMock = makeProviderManagerMock();
+      const sqs = makeSqsMock();
+      const dedup = makeDedupMock();
+      const listener = new EventListener(
+        buildOptions({
+          providerManager: providerMock.manager,
+          dedup,
+          sqs,
+        }),
+      );
+      await listener.start();
+
+      await providerMock.capturedHandler!(
+        makeLog({
+          txHash: `0x${"c".repeat(64)}`,
+          sender: SENDER,
+          value: 7n,
+        }),
+      );
+
+      expect(sqs.send).not.toHaveBeenCalled();
+      expect(failPhantomExecution).not.toHaveBeenCalled();
+      // A refusal is settled, so the event is marked: leaving it unmarked
+      // only buys another admission round-trip on the next reconnect.
+      expect(dedup.markProcessed).toHaveBeenCalledTimes(1);
+    });
+
     it("marks the phantom failed with ES-0001 when the enqueue fails", async () => {
-      createPhantomExecution.mockResolvedValue("exec_ph");
+      createPhantomExecution.mockResolvedValue({ executionId: "exec_ph" });
       const providerMock = makeProviderManagerMock();
       const sqs = makeSqsMock();
       sqs.send.mockRejectedValueOnce(new Error("SQS down"));

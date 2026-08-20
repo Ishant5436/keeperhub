@@ -5,6 +5,7 @@
 
 import type { PlanName } from "@/lib/billing/plans";
 import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
+import type { NodeExecutionStatus } from "@/lib/errors/execution-status";
 import type { Page } from "@/lib/pagination";
 import type { HeldPaymentView } from "@/lib/tempo/held-payment-view";
 import type { VoteDirection } from "@/lib/workflow/editor/votes";
@@ -829,7 +830,7 @@ export const workflowApi = {
         nodeId: string;
         nodeName: string;
         nodeType: string;
-        status: "pending" | "running" | "success" | "error" | "cancelled";
+        status: NodeExecutionStatus;
         input: unknown;
         output: unknown;
         error: string | null;
@@ -853,7 +854,7 @@ export const workflowApi = {
       status: string;
       nodeStatuses: Array<{
         nodeId: string;
-        status: "pending" | "running" | "success" | "error" | "cancelled";
+        status: NodeExecutionStatus;
       }>;
       progress?: {
         totalSteps: number;

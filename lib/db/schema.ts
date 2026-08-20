@@ -13,6 +13,10 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ErrorCode } from "../errors/error-codes";
 import type { ExecutionErrorType } from "../errors/execution-error-type";
+import type {
+  NodeExecutionStatus,
+  WorkflowExecutionStatus,
+} from "../errors/execution-status";
 import type { IntegrationType } from "../types/integration";
 import { generateId } from "../utils/id";
 
@@ -674,18 +678,9 @@ export const workflowExecutions = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id),
-    status: text("status").notNull().$type<
-      | "pending"
-      | "running"
-      // A run whose claimed transaction hashes could not be read on chain.
-      // Non-terminal: settled to success or error by the reconciler.
-      | "unconfirmed"
-      | "success"
-      | "error"
-      | "cancelled"
-      | "phantom"
-      | "system_error"
-    >(),
+    // Values and their meanings live on WorkflowExecutionStatus, so the API,
+    // the client and the executor all name the same set.
+    status: text("status").notNull().$type<WorkflowExecutionStatus>(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
     input: jsonb("input").$type<Record<string, any>>(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
@@ -841,9 +836,7 @@ export const workflowExecutionLogs = pgTable(
     nodeId: text("node_id").notNull(),
     nodeName: text("node_name").notNull(),
     nodeType: text("node_type").notNull(),
-    status: text("status")
-      .notNull()
-      .$type<"pending" | "running" | "success" | "error" | "cancelled">(),
+    status: text("status").notNull().$type<NodeExecutionStatus>(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
     input: jsonb("input").$type<any>(),
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level

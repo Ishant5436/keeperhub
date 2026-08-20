@@ -73,4 +73,58 @@ describe("validateWorkflow - allowance preflight", () => {
     );
     expect(result.warnings.some((w) => w.code === CODE)).toBe(false);
   });
+
+  it("ignores a top-level abiFunction on a batch-write-contract node (real batch nodes carry calls, not abiFunction)", () => {
+    const result = validateWorkflow(
+      writeWorkflow({
+        actionType: "web3/batch-write-contract",
+        abiFunction: "transferFrom",
+      })
+    );
+    expect(result.warnings.some((w) => w.code === CODE)).toBe(false);
+  });
+
+  it("warns when a batch-write-contract node's calls[] includes transferFrom with no check-allowance node", () => {
+    const result = validateWorkflow(
+      writeWorkflow({
+        actionType: "web3/batch-write-contract",
+        calls: JSON.stringify([
+          { contractAddress: "0x1", abi: "[]", abiFunction: "transfer" },
+          { contractAddress: "0x2", abi: "[]", abiFunction: "transferFrom" },
+        ]),
+      })
+    );
+    const warning = result.warnings.find((w) => w.code === CODE);
+    expect(warning).toBeDefined();
+    expect(warning?.parameterPath).toBe("nodes[1].config.calls[1].abiFunction");
+    expect(warning?.message).toContain("transferFrom");
+    expect(warning?.message).toContain("Multicall3");
+  });
+
+  it("does not warn when a batch-write-contract node's calls[] has no allowance-spend methods", () => {
+    const result = validateWorkflow(
+      writeWorkflow({
+        actionType: "web3/batch-write-contract",
+        calls: JSON.stringify([
+          { contractAddress: "0x1", abi: "[]", abiFunction: "transfer" },
+        ]),
+      })
+    );
+    expect(result.warnings.some((w) => w.code === CODE)).toBe(false);
+  });
+
+  it("suppresses the batch calls[] warning when a check-allowance node is present", () => {
+    const result = validateWorkflow(
+      writeWorkflow(
+        {
+          actionType: "web3/batch-write-contract",
+          calls: JSON.stringify([
+            { contractAddress: "0x1", abi: "[]", abiFunction: "transferFrom" },
+          ]),
+        },
+        [actionNode("ca", { actionType: "web3/check-allowance" })]
+      )
+    );
+    expect(result.warnings.some((w) => w.code === CODE)).toBe(false);
+  });
 });

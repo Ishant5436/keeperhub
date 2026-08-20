@@ -41,8 +41,9 @@ import { getCustomLogo } from "@/lib/workflow/editor/extension-registry";
 import { integrationsAtom } from "@/lib/integrations-store";
 import type { IntegrationType } from "@/lib/types/integration";
 import { cn } from "@/lib/utils";
-import { evaluateShowWhen, type ShowWhen } from "@/lib/workflow/editor/show-when";
 import { runWorkflowValidationPreflight } from "@/lib/workflow/editor/run-validation";
+import { evaluateShowWhen, type ShowWhen } from "@/lib/workflow/editor/show-when";
+import { getMissingBatchCallFields } from "@/lib/workflow/validation/action-config";
 import { ensureSavedBeforeRun } from "@/lib/workflow/run-preflight";
 import {
   addNodeAtom,
@@ -350,14 +351,36 @@ function getNodeMissingFields(
       fieldLabel: field.label,
     }));
 
-  if (missingFields.length === 0) {
+  // Each call inside a batch-write-contract/batch-read-contract `calls[]` is
+  // its own contract/ABI/function trio, required the same as a standalone
+  // write-contract/read-contract node. An incomplete call blocks Run the
+  // same way a missing top-level required field does.
+  const missingCallFields = flatFields
+    .filter(
+      (field) =>
+        field.type === "call-list-builder" &&
+        shouldShowField(field, config || {})
+    )
+    .flatMap((field) =>
+      getMissingBatchCallFields(
+        config?.[field.key],
+        field.hideNetworkColumn
+      ).map((missingCall) => ({
+        fieldKey: `${field.key}[${missingCall.callIndex}].${missingCall.fieldKey}`,
+        fieldLabel: `Call ${missingCall.callIndex + 1}: ${missingCall.fieldLabel}`,
+      }))
+    );
+
+  const allMissingFields = [...missingFields, ...missingCallFields];
+
+  if (allMissingFields.length === 0) {
     return null;
   }
 
   return {
     nodeId: node.id,
     nodeLabel: node.data.label || action.label || "Unnamed Step",
-    missingFields,
+    missingFields: allMissingFields,
   };
 }
 

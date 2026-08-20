@@ -1,6 +1,13 @@
 "use client";
 
-import { Check, Clock, ExternalLink, Loader2, X } from "lucide-react";
+import {
+  Check,
+  Clock,
+  ExternalLink,
+  Loader2,
+  SkipForward,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +20,7 @@ const TERMINAL_STATUSES = new Set([
   "success",
   "error",
   "system_error",
+  "skipped",
   "cancelled",
 ]);
 
@@ -56,6 +64,8 @@ function getStatusLabel(status: string): string {
       return "Running";
     case "cancelled":
       return "Cancelled";
+    case "skipped":
+      return "Skipped";
     default:
       return status;
   }
@@ -70,6 +80,9 @@ function StatusIcon({ status }: { status: string }): React.ReactElement {
       return <X aria-hidden="true" className="h-4 w-4" />;
     case "running":
       return <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />;
+    // Terminal, so it must not fall through to the pending clock.
+    case "skipped":
+      return <SkipForward aria-hidden="true" className="h-4 w-4" />;
     default:
       return <Clock aria-hidden="true" className="h-4 w-4" />;
   }
@@ -226,7 +239,10 @@ export function ExecutionShareView({
                   "bg-destructive/15 text-destructive",
                 statusData.status === "running" && "bg-primary/15 text-primary",
                 statusData.status === "cancelled" &&
-                  "bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                  "bg-orange-500/15 text-orange-600 dark:text-orange-400",
+                // Refused before it started: neutral, not a failure colour.
+                statusData.status === "skipped" &&
+                  "bg-muted text-muted-foreground"
               )}
             >
               <StatusIcon status={statusData.status} />

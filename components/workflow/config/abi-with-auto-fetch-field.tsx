@@ -448,7 +448,9 @@ type AbiWithAutoFetchProps = FieldProps & {
   contractInteractionType?: "read" | "write";
   networkField?: string;
   config: Record<string, unknown>;
-  onUpdateConfig?: (key: string, value: unknown) => void;
+  // Required: the manual-ABI checkbox is fully controlled by config.useManualAbi,
+  // so without this the toggle would have no way to persist a user's choice.
+  onUpdateConfig: (key: string, value: unknown) => void;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ABI field handles proxy, diamond, and read/write-as-proxy states with toggles
@@ -463,9 +465,11 @@ export function AbiWithAutoFetchField({
   config,
   onUpdateConfig,
 }: AbiWithAutoFetchProps) {
-  const [useManualAbi, setUseManualAbi] = useState(
-    () => String(config.useManualAbi) === "true"
-  );
+  // Derived directly from config on every render (not mirrored into local
+  // state) so the checkbox can never drift from the persisted value: it only
+  // ever changes when the user toggles it (via onUpdateConfig) or when the
+  // config prop itself changes, e.g. after a reload.
+  const useManualAbi = String(config.useManualAbi) === "true";
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isProxy, setIsProxy] = useState(false);
@@ -807,8 +811,7 @@ export function AbiWithAutoFetchField({
   };
 
   const handleManualToggle = (checked: boolean) => {
-    setUseManualAbi(checked);
-    onUpdateConfig?.("useManualAbi", String(checked));
+    onUpdateConfig("useManualAbi", String(checked));
     setError(null);
     if (checked) {
       onChange("");

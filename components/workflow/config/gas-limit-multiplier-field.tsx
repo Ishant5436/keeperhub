@@ -25,8 +25,8 @@ const DEBOUNCE_MS = 500;
 const TEMPLATE_REF_PATTERN = /\{\{.*?\}\}/;
 
 function hasTemplateRefs(config: Record<string, unknown>): boolean {
-  return Object.values(config).some(
-    (v) => typeof v === "string" && TEMPLATE_REF_PATTERN.test(v)
+  return Object.values(config).some((v) =>
+    TEMPLATE_REF_PATTERN.test(typeof v === "string" ? v : JSON.stringify(v))
   );
 }
 
@@ -67,6 +67,9 @@ export function GasLimitMultiplierField({
         recipientAddress: config.recipientAddress,
         amount: config.amount,
         tokenConfig: config.tokenConfig,
+        calls: config.calls,
+        isolateCallFailures: config.isolateCallFailures,
+        web3Connection: config.web3Connection,
       }),
     [
       config.contractAddress,
@@ -76,6 +79,9 @@ export function GasLimitMultiplierField({
       config.recipientAddress,
       config.amount,
       config.tokenConfig,
+      config.calls,
+      config.isolateCallFailures,
+      config.web3Connection,
     ]
   );
 
@@ -108,6 +114,8 @@ export function GasLimitMultiplierField({
         return Boolean(
           config.contractAddress && config.abi && config.abiFunction
         );
+      case "batch-write-contract":
+        return Boolean(config.calls);
       default:
         return false;
     }
@@ -120,6 +128,7 @@ export function GasLimitMultiplierField({
     config.contractAddress,
     config.abi,
     config.abiFunction,
+    config.calls,
   ]);
 
   // Fetch gas estimate with debounce

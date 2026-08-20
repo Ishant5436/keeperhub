@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// -- hoisted mocks --
-const { mockEncodeFunctionData, mockParseEther } = vi.hoisted(() => {
-  const encodeFunctionData = vi.fn();
-  const parseEther = vi.fn();
-  return {
-    mockEncodeFunctionData: encodeFunctionData,
-    mockParseEther: parseEther,
-  };
-});
+// hoisted mocks
+const { mockEncodeFunctionData, mockParseEther, mockBuildCallsWithMeta } =
+  vi.hoisted(() => {
+    const encodeFunctionData = vi.fn();
+    const parseEther = vi.fn();
+    const buildCallsWithMeta = vi.fn();
+    return {
+      mockEncodeFunctionData: encodeFunctionData,
+      mockParseEther: parseEther,
+      mockBuildCallsWithMeta: buildCallsWithMeta,
+    };
+  });
 
 vi.mock("ethers", () => {
   // Use a named function so it works as a `new` constructor
@@ -31,6 +34,14 @@ vi.mock("ethers", () => {
   };
 });
 
+// Mocked at the module boundary, same reason as gas-estimate-batch-write.test.ts.
+// The real module transitively imports db, wallet-helpers, chain-adapter, and
+// more, none of which are available in this pure encoding focused test.
+vi.mock("@/plugins/web3/steps/batch-write-contract-core", () => ({
+  buildCallsWithMeta: (...args: unknown[]) => mockBuildCallsWithMeta(...args),
+}));
+
+import { MULTICALL3_ADDRESS } from "@/lib/contracts/multicall3";
 import { generateCalldataForWorkflow } from "@/lib/mcp/calldata";
 
 const SAMPLE_ABI = JSON.stringify([
@@ -323,6 +334,212 @@ describe("generateCalldataForWorkflow", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.to).toBe("0x3333333333333333333333333333333333333333");
+    }
+  });
+});
+
+function makeBatchNode(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    id: "batch-write-1",
+    data: {
+      actionType: "web3/batch-write-contract",
+      config: {
+        network: "base",
+        calls: JSON.stringify([
+          {
+            contractAddress: "0xA",
+            abi: SAMPLE_ABI,
+            abiFunction: "transfer",
+            args: ["0xA", "1"],
+          },
+        ]),
+        isolateCallFailures: "true",
+        ...overrides,
+      },
+    },
+  };
+}
+
+const BATCH_CALL3 = {
+  target: "0xA",
+  allowFailure: true,
+  callData: "0xcalldata",
+};
+
+describe("generateCalldataForWorkflow, batch-write-contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEncodeFunctionData.mockReturnValue("0xaggregate3data");
+    mockBuildCallsWithMeta.mockReturnValue({ calls: [BATCH_CALL3] });
+  });
+
+  it("recognizes web3/batch-write-contract as a write action node", () => {
+    const nodes = [makeBatchNode()];
+    const result = generateCalldataForWorkflow(nodes, {});
+    expect(result.success).toBe(true);
+  });
+
+  it("targets Multicall3, not the batched contracts, and encodes aggregate3", () => {
+    const nodes = [makeBatchNode()];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.to).toBe(MULTICALL3_ADDRESS);
+      expect(result.data).toBe("0xaggregate3data");
+      expect(result.value).toBe("0");
+    }
+    expect(mockEncodeFunctionData).toHaveBeenCalledWith("aggregate3", [
+      [{ target: "0xA", allowFailure: true, callData: "0xcalldata" }],
+    ]);
+  });
+
+  it("is the first-matched write node, ahead of a later real write-contract node", () => {
+    // Unlike before batch-write-contract was calldata-generatable, it now
+    // matches isWriteActionType like any other write node, so the normal
+    // first-match rule applies to it too.
+    const nodes = [
+      makeBatchNode(),
+      makeWriteNode({ contractAddress: "0xShouldNotBeUsed" }),
+    ];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.to).toBe(MULTICALL3_ADDRESS);
+    }
+  });
+
+  it("passes calls and isolateCallFailures through to buildCallsWithMeta", () => {
+    const nodes = [makeBatchNode({ isolateCallFailures: "false" })];
+    generateCalldataForWorkflow(nodes, {});
+
+    expect(mockBuildCallsWithMeta).toHaveBeenCalledWith({
+      calls: [
+        {
+          contractAddress: "0xA",
+          abi: SAMPLE_ABI,
+          abiFunction: "transfer",
+          args: ["0xA", "1"],
+        },
+      ],
+      isolateCallFailures: "false",
+    });
+  });
+
+  it("accepts calls as a native array, not just a JSON string", () => {
+    const nodes = [
+      makeBatchNode({
+        calls: [
+          {
+            contractAddress: "0xA",
+            abi: SAMPLE_ABI,
+            abiFunction: "transfer",
+            args: [],
+          },
+        ],
+      }),
+    ];
+    const result = generateCalldataForWorkflow(nodes, {});
+    expect(result.success).toBe(true);
+  });
+
+  it("resolves {{@trigger:Trigger.field}} references in a call's args before encoding", () => {
+    const nodes = [
+      makeBatchNode({
+        calls: JSON.stringify([
+          {
+            contractAddress: "0xA",
+            abi: SAMPLE_ABI,
+            abiFunction: "transfer",
+            args: ["{{@trigger:Trigger.recipient}}", "1"],
+          },
+        ]),
+      }),
+    ];
+    generateCalldataForWorkflow(nodes, { recipient: "0xResolvedAddress" });
+
+    expect(mockBuildCallsWithMeta).toHaveBeenCalledWith({
+      calls: [
+        {
+          contractAddress: "0xA",
+          abi: SAMPLE_ABI,
+          abiFunction: "transfer",
+          args: ["0xResolvedAddress", "1"],
+        },
+      ],
+      isolateCallFailures: "true",
+    });
+  });
+
+  it("returns error for an unresolvable non-trigger template in a call's args", () => {
+    const nodes = [
+      makeBatchNode({
+        calls: JSON.stringify([
+          {
+            contractAddress: "0xA",
+            abi: SAMPLE_ABI,
+            abiFunction: "transfer",
+            args: ["{{@http-1:HTTP Request.data.value}}"],
+          },
+        ]),
+      }),
+    ];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("Unresolvable template reference");
+    }
+    expect(mockBuildCallsWithMeta).not.toHaveBeenCalled();
+  });
+
+  it("propagates a buildCallsWithMeta validation error", () => {
+    mockBuildCallsWithMeta.mockReturnValue({
+      calls: [],
+      error: "Call at index 0 missing contractAddress",
+    });
+    const nodes = [makeBatchNode()];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe("Call at index 0 missing contractAddress");
+    }
+  });
+
+  it("returns error when calls is missing", () => {
+    const nodes = [makeBatchNode({ calls: undefined })];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe("Missing calls in workflow node");
+    }
+    expect(mockBuildCallsWithMeta).not.toHaveBeenCalled();
+  });
+
+  it("returns error when calls JSON is malformed", () => {
+    const nodes = [makeBatchNode({ calls: "not valid json {{" })];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("Invalid Calls JSON");
+    }
+  });
+
+  it("returns structured error when the aggregate3 encode throws", () => {
+    mockEncodeFunctionData.mockImplementation(() => {
+      throw new Error("bad Call3 shape");
+    });
+    const nodes = [makeBatchNode()];
+    const result = generateCalldataForWorkflow(nodes, {});
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("Failed to encode batch call");
+      expect(result.error).toContain("bad Call3 shape");
     }
   });
 });

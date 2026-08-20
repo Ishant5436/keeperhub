@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -133,7 +133,7 @@ export async function PATCH(
       and(
         eq(workflowExecutions.id, executionId),
         eq(prevExecution.id, workflowExecutions.id),
-        ne(workflowExecutions.status, "cancelled")
+        notInArray(workflowExecutions.status, ["cancelled", "skipped"])
       )
     )
     .returning({

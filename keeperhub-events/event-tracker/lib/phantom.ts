@@ -22,19 +22,36 @@ import { logger } from "./utils/logger";
 /** Failure codes the event tracker assigns when an enqueue fails. */
 export type EventErrorCode = "ES-0001" | "N-0002";
 
+/** Why the platform refused to create the phantom. */
+export type PhantomRefusalReason = "plan_feature" | "execution_limit";
+
+/** Result of a phantom pre-create attempt. */
+export type PhantomCreateResult = {
+  /** Id of the phantom row, or undefined when the call failed. */
+  executionId?: string;
+  /**
+   * Set when the platform refused this dispatch on plan grounds. The caller
+   * must skip its enqueue: the executor would refuse the same run. Distinct
+   * from an undefined `executionId` with no refusal, which is a transport
+   * failure and still falls back to the id-less enqueue.
+   */
+  refused?: PhantomRefusalReason;
+};
+
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * Pre-create a phantom execution row. Returns its id, or undefined when the
- * call fails (the caller then enqueues without an id and the executor inserts
- * its own row).
+ * Pre-create a phantom execution row. Returns its id, a refusal when the
+ * platform declined the dispatch on plan grounds, or neither when the call
+ * fails (the caller then enqueues without an id and the executor inserts its
+ * own row).
  */
 export async function createPhantomExecution(
   workflowId: string,
   userId: string,
-): Promise<string | undefined> {
+): Promise<PhantomCreateResult> {
   const url = `${KEEPERHUB_API_URL}/api/internal/executions`;
   const body = JSON.stringify({
     workflowId,
@@ -54,13 +71,25 @@ export async function createPhantomExecution(
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const data = (await response.json()) as { executionId: string };
-    return data.executionId;
+    const data = (await response.json()) as {
+      executionId?: string;
+      refused?: boolean;
+      reason?: PhantomRefusalReason;
+      error?: string;
+    };
+    if (data.refused) {
+      const reason: PhantomRefusalReason = data.reason ?? "execution_limit";
+      logger.log(
+        `[Phantom] Dispatch refused for ${workflowId} (${reason}): ${data.error ?? ""}`,
+      );
+      return { refused: reason };
+    }
+    return { executionId: data.executionId };
   } catch (error) {
     logger.warn(
       `[Phantom] Failed to pre-create execution for ${workflowId}: ${formatError(error)}`,
     );
-    return undefined;
+    return {};
   }
 }
 

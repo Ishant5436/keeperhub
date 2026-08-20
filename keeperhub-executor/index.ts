@@ -65,9 +65,10 @@ import {
   claimPhantomForExecution,
   discardPhantomRow,
   failExecutionAsSystemError,
-  resolvePhantomToError,
+  resolveToSkipped,
 } from "./lib/db-helpers";
 import { applyCounterDeltas, isIngestPayload } from "./lib/metrics-shipping";
+import { recordSkippedSample } from "./lib/terminal-counters";
 import { toJsonSafe } from "./lib/serialize";
 import { executorMessageSchema } from "./message-schema";
 import {
@@ -140,10 +141,12 @@ async function settlePaygOverflow(params: {
     `[Executor] PAYG charge blocked ${params.triggerType} trigger for workflow ${params.workflowId}: org=${params.organizationId} reason=${charge.reason}`
   );
   if (params.claimedStatus === "running") {
-    await db
+    const resolved = await db
       .update(workflowExecutions)
       .set({
-        status: "error",
+        // Refused before it started: 'skipped', not 'error'. Same reasoning as
+        // resolveToSkipped - an unpaid charge is not a failed run.
+        status: "skipped",
         error: charge.message,
         errorCategory: "billing",
         errorType: "user",
@@ -156,12 +159,23 @@ async function settlePaygOverflow(params: {
           eq(workflowExecutions.id, params.executionId),
           eq(workflowExecutions.status, "running")
         )
-      );
+      )
+      .returning({ id: workflowExecutions.id });
+
+    // The row no longer carries an error status, so nothing else counts it.
+    // Gated on the CAS matching so a re-delivery cannot double-count.
+    if (resolved.length > 0) {
+      await recordSkippedSample(db, {
+        workflowId: params.workflowId,
+        reason: "payg_unpaid",
+      });
+    }
   } else {
-    await resolvePhantomToError(db, params.executionId, {
+    await resolveToSkipped(db, params.executionId, {
       error: charge.message,
       errorCategory: "billing",
       errorType: "user",
+      reason: "payg_unpaid",
     });
   }
   return false;
@@ -389,14 +403,15 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
     console.warn(
       `[Executor] Billing guard blocked ${triggerType} trigger for workflow ${workflowId}: org=${workflow.organizationId} plan=${billingResult.plan} used=${billingResult.used} limit=${billingResult.limit} effectiveLimit=${billingResult.effectiveLimit} debt=${billingResult.debtExecutions} reason=${billingResult.reason}`
     );
-    // KEEP-693: resolve a pre-created phantom to a user-actionable billing
-    // error so it surfaces correctly instead of being aged to a system P-code.
+    // KEEP-693: resolve a pre-created phantom to a user-actionable refusal so
+    // it surfaces correctly instead of being aged to a system P-code.
     // No phantom -> keep the prior silent-skip behaviour.
-    await resolvePhantomToError(db, message.executionId, {
+    await resolveToSkipped(db, message.executionId, {
       error:
         "Execution skipped: your plan's monthly execution limit has been reached.",
       errorCategory: "billing",
       errorType: "user",
+      reason: "execution_limit",
     });
     return;
   }
@@ -425,7 +440,7 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
       "userId" in message ? message.userId : workflow.userId;
 
     // KEEP-693: if a pre-created row exists for this trigger, resolve it in
-    // place to the blocked (billing/user) state rather than inserting a second
+    // place to the refused (billing/user) state rather than inserting a second
     // row -- and so the reaper does not later age the orphan to a system P-code.
     // Matches both 'phantom' (scheduler/event-tracker pre-created) and 'pending'
     // (API pre-created for manual triggers). Falls through to an insert when
@@ -435,10 +450,12 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
       const resolved = await db
         .update(workflowExecutions)
         .set({
-          status: "error",
+          // A gated action means the run was refused, not that it failed.
+          status: "skipped",
           error: errorMessage,
           errorCategory: "billing",
           errorType: "user",
+          billable: false,
           input: toJsonSafe(blockedInput) as Record<string, unknown>,
           completedAt: new Date(),
         })
@@ -465,7 +482,8 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
             id: blockedExecutionId,
             workflowId,
             userId: blockedUserId,
-            status: "error",
+            status: "skipped",
+            billable: false,
             input: toJsonSafe(blockedInput) as Record<string, unknown>,
             error: errorMessage,
             errorCategory: "billing",
@@ -476,6 +494,10 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
           })
       );
     }
+
+    // Exactly one row was written above, by whichever branch ran, and it is no
+    // longer an error row, so this is the only thing that counts the refusal.
+    await recordSkippedSample(db, { workflowId, reason: "plan_feature" });
     return;
   }
 

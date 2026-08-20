@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Trash2 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TemplateBadgeInput } from "@/components/ui/template-badge-input";
 import {
@@ -21,6 +21,7 @@ type CallEntry = {
   abi: string;
   abiFunction: string;
   args: string;
+  useManualAbi: string;
 };
 
 function createEmptyEntry(id: number): CallEntry {
@@ -31,6 +32,7 @@ function createEmptyEntry(id: number): CallEntry {
     abi: "",
     abiFunction: "",
     args: "",
+    useManualAbi: "false",
   };
 }
 
@@ -50,6 +52,7 @@ function parseCallsValue(value: string, nextId: () => number): CallEntry[] {
       abi: String(item.abi ?? ""),
       abiFunction: String(item.abiFunction ?? ""),
       args: Array.isArray(item.args) ? JSON.stringify(item.args) : "",
+      useManualAbi: String(item.useManualAbi ?? "false"),
     }));
   } catch {
     return [createEmptyEntry(nextId())];
@@ -57,27 +60,31 @@ function parseCallsValue(value: string, nextId: () => number): CallEntry[] {
 }
 
 function serializeCalls(entries: CallEntry[]): string {
-  const calls = entries
-    .filter((e) => e.contractAddress.trim() || e.abiFunction.trim())
-    .map((e) => {
-      let args: unknown[] = [];
-      if (e.args.trim()) {
-        try {
-          const parsed: unknown = JSON.parse(e.args);
-          args = Array.isArray(parsed) ? parsed : [parsed];
-        } catch {
-          args = [e.args];
-        }
+  // Every row the user has added is persisted as-is, including an empty one:
+  // dropping "blank" rows here lets an incomplete call silently vanish from
+  // the saved config instead of being caught as having a missing required
+  // field (contractAddress/abi/abiFunction), which lets a batch run with
+  // fewer calls than the UI shows.
+  const calls = entries.map((e) => {
+    let args: unknown[] = [];
+    if (e.args.trim()) {
+      try {
+        const parsed: unknown = JSON.parse(e.args);
+        args = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        args = [e.args];
       }
-      return {
-        network: e.network,
-        contractAddress: e.contractAddress,
-        abi: e.abi,
-        abiFunction: e.abiFunction,
-        args,
-      };
-    });
-  return calls.length > 0 ? JSON.stringify(calls) : "";
+    }
+    return {
+      network: e.network,
+      contractAddress: e.contractAddress,
+      abi: e.abi,
+      abiFunction: e.abiFunction,
+      args,
+      useManualAbi: e.useManualAbi,
+    };
+  });
+  return JSON.stringify(calls);
 }
 
 type CallListFieldProps = {
@@ -85,6 +92,9 @@ type CallListFieldProps = {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  // Full action config, used to read the action-level network when this
+  // field's per-row Network selector is hidden (see hideNetworkColumn).
+  actionConfig?: Record<string, unknown>;
 };
 
 export function CallListField({
@@ -92,6 +102,7 @@ export function CallListField({
   value,
   onChange,
   disabled,
+  actionConfig,
 }: CallListFieldProps): React.ReactNode {
   const idCounter = useRef(0);
   const nextId = (): number => {
@@ -103,18 +114,33 @@ export function CallListField({
     parseCallsValue(value, nextId)
   );
 
-  function updateEntries(updated: CallEntry[]): void {
-    setEntries(updated);
-    onChange(serializeCalls(updated));
-  }
+  // Notifies the parent from the committed `entries` state rather than
+  // inline in each mutator. A field like AbiWithAutoFetchField's manual-ABI
+  // toggle can call onUpdateConfig and onChange back to back in the same
+  // handler; deriving each mutator's next array from a stale `entries`
+  // closure would let the second call silently clobber the first. Reacting
+  // to the committed state instead means every functional setEntries update
+  // below composes correctly no matter how many fire in one event.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    onChangeRef.current(serializeCalls(entries));
+  }, [entries]);
 
   function addRow(): void {
-    updateEntries([...entries, createEmptyEntry(nextId())]);
+    setEntries((prev) => [...prev, createEmptyEntry(nextId())]);
   }
 
   function removeRow(targetId: number): void {
-    const updated = entries.filter((e) => e.id !== targetId);
-    updateEntries(updated.length > 0 ? updated : [createEmptyEntry(nextId())]);
+    setEntries((prev) => {
+      const updated = prev.filter((e) => e.id !== targetId);
+      return updated.length > 0 ? updated : [createEmptyEntry(nextId())];
+    });
   }
 
   function updateField(
@@ -122,19 +148,28 @@ export function CallListField({
     key: keyof Omit<CallEntry, "id">,
     fieldValue: string
   ): void {
-    const updated = entries.map((entry) =>
-      entry.id === targetId ? { ...entry, [key]: fieldValue } : entry
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === targetId ? { ...entry, [key]: fieldValue } : entry
+      )
     );
-    updateEntries(updated);
   }
+
+  const actionNetwork = String(
+    actionConfig?.[field.networkField ?? "network"] ?? ""
+  );
 
   return (
     <div className="space-y-3">
       {entries.map((entry, index) => (
         <CallRow
+          actionNetwork={actionNetwork}
+          contractInteractionType={field.contractInteractionType}
           disabled={disabled}
           entry={entry}
           fieldKey={field.key}
+          functionFilter={field.functionFilter}
+          hideNetworkColumn={field.hideNetworkColumn}
           index={index}
           key={entry.id}
           onRemove={entries.length > 1 ? () => removeRow(entry.id) : undefined}
@@ -162,6 +197,12 @@ type CallRowProps = {
   index: number;
   fieldKey: string;
   disabled?: boolean;
+  functionFilter?: "read" | "write";
+  contractInteractionType?: "read" | "write";
+  hideNetworkColumn?: boolean;
+  // Action-level network, used for ABI auto-fetch when the per-row Network
+  // selector is hidden (hideNetworkColumn).
+  actionNetwork?: string;
   onUpdate: (key: keyof Omit<CallEntry, "id">, value: string) => void;
   onRemove?: () => void;
 };
@@ -171,15 +212,24 @@ function CallRow({
   index,
   fieldKey,
   disabled,
+  functionFilter,
+  contractInteractionType,
+  hideNetworkColumn,
+  actionNetwork,
   onUpdate,
   onRemove,
 }: CallRowProps): React.ReactNode {
+  const abiFetchNetwork = hideNetworkColumn
+    ? (actionNetwork ?? "")
+    : entry.network;
+
   const rowConfig = useMemo<Record<string, unknown>>(
     () => ({
       contractAddress: entry.contractAddress,
-      network: entry.network,
+      network: abiFetchNetwork,
+      useManualAbi: entry.useManualAbi,
     }),
-    [entry.contractAddress, entry.network]
+    [entry.contractAddress, abiFetchNetwork, entry.useManualAbi]
   );
 
   return (
@@ -202,25 +252,27 @@ function CallRow({
         )}
       </div>
 
-      <div className="space-y-1.5">
-        <label
-          className="text-xs font-medium"
-          htmlFor={`${fieldKey}-net-${entry.id}`}
-        >
-          Network
-        </label>
-        <ChainSelectField
-          chainTypeFilter="evm"
-          disabled={disabled}
-          field={{
-            key: `${fieldKey}-net-${entry.id}`,
-            label: "Network",
-            type: "chain-select",
-          }}
-          onChange={(val) => onUpdate("network", String(val))}
-          value={entry.network}
-        />
-      </div>
+      {!hideNetworkColumn && (
+        <div className="space-y-1.5">
+          <label
+            className="text-xs font-medium"
+            htmlFor={`${fieldKey}-net-${entry.id}`}
+          >
+            Network
+          </label>
+          <ChainSelectField
+            chainTypeFilter="evm"
+            disabled={disabled}
+            field={{
+              key: `${fieldKey}-net-${entry.id}`,
+              label: "Network",
+              type: "chain-select",
+            }}
+            onChange={(val) => onUpdate("network", String(val))}
+            value={entry.network}
+          />
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <label
@@ -249,7 +301,7 @@ function CallRow({
         </label>
         <AbiWithAutoFetchField
           config={rowConfig}
-          contractInteractionType="read"
+          contractInteractionType={contractInteractionType}
           disabled={disabled}
           field={{
             key: `${fieldKey}-abi-${entry.id}`,
@@ -257,6 +309,9 @@ function CallRow({
             type: "abi-with-auto-fetch",
           }}
           onChange={(val) => onUpdate("abi", String(val))}
+          onUpdateConfig={(key, val) =>
+            onUpdate(key as keyof Omit<CallEntry, "id">, String(val))
+          }
           value={entry.abi}
         />
       </div>
@@ -277,7 +332,7 @@ function CallRow({
             type: "abi-function-select",
             placeholder: "Select a function",
           }}
-          functionFilter="read"
+          functionFilter={functionFilter}
           onChange={(val) => onUpdate("abiFunction", String(val))}
           value={entry.abiFunction}
         />

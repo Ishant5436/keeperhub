@@ -18,6 +18,7 @@ export type TrialInfo = {
 
 export type PricingTableProps = {
   currentPlan?: PlanName;
+  canManage?: boolean;
   currentTier?: TierKey | null;
   currentInterval?: BillingInterval | null;
   gasCreditCaps?: GasCreditCapsMap;

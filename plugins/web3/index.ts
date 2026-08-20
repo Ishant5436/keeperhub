@@ -1248,6 +1248,8 @@ const web3Plugin: IntegrationPlugin = {
           label: "Calls",
           type: "call-list-builder",
           required: true,
+          functionFilter: "read",
+          contractInteractionType: "read",
           helpTip:
             "Add contract calls to batch. Each call has its own network, contract address, ABI, function, and arguments.",
           showWhen: { field: "inputMode", equals: "mixed" },
@@ -1267,6 +1269,129 @@ const web3Plugin: IntegrationPlugin = {
               max: 500,
               helpTip:
                 "Maximum calls per Multicall3 request. Lower values reduce RPC payload size.",
+            },
+          ],
+        },
+      ],
+    },
+    {
+      slug: "batch-write-contract",
+      label: "Batch Write Contract",
+      description:
+        "Send multiple write calls as a single on-chain transaction via Multicall3. Each call carries its own contract, ABI, and function. Every call executes with msg.sender set to the Multicall3 contract, not your organization wallet: any call whose behavior depends on msg.sender (an approve() sets Multicall3's allowance, not the wallet's; an ownerOnly-style check fails) will not behave like a direct call from your wallet.",
+      category: "Web3",
+      requiresCredentials: true,
+      stepFunction: "batchWriteContractStep",
+      stepImportPath: "batch-write-contract",
+      outputFields: [
+        {
+          field: "success",
+          description:
+            "Whether the step completed. True for a real successful broadcast. Also true when failOnError is off and an execution failure (signer/RPC/whole-batch revert) was softened; check `error` to tell them apart.",
+        },
+        {
+          field: "transactionHash",
+          description:
+            "The transaction hash of the batch write. Present on a successful broadcast. Absent on a soft-failed (failOnError=false) call, on a revert, and on a pre-broadcast failure.",
+        },
+        {
+          field: "chainId",
+          description: "Chain the transaction was broadcast on.",
+        },
+        {
+          field: "transactionLink",
+          description: "Explorer link to view the transaction",
+        },
+        {
+          field: "gasUsed",
+          description: "Gas cost in wei for the whole batch",
+        },
+        {
+          field: "gasUsedUnits",
+          description: "Gas units consumed by the whole batch",
+        },
+        {
+          field: "effectiveGasPrice",
+          description: "Effective gas price paid",
+        },
+        {
+          field: "results",
+          description:
+            "Per-call outcome in call order: [{ success, result, error? }], decoded from a pre-broadcast simulation of the same batch this transaction executes.",
+        },
+        {
+          field: "totalCalls",
+          description: "Total number of calls in the batch",
+        },
+        {
+          field: "error",
+          description:
+            "Error message if the batch failed, or the softened error when failOnError is off",
+        },
+        {
+          field: "rejection",
+          description:
+            "Classified revert kind when the batch was rejected on-chain, when it could be determined",
+        },
+      ],
+      configFields: [
+        {
+          key: "network",
+          label: "Network",
+          type: "chain-select",
+          chainTypeFilter: "evm",
+          showPrivateVariants: true,
+          placeholder: "Select network",
+          required: true,
+        },
+        {
+          key: "calls",
+          label: "Calls",
+          type: "call-list-builder",
+          required: true,
+          functionFilter: "write",
+          contractInteractionType: "write",
+          hideNetworkColumn: true,
+          helpTip:
+            "Each call carries its own contract address, ABI, and function; args is positional and must match that call's selected function. All calls still run on this action's single selected Network above and broadcast as one signed transaction, with msg.sender set to the Multicall3 contract, not your wallet. Avoid batching msg.sender-gated calls (like approve()) here, since they would grant Multicall3 the allowance or permission, not your organization wallet.",
+        },
+        {
+          key: "isolateCallFailures",
+          label: "Isolate Call Failures",
+          type: "select",
+          options: [
+            {
+              value: "true",
+              label: "On, a failed call does not block the rest",
+            },
+            {
+              value: "false",
+              label: "Off, any failed call reverts the entire batch",
+            },
+          ],
+          defaultValue: "true",
+          helpTip:
+            "When on, one call reverting does not block the others: the transaction still succeeds and the failed call is reported in `results`. When off, any single call reverting reverts the entire batch, and since this transaction races the state read that produced `calls`, a job already worked by someone else can revert the whole batch.",
+        },
+        {
+          key: "failOnError",
+          label: "Fail workflow on error",
+          type: "fail-on-error-switch",
+          defaultValue: "true",
+          helpTip:
+            "When off, a failed batch send (signer/RPC error, or the whole tx reverting) passes a soft error to the next node instead of failing the run. Config/validation problems (bad ABI, missing function, malformed calls JSON) always fail the run regardless of this setting.",
+        },
+        {
+          type: "group",
+          label: "Advanced",
+          defaultExpanded: false,
+          fields: [
+            {
+              key: "gasLimitMultiplier",
+              label: "Gas Limit",
+              type: "gas-limit-multiplier",
+              networkField: "network",
+              actionSlug: "batch-write-contract",
             },
           ],
         },

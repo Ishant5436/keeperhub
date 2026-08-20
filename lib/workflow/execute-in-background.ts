@@ -1,5 +1,5 @@
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, notInArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { start } from "workflow/api";
 import { db } from "@/lib/db";
@@ -207,7 +207,7 @@ export async function executeWorkflowInBackground(
         and(
           eq(workflowExecutions.id, executionId),
           eq(prevExecution.id, workflowExecutions.id),
-          ne(workflowExecutions.status, "cancelled"),
+          notInArray(workflowExecutions.status, ["cancelled", "skipped"]),
           ne(workflowExecutions.status, "success")
         )
       )

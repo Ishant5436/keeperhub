@@ -1,3 +1,4 @@
+import type { NodeExecutionStatus } from "@/lib/errors/execution-status";
 import { getReadContractOutputFields } from "@/lib/workflow/editor/action-output-fields";
 import { getInputSchemaFields } from "@/lib/workflow/editor/input-schema-fields";
 import { getTriggerOutputFields } from "@/lib/workflow/editor/trigger-output-fields";
@@ -30,7 +31,7 @@ export function buildExecutionLogsMap(
     nodeId: string;
     nodeName: string;
     nodeType: string;
-    status: "pending" | "running" | "success" | "error" | "cancelled";
+    status: NodeExecutionStatus;
     output?: unknown;
   }>
 ): ExecutionLogsByNodeId {

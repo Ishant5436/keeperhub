@@ -114,7 +114,7 @@ export type ActionConfigFieldBase = {
   // For abi-function-select and abi-event-select: which field contains the ABI JSON
   abiField?: string;
 
-  // For abi-function-select: filter functions by type ("read" or "write")
+  // For abi-function-select and call-list-builder: filter functions by type ("read" or "write")
   functionFilter?: "read" | "write";
 
   // For abi-function-args: which field contains the ABI JSON and selected function
@@ -128,6 +128,11 @@ export type ActionConfigFieldBase = {
 
   // For abi-with-auto-fetch: "read" or "write" so the node shows the right proxy option label (Read as Proxy / Write as Proxy)
   contractInteractionType?: "read" | "write";
+
+  // For call-list-builder: hide the per-row Network selector (a write batch
+  // is single-chain, one signed tx can't span chains, so the field would be
+  // visually present but silently ignored)
+  hideNetworkColumn?: boolean;
 
   // Tooltip text shown next to the label via an info icon
   helpTip?: string;

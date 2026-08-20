@@ -5,6 +5,7 @@ import { authenticateApiKey } from "@/lib/api-key-auth";
 import { db } from "@/lib/db";
 import type { TransactionHashEntry } from "@/lib/db/schema";
 import { workflowExecutions } from "@/lib/db/schema";
+import type { NodeExecutionStatus } from "@/lib/errors/execution-status";
 import {
   type DualAuthContext,
   getDualAuthContext,
@@ -39,7 +40,7 @@ export type ExecutionViewAccess =
 
 type NodeStatus = {
   nodeId: string;
-  status: "pending" | "running" | "success" | "error" | "cancelled";
+  status: NodeExecutionStatus;
 };
 
 export type ExecutionStatusPayload = {

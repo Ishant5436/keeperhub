@@ -22,6 +22,9 @@ export type PhantomTriggerSource = "schedule" | "block";
 /** Failure codes the scheduler assigns when an enqueue fails. */
 export type SchedulerErrorCode = "CS-0001" | "BS-0001" | "N-0002";
 
+/** Why the platform refused to create the phantom. */
+export type PhantomRefusalReason = "plan_feature" | "execution_limit";
+
 /** Result of a phantom pre-create attempt. */
 export interface PhantomCreateResult {
   /** Id of the phantom row, or undefined when the call failed. */
@@ -33,6 +36,14 @@ export interface PhantomCreateResult {
    * then skip its own enqueue to avoid a duplicate SQS message.
    */
   alreadyExisted: boolean;
+  /**
+   * Set when the platform refused this dispatch on plan grounds (over the
+   * execution limit, or a gated action). The caller must skip its enqueue: the
+   * executor would refuse the same run, so the SQS message and the round-trip
+   * are pure waste. Distinct from an undefined `executionId` with no refusal,
+   * which is a transport failure and still falls back to the id-less enqueue.
+   */
+  refused?: PhantomRefusalReason;
 }
 
 /**
@@ -53,8 +64,11 @@ export async function createPhantomExecution(
 ): Promise<PhantomCreateResult> {
   try {
     const result = await apiRequest<{
-      executionId: string;
+      executionId?: string;
       alreadyExisted?: boolean;
+      refused?: boolean;
+      reason?: PhantomRefusalReason;
+      error?: string;
     }>("/api/internal/executions", {
       method: "POST",
       body: JSON.stringify({
@@ -65,6 +79,13 @@ export async function createPhantomExecution(
         dispatchKey,
       }),
     });
+    if (result.refused) {
+      const reason: PhantomRefusalReason = result.reason ?? "execution_limit";
+      console.log(
+        `[Phantom] Dispatch refused for workflow ${workflowId} (${reason}): ${result.error ?? ""}`,
+      );
+      return { alreadyExisted: false, refused: reason };
+    }
     return {
       executionId: result.executionId,
       alreadyExisted: result.alreadyExisted ?? false,

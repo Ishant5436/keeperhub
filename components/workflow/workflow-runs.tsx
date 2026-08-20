@@ -12,6 +12,7 @@ import {
   GitBranch,
   Loader2,
   Play,
+  SkipForward,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -22,6 +23,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toChecksumAddress } from "@/lib/address-utils";
 import { getCustomerRunErrorMessage } from "@/lib/errors/customer-message";
 import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
+import type {
+  NodeExecutionStatus,
+  WorkflowExecutionStatus,
+} from "@/lib/errors/execution-status";
 import {
   FOR_EACH_GROUP_TYPE,
   buildChildLogsLookup,
@@ -52,7 +57,7 @@ type ExecutionLog = {
   nodeId: string;
   nodeName: string;
   nodeType: string;
-  status: "pending" | "running" | "success" | "error" | "cancelled";
+  status: NodeExecutionStatus;
   startedAt: Date;
   completedAt: Date | null;
   duration: string | null;
@@ -66,7 +71,7 @@ type ExecutionLog = {
 type WorkflowExecution = {
   id: string;
   workflowId: string;
-  status: "pending" | "running" | "success" | "error" | "cancelled" | "phantom";
+  status: WorkflowExecutionStatus;
   startedAt: Date;
   completedAt: Date | null;
   duration: string | null;
@@ -145,7 +150,7 @@ function createExecutionLogsMap(logs: ExecutionLog[]): Record<
     nodeId: string;
     nodeName: string;
     nodeType: string;
-    status: "pending" | "running" | "success" | "error" | "cancelled";
+    status: NodeExecutionStatus;
     output?: unknown;
   }
 > {
@@ -155,7 +160,7 @@ function createExecutionLogsMap(logs: ExecutionLog[]): Record<
       nodeId: string;
       nodeName: string;
       nodeType: string;
-      status: "pending" | "running" | "success" | "error" | "cancelled";
+      status: NodeExecutionStatus;
       output?: unknown;
     }
   > = {};
@@ -799,6 +804,8 @@ function getStatusLabel(status: string): string {
       return "Running";
     case "cancelled":
       return "Cancelled before it finished";
+    case "skipped":
+      return "Skipped - expand for why it did not run";
     default:
       return "Pending - has not run yet";
   }
@@ -1017,7 +1024,7 @@ export function WorkflowRuns({
         nodeId: string;
         nodeName: string;
         nodeType: string;
-        status: "pending" | "running" | "success" | "error" | "cancelled";
+        status: NodeExecutionStatus;
         input: unknown;
         output: unknown;
         error: string | null;
@@ -1149,6 +1156,7 @@ export function WorkflowRuns({
           "success",
           "error",
           "system_error",
+          "skipped",
         ]);
         const executionMap = new Map(data.map((e) => [e.id, e]));
         for (const executionId of expandedRuns) {
@@ -1226,6 +1234,8 @@ export function WorkflowRuns({
         return <Loader2 className="h-3 w-3 animate-spin text-white" />;
       case "cancelled":
         return <Ban className="h-3 w-3 text-white" />;
+      case "skipped":
+        return <SkipForward className="h-3 w-3 text-white" />;
       default:
         return <Clock className="h-3 w-3 text-white" />;
     }
@@ -1243,6 +1253,9 @@ export function WorkflowRuns({
         return "bg-blue-600";
       case "cancelled":
         return "bg-orange-500";
+      // Neutral: refused before it started, not a failure.
+      case "skipped":
+        return "bg-muted-foreground";
       default:
         return "bg-muted-foreground";
     }

@@ -1,10 +1,44 @@
 import "server-only";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { isMutatingActionType } from "@/lib/mcp/action-type";
 import {
   buildTriggerInputSchema,
   detectListingTriggerType,
   normalizeTriggerInput,
 } from "@/lib/mcp/trigger-input-schema";
+
+function getNodeActionType(node: unknown): unknown {
+  if (node === null || typeof node !== "object" || !("data" in node)) {
+    return;
+  }
+  const { data } = node as { data?: unknown };
+  if (data === null || typeof data !== "object") {
+    return;
+  }
+  const config =
+    "config" in data ? (data as Record<string, unknown>).config : undefined;
+  const configActionType =
+    config !== null && typeof config === "object" && "actionType" in config
+      ? (config as Record<string, unknown>).actionType
+      : undefined;
+  const legacyActionType =
+    "actionType" in data
+      ? (data as Record<string, unknown>).actionType
+      : undefined;
+  return configActionType ?? legacyActionType;
+}
+
+// Broader than workflowType === "write": also catches genuinely-mutating
+// actions (batch-write-contract, approve-token, transfer-funds,
+// transfer-token) that deriveWorkflowType deliberately never promotes to
+// "write" because they cannot be served by the calldata-handoff MCP route.
+// Those workflows correctly stay workflowType="read" for routing purposes,
+// but they still broadcast a real transaction, so the readOnlyHint
+// annotation needs this separate, wider check rather than reusing
+// workflowType.
+function hasMutatingNode(nodes: unknown[]): boolean {
+  return nodes.some((node) => isMutatingActionType(getNodeActionType(node)));
+}
 
 type ApiResponse = Record<string, unknown>;
 
@@ -136,7 +170,8 @@ export function createWorkflowMcpServer(
       description: toolDescription,
       inputSchema,
       annotations: {
-        readOnlyHint: listing.workflowType === "read",
+        readOnlyHint:
+          listing.workflowType === "read" && !hasMutatingNode(listing.nodes),
         destructiveHint: false,
       },
     },

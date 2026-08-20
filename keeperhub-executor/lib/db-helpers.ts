@@ -1,5 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   workflowExecutions,
@@ -19,7 +19,10 @@ import { calculateTotalSteps } from "../../lib/workflow/executor/progress";
 import type { WorkflowEdge, WorkflowNode } from "../../lib/workflow/store";
 import type { executeWorkflow } from "../../lib/workflow/executor/executor.workflow";
 import { toJsonSafe } from "./serialize";
-import { recordTerminalSample } from "./terminal-counters";
+import {
+  recordSkippedSample,
+  recordTerminalSample,
+} from "./terminal-counters";
 
 export type DbSchema = {
   workflows: typeof workflows;
@@ -222,18 +225,23 @@ export async function updateExecutionStatus(
   // backstop: if the engine's own write landed, the row is already
   // success/error/cancelled and this update is a no-op; if that write was lost
   // (it can throw and only be logged), this closes the row instead of leaving
-  // it stuck "running". Excluding all three terminal states keeps the backstop
-  // from clobbering the engine's richer fields (KEEP-431).
+  // it stuck "running". Excluding every terminal state keeps the backstop from
+  // clobbering the engine's richer fields (KEEP-431). 'skipped' is in the list
+  // for the same reason: a run the platform refused must not be reopened as a
+  // failure by a late backstop write.
   const updated = await db
     .update(workflowExecutions)
     .set(updateData)
     .where(
       and(
         eq(workflowExecutions.id, executionId),
-        ne(workflowExecutions.status, "success"),
-        ne(workflowExecutions.status, "error"),
-        ne(workflowExecutions.status, "system_error"),
-        ne(workflowExecutions.status, "cancelled")
+        notInArray(workflowExecutions.status, [
+          "success",
+          "error",
+          "system_error",
+          "skipped",
+          "cancelled",
+        ])
       )
     )
     .returning({ workflowId: workflowExecutions.workflowId });
@@ -461,18 +469,29 @@ export async function discardPhantomRow(
 }
 
 /**
- * KEEP-693: resolve a pre-created phantom or pending row to a user-actionable
- * error (e.g. a billing block) rather than leaving it for the reaper to
- * mis-code as a system failure. Compare-and-set on status IN ('phantom',
- * 'pending') so a row that already advanced is left untouched.
+ * KEEP-693: resolve a pre-created phantom or pending row to its terminal state
+ * rather than leaving it for the reaper to mis-code as a system failure.
+ * Compare-and-set on status IN ('phantom', 'pending') so a row that already
+ * advanced is left untouched.
+ *
+ * The run was refused before it started, so it lands on 'skipped', not 'error':
+ * it never executed, and counting it as a failure skews the success-rate SLI
+ * (in a sampled window, refusals read as a 21% error rate against a real 3%).
+ * The reason is still recorded on the row so its author sees why it did not
+ * fire.
  *
  * Matches 'pending' in addition to 'phantom' because manual-trigger executions
  * are pre-created by the API as 'pending' (not 'phantom') before being enqueued.
  */
-export async function resolvePhantomToError(
+export async function resolveToSkipped(
   db: PostgresJsDatabase<DbSchema>,
   executionId: string | undefined,
-  fields: { error: string; errorCategory: "billing"; errorType: "user" }
+  fields: {
+    error: string;
+    errorCategory: "billing";
+    errorType: "user";
+    reason: string;
+  }
 ): Promise<void> {
   if (!executionId) {
     return;
@@ -480,7 +499,7 @@ export async function resolvePhantomToError(
   const resolved = await db
     .update(workflowExecutions)
     .set({
-      status: "error",
+      status: "skipped",
       error: fields.error,
       errorCategory: fields.errorCategory,
       errorType: fields.errorType,
@@ -498,16 +517,13 @@ export async function resolvePhantomToError(
     )
     .returning({ workflowId: workflowExecutions.workflowId });
 
-  // Same reasoning as failExecutionAsSystemError: the phantom/pending CAS
-  // makes a match the first terminal transition, and billing-blocked rows
-  // never reach any other counted finalize path.
+  // Same reasoning as failExecutionAsSystemError: the phantom/pending CAS makes
+  // a match the first terminal transition, and refused rows never reach any
+  // other counted finalize path.
   if (resolved.length > 0) {
-    await recordTerminalSample(db, {
+    await recordSkippedSample(db, {
       workflowId: resolved[0].workflowId,
-      status: "error",
-      errorMessage: fields.error,
-      errorType: fields.errorType,
-      errorCategory: fields.errorCategory,
+      reason: fields.reason,
     });
   }
 }

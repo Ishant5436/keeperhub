@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   }
 
   const fire = fires[0];
-  const executionId = await createPhantomExecution(
+  const { executionId } = await createPhantomExecution(
     fire.workflowId,
     fire.userId,
     "event",

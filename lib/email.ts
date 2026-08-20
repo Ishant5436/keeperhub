@@ -601,6 +601,9 @@ type ExecutionDigestEmailData = {
     total: number;
     success: number;
     error: number;
+    // Runs refused before they started. Rendered in its own neutral section:
+    // they never ran, so they are not failures and carry no rate.
+    skipped: number;
     distinctWorkflows: number;
     transactionCount: number;
     gasUsedWei: string;
@@ -617,6 +620,12 @@ type ExecutionDigestEmailData = {
     workflowId: string;
     name: string;
     runs: number;
+  }[];
+  topSkipped: {
+    workflowId: string;
+    name: string;
+    skipped: number;
+    lastReason: string | null;
   }[];
 };
 
@@ -721,6 +730,7 @@ export async function sendWorkflowExecutionDigestEmail(
     stats,
     topFailing,
     mostExecuted,
+    topSkipped,
   } = data;
   const period = DIGEST_PERIOD_LABEL[cadence];
   const summaryLabel = DIGEST_SUMMARY_LABEL[cadence];
@@ -774,6 +784,21 @@ export async function sendWorkflowExecutionDigestEmail(
       ? ""
       : `\nSponsored transactions: ${stats.sponsoredTransactionCount}`;
 
+  // Omitted entirely when nothing was refused, which is the normal case.
+  const skippedText = stats.skipped
+    ? `
+Skipped: ${stats.skipped} (refused before starting, not failures)
+${topSkipped
+  .map(
+    (w) =>
+      `- ${w.name}: ${w.skipped} skipped${
+        w.lastReason ? ` (${w.lastReason})` : ""
+      } (${workflowUrl(w.workflowId)})`
+  )
+  .join("\n")}
+`
+    : "";
+
   const socialText = DIGEST_SOCIAL_LINKS.map((s) => `${s.name}: ${s.url}`).join(
     "\n"
   );
@@ -795,7 +820,7 @@ ${mostExecutedText}
 Failed: ${stats.error} (${failRate}%)
 Top failing workflows:
 ${failingText}
-
+${skippedText}
 View runs: ${appUrl}/analytics
 
 You're receiving this digest for ${orgName} because you're an owner or admin of that organization.
@@ -875,6 +900,33 @@ ${socialText}
         .join("")
     : `<tr><td style="padding:6px 0;color:#999;">No executions.</td></tr>`;
 
+  // Neutral grey throughout: a skipped run is not an error, and colouring it
+  // like one is the misread this section exists to prevent.
+  const skippedRows = topSkipped
+    .map((w) => {
+      const reasonNote = w.lastReason
+        ? ` <span style="color:#999;" title="${escapeHtml(
+            w.lastReason
+          )}">- ${escapeHtml(truncate(w.lastReason, 42))}</span>`
+        : "";
+      return `<tr><td style="padding:6px 0;">${nameLink(
+        w.workflowId,
+        truncate(w.name, 26),
+        w.name
+      )}${reasonNote}</td><td style="padding:6px 0;text-align:right;color:#666;vertical-align:top;">${
+        w.skipped
+      }</td></tr>`;
+    })
+    .join("");
+
+  const skippedSection = stats.skipped
+    ? `<div style="text-align:left; margin-top:28px;">
+      <p style="margin:0 0 4px;"><span style="color:#666; font-weight:bold; font-size:17px;">Skipped: ${stats.skipped}</span> <span style="color:#999; font-size:13px;">- Runs refused before they started</span></p>
+      <p style="margin:0 0 10px; color:#999; font-size:12px;">These runs never started, so they are not failures and do not count towards your success rate or your usage.</p>
+      <table style="width:100%; border-collapse:collapse;">${tableHeader("Skipped")}${skippedRows}</table>
+    </div>`
+    : "";
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -905,6 +957,7 @@ ${socialText}
       <p style="margin:0 0 10px;"><span style="color:#c0392b; font-weight:bold; font-size:17px;">Failed: ${stats.error} (${failRate}%)</span> <span style="color:#999; font-size:13px;">- Top failing workflows</span></p>
       <table style="width:100%; border-collapse:collapse;">${tableHeader("Failures", "#c0392b")}${failingRows}</table>
     </div>
+    ${skippedSection}
     <div style="margin:30px 0 0;">
       <a href="${appUrl}/analytics" style="display:inline-block; background:#1a1a2e; color:#fff; padding:12px 24px; border-radius:8px; text-decoration:none;">View runs</a>
     </div>

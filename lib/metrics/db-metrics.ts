@@ -85,6 +85,7 @@ export type WorkflowStats = {
   totalRunning: number;
   totalPending: number;
   totalCancelled: number;
+  totalSkipped: number;
 
   // Per-(status, org_slug, error_type) execution counts. Personal/anonymous
   // workflows are bucketed under ANONYMOUS_ORG_SLUG so the sum of counts for
@@ -128,6 +129,7 @@ export async function getWorkflowStatsFromDb(): Promise<WorkflowStats> {
       totalRunning: 0,
       totalPending: 0,
       totalCancelled: 0,
+      totalSkipped: 0,
       executionsByStatusAndOrgSlug: [],
       durationBuckets: new Array(WORKFLOW_DURATION_BUCKETS.length + 1).fill(0),
       durationSum: 0,
@@ -196,6 +198,11 @@ export async function getWorkflowStatsFromDb(): Promise<WorkflowStats> {
         case "cancelled":
           stats.totalCancelled += c;
           break;
+        // Refused before starting: counted apart from errors so the 30-day
+        // volume gauge does not read a refusal as a failure.
+        case "skipped":
+          stats.totalSkipped += c;
+          break;
         default:
           // Ignore unknown status values
           break;
@@ -258,6 +265,7 @@ export async function getWorkflowStatsFromDb(): Promise<WorkflowStats> {
       totalRunning: 0,
       totalPending: 0,
       totalCancelled: 0,
+      totalSkipped: 0,
       executionsByStatusAndOrgSlug: [],
       durationBuckets: new Array(WORKFLOW_DURATION_BUCKETS.length + 1).fill(0),
       durationSum: 0,

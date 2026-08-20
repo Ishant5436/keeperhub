@@ -11,7 +11,7 @@ import {
   type PricingCtaContext,
 } from "keeperhub-pricing-ui";
 import "keeperhub-pricing-ui/styles.css";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BILLING_API } from "@/lib/billing/constants";
 import {
@@ -676,6 +676,87 @@ function buildComparisonColumns(): PkgComparisonColumn[] {
   }));
 }
 
+const OWNER_ONLY_HINT = "Available to the owner";
+
+/**
+ * A card nobody can act on: the price and what it includes still read. The
+ * handler goes with the button, which leaves the package rendering an inert
+ * link -- and a link, unlike a disabled button, still reports the hover the
+ * hint is anchored to.
+ */
+function withoutCta(card: PkgPricingCard): PkgPricingCard {
+  return {
+    ...card,
+    cta: { ...card.cta, disabled: true, href: undefined, onClick: undefined },
+  };
+}
+
+type HintSpot = { left: number; top: number };
+
+/** The read-only table, with a word on why the cards cannot be acted on. */
+function ReadOnlyCards({
+  cards,
+  interval,
+  onIntervalChange,
+  onTierChange,
+}: {
+  cards: PkgPricingCard[];
+  interval: PkgBillingInterval;
+  onIntervalChange: (next: PkgBillingInterval) => void;
+  onTierChange: (cardId: string, tierKey: string) => void;
+}): React.ReactElement {
+  const frame = useRef<HTMLDivElement>(null);
+  const [hint, setHint] = useState<HintSpot | null>(null);
+
+  // The cards come from a package, so there is no element of ours to hang a
+  // tooltip on. The frame listens for the hover instead and places the hint
+  // over whichever card button the pointer is on.
+  useEffect(() => {
+    const node = frame.current;
+    if (!node) {
+      return;
+    }
+    const show = (event: MouseEvent): void => {
+      const cta = (event.target as HTMLElement | null)?.closest(".khp-cta");
+      if (!cta) {
+        return;
+      }
+      const box = cta.getBoundingClientRect();
+      const frameBox = node.getBoundingClientRect();
+      setHint({
+        left: box.left - frameBox.left + box.width / 2,
+        top: box.top - frameBox.top,
+      });
+    };
+    const hide = (): void => setHint(null);
+    node.addEventListener("mouseover", show);
+    node.addEventListener("mouseout", hide);
+    return () => {
+      node.removeEventListener("mouseover", show);
+      node.removeEventListener("mouseout", hide);
+    };
+  }, []);
+
+  return (
+    <div className="relative" ref={frame}>
+      <PricingCards
+        cards={cards}
+        interval={interval}
+        onIntervalChange={onIntervalChange}
+        onTierChange={onTierChange}
+      />
+      {hint && (
+        <span
+          className="-translate-x-1/2 -translate-y-full pointer-events-none absolute z-50 w-fit whitespace-nowrap rounded-md bg-foreground px-3 py-1.5 text-background text-xs"
+          style={{ left: hint.left, top: hint.top - 8 }}
+        >
+          {OWNER_ONLY_HINT}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // -- Confirm dialog derived data --
 
 type DialogData = ConfirmTarget & {
@@ -741,6 +822,7 @@ export function PricingTable({
   gasCreditCaps,
   trial,
   onPlanUpdated,
+  canManage = true,
 }: PricingTableProps): React.ReactElement {
   const [interval, setInterval] = useState<BillingInterval>("monthly");
   const [selectedTierByCard, setSelectedTierByCard] = useState<
@@ -819,7 +901,7 @@ export function PricingTable({
   const proTrialDays = isTrialSelection(trial, "pro", selectedTierByCard.pro)
     ? (trial?.days ?? null)
     : null;
-  const cards = buildCards({
+  const builtCards = buildCards({
     currentPlan,
     currentTier,
     currentInterval,
@@ -832,6 +914,7 @@ export function PricingTable({
     proTrialDays,
     onSelect: onCardCta,
   });
+  const cards = canManage ? builtCards : builtCards.map(withoutCta);
 
   const comparisonColumns = buildComparisonColumns();
   const comparisonRows = buildComparisonRows(
@@ -843,12 +926,21 @@ export function PricingTable({
 
   return (
     <div className="space-y-8">
-      <PricingCards
-        cards={cards}
-        interval={appIntervalToPkg(interval)}
-        onIntervalChange={(next) => setInterval(pkgIntervalToApp(next))}
-        onTierChange={onCardTierChange}
-      />
+      {canManage ? (
+        <PricingCards
+          cards={cards}
+          interval={appIntervalToPkg(interval)}
+          onIntervalChange={(next) => setInterval(pkgIntervalToApp(next))}
+          onTierChange={onCardTierChange}
+        />
+      ) : (
+        <ReadOnlyCards
+          cards={cards}
+          interval={appIntervalToPkg(interval)}
+          onIntervalChange={(next) => setInterval(pkgIntervalToApp(next))}
+          onTierChange={onCardTierChange}
+        />
+      )}
 
       <PricingComparisonTable
         collapsible

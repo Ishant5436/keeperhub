@@ -19,8 +19,8 @@ vi.mock("../../lib/db/schema", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
   and: () => ({}),
-  ne: () => ({}),
   inArray: () => ({}),
+  notInArray: () => ({}),
 }));
 
 vi.mock("cron-parser", () => ({

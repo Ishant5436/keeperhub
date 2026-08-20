@@ -797,12 +797,19 @@ export class ChainMonitor {
     // unique index so only one enqueue lands. The in-memory lastProcessedBlock
     // dedup only guards a single instance, so this is what covers 2 replicas.
     const dispatchKey = `block:${wf.id}:${this.chainId}:${blockNumber}`;
-    const { executionId, alreadyExisted } = await createPhantomExecution(
-      wf.id,
-      "block",
-      wf.userId,
-      dispatchKey,
-    );
+    const { executionId, alreadyExisted, refused } =
+      await createPhantomExecution(wf.id, "block", wf.userId, dispatchKey);
+
+    // Refused on plan grounds: the executor would refuse the same run. Skipping
+    // here matters most on a fast chain, where enqueueing would otherwise cost
+    // a message and an executor round-trip on every block, indefinitely.
+    if (refused) {
+      console.log(
+        `[BlockMonitor:${this.chainName}] Skipping refused dispatch for ${dispatchKey} (${refused})`,
+      );
+      metrics.recordDispatchRefused(this.chainName, refused);
+      return;
+    }
 
     if (alreadyExisted) {
       console.log(

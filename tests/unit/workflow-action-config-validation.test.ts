@@ -467,6 +467,104 @@ describe("validateWorkflowActionConfigs", () => {
     });
   });
 
+  describe("batch-write-contract calls[] required fields", () => {
+    const DO_WRITE_ABI = JSON.stringify([
+      {
+        inputs: [],
+        name: "doWrite",
+        outputs: [],
+        stateMutability: "nonpayable",
+        type: "function",
+      },
+    ]);
+
+    const VALID_CALL = {
+      network: "1",
+      contractAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+      abi: DO_WRITE_ABI,
+      abiFunction: "doWrite",
+      args: [],
+    };
+
+    it("accepts a batch whose every call is complete", () => {
+      const result = validateWorkflowActionConfigs([
+        actionNode("web3/batch-write-contract", {
+          network: "1",
+          calls: JSON.stringify([VALID_CALL, VALID_CALL]),
+        }),
+      ]);
+
+      expect(result).toEqual({ valid: true, issues: [] });
+    });
+
+    it("flags a missing contractAddress on the second call, not just the first", () => {
+      const result = validateWorkflowActionConfigs([
+        actionNode("web3/batch-write-contract", {
+          network: "1",
+          calls: JSON.stringify([
+            VALID_CALL,
+            { ...VALID_CALL, contractAddress: "" },
+          ]),
+        }),
+      ]);
+
+      expect(result.valid).toBe(false);
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          code: "MISSING_REQUIRED_FIELD",
+          path: "nodes[0].data.config.calls[1].contractAddress",
+          field: "calls[1].contractAddress",
+          actionType: "web3/batch-write-contract",
+        }),
+      ]);
+    });
+
+    it("flags every missing field on a fully blank call", () => {
+      const result = validateWorkflowActionConfigs([
+        actionNode("web3/batch-write-contract", {
+          network: "1",
+          calls: JSON.stringify([
+            VALID_CALL,
+            {
+              network: "1",
+              contractAddress: "",
+              abi: "",
+              abiFunction: "",
+              args: [],
+            },
+          ]),
+        }),
+      ]);
+
+      expect(result.valid).toBe(false);
+      const paths = result.issues.map((issue) => issue.path);
+      expect(paths).toEqual([
+        "nodes[0].data.config.calls[1].contractAddress",
+        "nodes[0].data.config.calls[1].abi",
+        "nodes[0].data.config.calls[1].abiFunction",
+      ]);
+    });
+
+    it("rejects an unparseable calls value via the existing type check", () => {
+      const result = validateWorkflowActionConfigs([
+        actionNode("web3/batch-write-contract", {
+          network: "1",
+          calls: "not json",
+        }),
+      ]);
+
+      expect(result.valid).toBe(false);
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          code: "INVALID_FIELD_TYPE",
+          path: "nodes[0].data.config.calls",
+          field: "calls",
+          actionType: "web3/batch-write-contract",
+        }),
+      ]);
+    });
+  });
+
   describe("KEEP-571 legacy field aliases", () => {
     const WRITE_CONTRACT_ABI = JSON.stringify([
       {

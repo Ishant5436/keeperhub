@@ -68,6 +68,29 @@ describe("createPhantomExecution", () => {
 
     expect(result).toEqual({ alreadyExisted: false });
   });
+
+  // A transport failure and a refusal must stay distinguishable: the first
+  // still falls back to the id-less enqueue, the second must not enqueue.
+  it("reports a refusal when the platform declines the dispatch", async () => {
+    apiRequest.mockResolvedValue({
+      refused: true,
+      reason: "plan_feature",
+      error: "gated action",
+    });
+
+    const result = await createPhantomExecution("wf_1", "schedule");
+
+    expect(result).toEqual({ alreadyExisted: false, refused: "plan_feature" });
+    expect(result.executionId).toBeUndefined();
+  });
+
+  it("defaults an unlabelled refusal to execution_limit", async () => {
+    apiRequest.mockResolvedValue({ refused: true });
+
+    const result = await createPhantomExecution("wf_1", "schedule");
+
+    expect(result.refused).toBe("execution_limit");
+  });
 });
 
 describe("failPhantomExecution", () => {

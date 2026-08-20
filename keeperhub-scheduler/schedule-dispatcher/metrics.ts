@@ -29,6 +29,16 @@ export const triggeredTotal = new Counter({
   registers: [registry],
 });
 
+// Occurrences the platform refused on plan grounds before anything was
+// enqueued. Not an error: the trigger fired, the org may not run it. Rising
+// here with triggered_total flat is an org sitting at its limit, not an outage.
+export const refusedTotal = new Counter({
+  name: `${PREFIX}_refused_total`,
+  help: "Total occurrences refused at admission (over plan limit or gated action), skipped without enqueueing.",
+  labelNames: ["reason"] as const,
+  registers: [registry],
+});
+
 // Per-schedule errors (SQS failure, bad cron caught late, etc.). Distinct from
 // fetch errors which abort the whole pass and are not counted here.
 export const errorsTotal = new Counter({

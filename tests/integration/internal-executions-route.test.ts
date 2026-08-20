@@ -33,6 +33,16 @@ vi.mock("@/lib/features", () => ({
   extractActionTypeNodes: vi.fn(() => []),
 }));
 
+// Admission for phantom creates: defaults to admitted (null), tests flip it.
+const checkDispatchAdmission = vi.fn(
+  async (..._args: unknown[]) =>
+    null as { reason: string; message: string } | null
+);
+vi.mock("@/lib/billing/dispatch-admission", () => ({
+  checkDispatchAdmission: (...args: unknown[]) =>
+    checkDispatchAdmission(...args),
+}));
+
 // withBackstopCapture wraps the insert; just run the callback.
 vi.mock("@/lib/security/backstop-capture", () => ({
   withBackstopCapture: vi.fn((_ctx: unknown, fn: () => unknown) => fn()),
@@ -192,6 +202,7 @@ describe("POST /api/internal/executions", () => {
     mockSelectResult = [];
     enforceExecutionLimit.mockResolvedValue({ blocked: false });
     enforceWorkflowFeatures.mockResolvedValue({ blocked: false });
+    checkDispatchAdmission.mockResolvedValue(null);
   });
 
   it("creates a running row by default and returns the execution id", async () => {
@@ -207,7 +218,7 @@ describe("POST /api/internal/executions", () => {
     expect(enforceExecutionLimit).toHaveBeenCalledTimes(1);
   });
 
-  it("creates a phantom row and skips the execution-limit guard", async () => {
+  it("creates a phantom row and skips the running-row guards", async () => {
     const response = await POST(
       postRequest({ workflowId: "wf_1", userId: "user_1", status: "phantom" })
     );
@@ -220,6 +231,60 @@ describe("POST /api/internal/executions", () => {
     expect(insertedValues?.billable).toBe(false);
     // Quota is charged when the executor upgrades to running, not now.
     expect(enforceExecutionLimit).not.toHaveBeenCalled();
+    expect(checkDispatchAdmission).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a phantom the org may not run, without creating one", async () => {
+    checkDispatchAdmission.mockResolvedValue({
+      reason: "execution_limit",
+      message: "limit reached",
+    });
+
+    const response = await POST(
+      postRequest({
+        workflowId: "wf_1",
+        userId: "user_1",
+        status: "phantom",
+        triggerSource: "schedule",
+      })
+    );
+    const data = await response.json();
+
+    // 200, not an error status: a refusal must never look like a transport
+    // failure, which the dispatchers fall back to enqueueing through.
+    expect(response.status).toBe(200);
+    expect(data).toMatchObject({
+      refused: true,
+      reason: "execution_limit",
+      error: "limit reached",
+    });
+    expect(data.executionId).toBeUndefined();
+    // 'skipped', not 'error': the run never executed, so it stays out of the
+    // error count and the success-rate denominator.
+    expect(insertedValues?.status).toBe("skipped");
+  });
+
+  it("records one visible row per workflow, reason and hour for refusals", async () => {
+    checkDispatchAdmission.mockResolvedValue({
+      reason: "plan_feature",
+      message: "gated action",
+    });
+
+    await POST(
+      postRequest({ workflowId: "wf_1", userId: "user_1", status: "phantom" })
+    );
+
+    // The hour-bucketed key is what the unique index collapses, so a fast
+    // trigger writes one row an hour instead of one per occurrence.
+    expect(insertedValues?.dispatchKey).toMatch(
+      /^refused:wf_1:plan_feature:\d{4}-\d{2}-\d{2}T\d{2}$/
+    );
+    expect(insertedValues?.status).toBe("skipped");
+    expect(insertedValues?.error).toBe("gated action");
+    expect(insertedValues?.errorCategory).toBe("billing");
+    expect(insertedValues?.errorType).toBe("user");
+    // Refused before it started, so it consumes no quota.
+    expect(insertedValues?.billable).toBe(false);
   });
 
   it("attributes the row to the supplied trigger source", async () => {

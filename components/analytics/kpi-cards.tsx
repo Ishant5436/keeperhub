@@ -112,6 +112,12 @@ function DeltaDisplay({
   );
 }
 
+// Shown on Total Runs, which is where a user notices runs are missing: the
+// trigger fired but the platform refused the run before it started, so it is
+// neither a success nor a failure and belongs in no rate.
+const SKIPPED_TOOLTIP =
+  "Runs that finished, successfully or not, over this period. Runs still in flight, runs you cancelled, and skipped runs are excluded. A run is skipped when the trigger fired but the run was refused before it started, because the plan's monthly execution limit was reached, the workflow uses an action your plan does not include, or a pay-as-you-go charge could not be collected. Nothing ran, so skipped runs do not count towards your success rate or your usage.";
+
 const COMPARISON_LABELS: Record<TimeRange, string> = {
   "1h": "the previous hour",
   "24h": "the previous 24 hours",
@@ -297,6 +303,7 @@ export function KpiCards(): ReactNode {
       `Change in ${metric} compared with ${versus}.`;
 
     const prev = summary.previousPeriod;
+    const skippedCount = summary.skippedCount;
 
     const totalRunsDelta = prev
       ? computeDelta(summary.totalRuns, prev.totalRuns)
@@ -337,6 +344,16 @@ export function KpiCards(): ReactNode {
         deltaTooltip: deltaTooltip("total runs"),
         invertDeltaColor: false,
         iconClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+        breakdown:
+          skippedCount > 0
+            ? ([
+                {
+                  key: "skipped",
+                  text: `${skippedCount.toLocaleString()} skipped`,
+                },
+              ] as const)
+            : undefined,
+        tooltip: SKIPPED_TOOLTIP,
       },
       {
         key: "success-rate",

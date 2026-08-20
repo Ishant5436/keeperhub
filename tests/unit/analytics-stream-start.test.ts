@@ -11,6 +11,7 @@ const EMPTY_SUMMARY: AnalyticsSummary = {
   successCount: 0,
   errorCount: 0,
   cancelledCount: 0,
+  skippedCount: 0,
   successRate: 0,
   avgDurationMs: null,
   totalGasWei: "0",

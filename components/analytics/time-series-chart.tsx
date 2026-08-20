@@ -24,6 +24,8 @@ const CHART_COLORS = {
   success: "var(--color-keeperhub-green)",
   error: "var(--color-orange-500, #f97316)",
   cancelled: "var(--chart-1)",
+  // Refused before it started: muted, so it never reads as a failure band.
+  skipped: "var(--color-muted-foreground)",
   running: "var(--chart-2)",
   pending: "var(--chart-4)",
 } as const;
@@ -119,6 +121,7 @@ function TimeSeriesContent({
     success: number;
     error: number;
     cancelled: number;
+    skipped: number;
     pending: number;
     running: number;
   }[];
@@ -132,6 +135,7 @@ function TimeSeriesContent({
       "success",
       "error",
       "cancelled",
+      "skipped",
       "running",
       "pending",
     ] as const;

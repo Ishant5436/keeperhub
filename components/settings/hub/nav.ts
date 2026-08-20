@@ -284,6 +284,11 @@ export const SETTINGS_NAV: readonly SettingsNavGroup[] = [
               "usage",
               "quota",
               "gas sponsorship credits",
+            ],
+          },
+          {
+            title: "Payment and invoices",
+            tags: [
               "invoices",
               "receipts",
               "payment method",
@@ -300,11 +305,11 @@ export const SETTINGS_NAV: readonly SettingsNavGroup[] = [
               "balance",
               "per execution",
               "auto recharge",
+              "spend cap",
             ],
           },
         ],
         tags: ["pricing", "cost", "pay"],
-        ownerOnly: true,
       },
       {
         segment: "plans",
@@ -325,7 +330,6 @@ export const SETTINGS_NAV: readonly SettingsNavGroup[] = [
           "monthly",
           "yearly",
         ],
-        ownerOnly: true,
       },
       {
         segment: "wallets",

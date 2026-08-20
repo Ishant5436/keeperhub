@@ -185,6 +185,8 @@ const STATUS_STYLES: Record<NormalizedStatus, string> = {
     "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20",
   cancelled:
     "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/20",
+  // Refused before it started: neutral, not a failure colour.
+  skipped: "bg-muted text-muted-foreground border-border",
   running: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20",
   pending: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20",
 } as const;
@@ -192,16 +194,44 @@ const STATUS_STYLES: Record<NormalizedStatus, string> = {
 const STATUS_LABELS: Partial<Record<NormalizedStatus, string>> = {
   system_error: "System Error",
   external_error: "External",
+  skipped: "Skipped",
+};
+
+// The four outcome badges a user cannot tell apart from the label alone. Each
+// one answers "whose fault is it and what do I do about it".
+const STATUS_TOOLTIPS: Partial<Record<NormalizedStatus, string>> = {
+  skipped:
+    "The trigger fired but the run was refused before it started. Either the monthly execution limit was reached, or the workflow uses an action your plan does not include, or a pay-as-you-go charge could not be collected. Nothing ran, so a skipped run is not a failure and does not count towards your success rate or your usage.",
+  error:
+    "The run started and failed on something in the workflow itself: bad input, a missing or invalid credential, or a 4xx from an endpoint you configured. Fix the workflow and run it again.",
+  external_error:
+    "The run failed on a third party it called, not on the workflow and not on KeeperHub. Typical causes are an API or endpoint that timed out, a webhook host that was down, or a provider that returned a 5xx. Retrying usually works once the provider recovers.",
+  system_error:
+    "The run failed inside KeeperHub: dispatch, the queue, or a run that was reaped after it timed out. There is nothing to fix in your workflow.",
 };
 
 function StatusBadge({ status }: { status: NormalizedStatus }): ReactNode {
-  return (
+  const badge = (
     <Badge
       className={cn("capitalize", STATUS_STYLES[status])}
       variant="outline"
     >
       {STATUS_LABELS[status] ?? status}
     </Badge>
+  );
+
+  const tooltip = STATUS_TOOLTIPS[status];
+  if (!tooltip) {
+    return badge;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-help">{badge}</span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

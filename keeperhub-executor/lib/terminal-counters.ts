@@ -17,6 +17,34 @@ import type { DbSchema } from "./db-helpers";
  * actually flipped a non-terminal row, which preserves the emit-once
  * contract. Never throws: metric emission must not break executor DB writes.
  */
+/**
+ * Emit the refusal counter for a run the platform declined before it started.
+ * Deliberately not recordTerminalSample: a refused run is not a failure, so it
+ * must stay out of the error series and the success-rate SLI, while still being
+ * visible in Prometheus. Never throws, same contract as recordTerminalSample.
+ */
+export async function recordSkippedSample(
+  db: PostgresJsDatabase<DbSchema>,
+  args: { workflowId: string; reason: string }
+): Promise<void> {
+  try {
+    const { recordWorkflowExecutionSkipped } = await import(
+      "../../lib/metrics/collectors/prometheus"
+    );
+    const orgSlug = await resolveOrgSlugCached(args.workflowId, (id) =>
+      db
+        .select({ slug: organization.slug })
+        .from(workflows)
+        .leftJoin(organization, eq(workflows.organizationId, organization.id))
+        .where(eq(workflows.id, id))
+        .limit(1)
+    );
+    recordWorkflowExecutionSkipped({ orgSlug, reason: args.reason });
+  } catch {
+    // Metric emission must never break the executor's DB writes.
+  }
+}
+
 export async function recordTerminalSample(
   db: PostgresJsDatabase<DbSchema>,
   args: {

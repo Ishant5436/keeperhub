@@ -2,12 +2,15 @@ import { ethers } from "ethers";
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-error";
 import ERC20_ABI from "@/lib/contracts/abis/erc20.json";
+import { MULTICALL3_ABI, MULTICALL3_ADDRESS } from "@/lib/contracts/multicall3";
 import { SCOPE_MCP_READ } from "@/lib/mcp/oauth-scopes";
 import { resolveOrganizationId } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
+import { resolveSignerForNode, SIGNER_MODE } from "@/lib/safe/signer-resolver";
 import { getChainGasDefaults } from "@/lib/web3/gas-defaults";
 import { getOrganizationWalletAddress } from "@/lib/web3/wallet-helpers";
+import { buildCallsWithMeta } from "@/plugins/web3/steps/batch-write-contract-core";
 
 type EstimateConfig = {
   contractAddress?: string;
@@ -17,15 +20,23 @@ type EstimateConfig = {
   recipientAddress?: string;
   amount?: string;
   tokenConfig?: unknown;
+  calls?: string | unknown[];
+  isolateCallFailures?: string | boolean;
+  web3Connection?: string;
 };
 
-type ActionSlug = "write-contract" | "transfer-funds" | "transfer-token";
+type ActionSlug =
+  | "write-contract"
+  | "transfer-funds"
+  | "transfer-token"
+  | "batch-write-contract";
 
 const TEMPLATE_REF_PATTERN = /\{\{.*?\}\}/;
 const VALID_SLUGS: ActionSlug[] = [
   "write-contract",
   "transfer-funds",
   "transfer-token",
+  "batch-write-contract",
 ];
 
 function hasTemplateRefs(value: string | undefined): boolean {
@@ -171,6 +182,67 @@ function estimateWriteContract(
 }
 
 /**
+ * Estimate gas for a batch write via Multicall3's aggregate3. Builds the
+ * exact same CallWithMeta[] the step would broadcast (reusing
+ * buildCallsWithMeta from batch-write-contract-core.ts) and estimates gas
+ * for the aggregate3 call itself, since a batch has no single
+ * contractAddress/abiFunction to estimate against the way write-contract
+ * does.
+ *
+ * Checks the EOA-only gate first, matching batchWriteContractCore's own
+ * hard gate. Unlike write-contract (which supports Safe/Safe-Role at
+ * broadcast), a batch is EOA-only, so a Safe/Safe-Role org would otherwise
+ * get a plausible gas number here for a config guaranteed to fail at
+ * execution with a USER error.
+ */
+async function estimateBatchWriteContract(
+  config: EstimateConfig,
+  provider: ethers.JsonRpcProvider,
+  walletAddress: string,
+  organizationId: string,
+  chainId: number
+): Promise<bigint | NextResponse> {
+  if (!config.calls) {
+    return badRequest("calls is required for batch-write-contract estimation");
+  }
+
+  const signerMode = await resolveSignerForNode({
+    organizationId,
+    chainId,
+    web3Connection: config.web3Connection,
+  });
+  if (signerMode.kind !== SIGNER_MODE.EOA) {
+    return badRequest(
+      "Batch Write Contract only supports the default EOA Web3 Connection. Safe/Role routing would change msg.sender for every batched call, which is not supported here. Use individual Write Contract nodes for Safe execution instead."
+    );
+  }
+
+  const { calls: callsWithMeta, error } = buildCallsWithMeta({
+    calls: config.calls,
+    isolateCallFailures: config.isolateCallFailures,
+  });
+  if (error) {
+    return badRequest(error);
+  }
+
+  const call3Array = callsWithMeta.map(
+    ({ target, allowFailure, callData }) => ({
+      target,
+      allowFailure,
+      callData,
+    })
+  );
+
+  const multicall = new ethers.Contract(
+    MULTICALL3_ADDRESS,
+    MULTICALL3_ABI,
+    provider
+  );
+
+  return multicall.aggregate3.estimateGas(call3Array, { from: walletAddress });
+}
+
+/**
  * Validate common request fields and return parsed values
  */
 async function validateRequest(request: Request): Promise<
@@ -222,8 +294,16 @@ async function validateRequest(request: Request): Promise<
     config.functionArgs,
     config.recipientAddress,
     config.amount,
+    // isolateCallFailures is string | boolean | undefined; only the string
+    // form (what the workflow UI sends) can carry a template reference.
+    typeof config.isolateCallFailures === "string"
+      ? config.isolateCallFailures
+      : undefined,
   ];
-  if (configValues.some(hasTemplateRefs)) {
+  if (
+    configValues.some(hasTemplateRefs) ||
+    hasTemplateRefs(JSON.stringify(config.calls))
+  ) {
     return badRequest(
       "Cannot estimate gas with template references ({{...}}). Provide literal values."
     );
@@ -269,6 +349,14 @@ export async function POST(request: Request): Promise<NextResponse> {
           return await estimateTransferToken(config, provider, walletAddress);
         case "write-contract":
           return await estimateWriteContract(config, provider, walletAddress);
+        case "batch-write-contract":
+          return await estimateBatchWriteContract(
+            config,
+            provider,
+            walletAddress,
+            activeOrgId,
+            chainId
+          );
         default:
           return badRequest(`Unsupported action: ${actionSlug as string}`);
       }

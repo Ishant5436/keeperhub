@@ -736,7 +736,7 @@ export async function PATCH(
           {
             error: "MISSING_WRITE_ACTION",
             message:
-              "Workflows listed as workflowType='write' must contain at least one write-contract or protocol-write action node. Add the action back, or unlist the workflow before saving these changes.",
+              "Workflows listed as workflowType='write' must contain at least one write-contract, protocol-write, or batch-write-contract action node. Add the action back, or unlist the workflow before saving these changes.",
           },
           { status: 422 }
         );

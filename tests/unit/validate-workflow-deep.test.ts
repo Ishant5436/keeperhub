@@ -175,6 +175,143 @@ describe("collectContractRefs", () => {
     const refs = collectContractRefs([makeTriggerNode(), node]);
     expect(refs).toHaveLength(0);
   });
+
+  it("does not collect a web3/batch-write-contract node's top-level fields as a write ref, even if a stray contractAddress is present", () => {
+    // batch-write-contract has no single contractAddress/abi at the top
+    // level; a real batch node carries its targets in calls[] instead
+    // (covered by the collectContractRefs, batch-write-contract calls[]
+    // describe block below).
+    const node = makeWriteNode(
+      0,
+      "0xccccccccccccccccccccccccccccccccccccccc",
+      "1",
+      SIMPLE_ABI_TRANSFER,
+      "web3/batch-write-contract"
+    );
+    const refs = collectContractRefs([makeTriggerNode(), node]);
+    expect(refs).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectContractRefs, batch-write-contract calls[]
+// ---------------------------------------------------------------------------
+
+function makeBatchNode(idx: number, network: string, calls: unknown[]) {
+  return {
+    id: `batch-${idx}`,
+    data: {
+      type: "action",
+      config: {
+        actionType: "web3/batch-write-contract",
+        network,
+        calls: JSON.stringify(calls),
+      },
+    },
+  };
+}
+
+describe("collectContractRefs, batch-write-contract calls[]", () => {
+  it("collects a ref for each call in calls[], using the action-level network", () => {
+    const node = makeBatchNode(0, "1", [
+      {
+        contractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        abi: SIMPLE_ABI_TRANSFER,
+        abiFunction: "transfer",
+      },
+      {
+        contractAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        abi: SIMPLE_ABI_APPROVE,
+        abiFunction: "approve",
+      },
+    ]);
+    const refs = collectContractRefs([makeTriggerNode(), node]);
+    expect(refs).toHaveLength(2);
+    expect(refs[0].contractAddress).toBe(
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    expect(refs[0].network).toBe("1");
+    expect(refs[0].callIdx).toBe(0);
+    expect(refs[0].isAbiAutoFetch).toBe(true);
+    expect(refs[1].contractAddress).toBe(
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    );
+    expect(refs[1].callIdx).toBe(1);
+  });
+
+  it("accepts calls as a native array, not just a JSON string", () => {
+    const node = {
+      id: "batch-native",
+      data: {
+        type: "action",
+        config: {
+          actionType: "web3/batch-write-contract",
+          network: "1",
+          calls: [
+            {
+              contractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              abi: SIMPLE_ABI_TRANSFER,
+              abiFunction: "transfer",
+            },
+          ],
+        },
+      },
+    };
+    const refs = collectContractRefs([node]);
+    expect(refs).toHaveLength(1);
+  });
+
+  it("skips a call whose contractAddress is a template reference", () => {
+    const node = makeBatchNode(0, "1", [
+      {
+        contractAddress: "{{@prep:Prep.governor_address_safe}}",
+        abi: SIMPLE_ABI_TRANSFER,
+        abiFunction: "transfer",
+      },
+    ]);
+    const refs = collectContractRefs([node]);
+    expect(refs).toHaveLength(0);
+  });
+
+  it("skips a call entry missing contractAddress or abi", () => {
+    const node = makeBatchNode(0, "1", [
+      { abi: SIMPLE_ABI_TRANSFER, abiFunction: "transfer" },
+      {
+        contractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        abiFunction: "transfer",
+      },
+    ]);
+    const refs = collectContractRefs([node]);
+    expect(refs).toHaveLength(0);
+  });
+
+  it("returns no refs when the batch node's own network is missing", () => {
+    const node = makeBatchNode(0, "", [
+      {
+        contractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        abi: SIMPLE_ABI_TRANSFER,
+        abiFunction: "transfer",
+      },
+    ]);
+    const refs = collectContractRefs([node]);
+    expect(refs).toHaveLength(0);
+  });
+
+  it("returns no refs when calls is malformed JSON", () => {
+    const node = {
+      id: "batch-bad-json",
+      data: {
+        type: "action",
+        config: {
+          actionType: "web3/batch-write-contract",
+          network: "1",
+          calls: "not json",
+        },
+      },
+    };
+    const refs = collectContractRefs([node]);
+    expect(refs).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -279,6 +416,47 @@ describe("validateWorkflowDeep — ABI mismatch (Pitfall 1)", () => {
     // CRITICAL: never an error
     expectNoAbiErrors(result);
     // valid must reflect only errors, not warnings
+    expect(result.valid).toBe(true);
+  });
+
+  it("emits nodes[i].config.calls[j].abi for a mismatched ABI nested in a batch-write-contract node", async () => {
+    // Two calls at node index 1 (after the trigger): call 0 matches, call 1's
+    // declared ABI (transfer) mismatches the resolved one (approve). Only
+    // call 1 should warn, and its parameterPath must point at calls[1], not
+    // the batch node's own (nonexistent) top-level config.abi.
+    const batchNode = makeBatchNode(0, "1", [
+      {
+        contractAddress: "0x1111111111111111111111111111111111111111",
+        abi: SIMPLE_ABI_APPROVE,
+        abiFunction: "approve",
+      },
+      {
+        contractAddress: "0x2222222222222222222222222222222222222222",
+        abi: SIMPLE_ABI_TRANSFER,
+        abiFunction: "transfer",
+      },
+    ]);
+    const workflow = makeWorkflow({
+      nodes: [makeTriggerNode(), batchNode],
+      workflowType: "write",
+    });
+    // Every call resolves to the same on-chain ABI (approve): call 0's
+    // declared ABI already is approve, so it matches; call 1 declared
+    // transfer, so it mismatches.
+    const mockResolve = vi.fn().mockResolvedValue({
+      abi: SIMPLE_ABI_APPROVE,
+      source: "explorer",
+    });
+    const result = await validateWorkflowDeep(workflow, {
+      resolveAbiOverride: mockResolve,
+    });
+
+    const abiWarnings = result.warnings.filter(
+      (w) => w.code === "low-confidence-abi-match"
+    );
+    expect(abiWarnings).toHaveLength(1);
+    expect(abiWarnings[0].parameterPath).toBe("nodes[1].config.calls[1].abi");
+    expectNoAbiErrors(result);
     expect(result.valid).toBe(true);
   });
 

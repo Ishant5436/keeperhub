@@ -14,6 +14,10 @@ import "server-only";
 
 import { resolveAbi } from "@/lib/abi/cache";
 import {
+  BATCH_WRITE_CONTRACT_ACTION_TYPE,
+  isWriteActionType,
+} from "@/lib/mcp/action-type";
+import {
   type ValidationIssue,
   type ValidationResult,
   type ValidatorWorkflow,
@@ -40,12 +44,16 @@ type ContractRef = {
   contractAddress: string;
   network: string;
   declaredAbi: string;
-  // True for nodes whose actionType belongs to the web3 plugin family —
-  // these are the canonical `abi-with-auto-fetch` consumers per
-  // plugins/web3/index.ts. Mismatches on these are warnings only.
-  // Non-web3 nodes are also treated warnings-only (generous-warning,
-  // conservative-error stance per PITFALLS pitfall #1).
+  // True for nodes whose actionType belongs to the web3 plugin family,
+  // the canonical `abi-with-auto-fetch` consumers per plugins/web3/index.ts.
+  // Mismatches on these are warnings only. Non-web3 nodes are also treated
+  // warnings-only (generous-warning, conservative-error stance per
+  // PITFALLS pitfall #1).
   isAbiAutoFetch: boolean;
+  // Set only for a call nested inside a batch-write-contract node's calls[],
+  // so the reported warning can point at nodes[i].config.calls[j].abi
+  // instead of the batch node's own (nonexistent) top-level abi field.
+  callIdx?: number;
 };
 
 type WorkflowNodeShape = {
@@ -58,16 +66,6 @@ type WorkflowNodeShape = {
     } & Record<string, unknown>;
   };
 };
-
-function isWriteActionType(actionType: unknown): boolean {
-  if (typeof actionType !== "string") {
-    return false;
-  }
-  return (
-    actionType.includes("write-contract") ||
-    actionType.includes("protocol-write")
-  );
-}
 
 function isAbiCarryingReadType(actionType: unknown): boolean {
   // web3 read-contract / batch-read / query-events also carry an `abi`
@@ -82,10 +80,64 @@ function isAbiCarryingReadType(actionType: unknown): boolean {
   );
 }
 
+// batch-write-contract has no top-level contractAddress/abi; each call in
+// its calls[] carries its own. Kept as a standalone parse (rather than
+// importing batch-write-contract-core.ts) since that module pulls in
+// ethers/DB/RPC deps this validator does not need.
+function collectBatchCallRefs(
+  nodeIdx: number,
+  network: unknown,
+  callsValue: unknown
+): ContractRef[] {
+  if (typeof network !== "string" || network.length === 0) {
+    return [];
+  }
+  let parsed: unknown = callsValue;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  const refs: ContractRef[] = [];
+  for (const [callIdx, entry] of parsed.entries()) {
+    if (entry === null || typeof entry !== "object") {
+      continue;
+    }
+    const { contractAddress, abi: declaredAbi } = entry as Record<
+      string,
+      unknown
+    >;
+    if (
+      typeof contractAddress !== "string" ||
+      typeof declaredAbi !== "string" ||
+      contractAddress.length === 0 ||
+      declaredAbi.length === 0 ||
+      isTemplateReference(contractAddress)
+    ) {
+      continue;
+    }
+    refs.push({
+      nodeIdx,
+      contractAddress,
+      network,
+      declaredAbi,
+      isAbiAutoFetch: true,
+      callIdx,
+    });
+  }
+  return refs;
+}
+
 /**
  * Walk every node; collect refs for nodes that have all three
  * (contractAddress, network, abi) and whose actionType matches one of
- * the ABI-carrying action families.
+ * the ABI-carrying action families. batch-write-contract nodes are handled
+ * separately since their calls live in a nested calls[] array instead.
  */
 export function collectContractRefs(nodes: unknown): ContractRef[] {
   const refs: ContractRef[] = [];
@@ -98,6 +150,16 @@ export function collectContractRefs(nodes: unknown): ContractRef[] {
       continue;
     }
     const { actionType } = config;
+    if (actionType === BATCH_WRITE_CONTRACT_ACTION_TYPE) {
+      refs.push(
+        ...collectBatchCallRefs(
+          idx,
+          config.network,
+          (config as Record<string, unknown>).calls
+        )
+      );
+      continue;
+    }
     const isWrite = isWriteActionType(actionType);
     const isRead = isAbiCarryingReadType(actionType);
     if (!(isWrite || isRead)) {
@@ -305,10 +367,14 @@ export async function validateWorkflowDeep(
         return null;
       }
       if (!compareAbiSignatures(ref.declaredAbi, resolvedAbi)) {
+        const parameterPath =
+          ref.callIdx === undefined
+            ? `nodes[${ref.nodeIdx}].config.abi`
+            : `nodes[${ref.nodeIdx}].config.calls[${ref.callIdx}].abi`;
         deepWarnings.push({
           code: VALIDATION_WARNING_CODES.LOW_CONFIDENCE_ABI_MATCH,
-          message: `nodes[${ref.nodeIdx}].config.abi does not match the resolved ABI for ${ref.contractAddress} on chain ${ref.network}. Proxy contracts are expected to mismatch (warning only).`,
-          parameterPath: `nodes[${ref.nodeIdx}].config.abi`,
+          message: `${parameterPath} does not match the resolved ABI for ${ref.contractAddress} on chain ${ref.network}. Proxy contracts are expected to mismatch (warning only).`,
+          parameterPath,
         });
       }
       return null;

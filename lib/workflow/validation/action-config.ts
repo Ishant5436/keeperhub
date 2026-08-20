@@ -81,6 +81,68 @@ function isMissingRequiredValue(value: unknown): boolean {
   return value === undefined || value === null || value === "";
 }
 
+// Each entry inside a `call-list-builder` field (batch-write-contract,
+// batch-read-contract) carries its own contract address, ABI, and function --
+// the same three fields that are `required` on the equivalent standalone
+// write-contract/read-contract node. Validated independently per call so an
+// incomplete call added after a valid one is never silently treated as
+// optional. Network is required too, but only when the field renders a
+// per-row Network selector: batch-write-contract sets hideNetworkColumn and
+// reads the action-level network instead, so a blank per-call network there
+// is not a config error.
+const BATCH_CALL_REQUIRED_FIELDS: Array<{
+  key: "contractAddress" | "abi" | "abiFunction" | "network";
+  label: string;
+}> = [
+  { key: "contractAddress", label: "Contract Address" },
+  { key: "abi", label: "Contract ABI" },
+  { key: "abiFunction", label: "Function" },
+];
+
+function parseBatchCalls(value: unknown): Record<string, unknown>[] {
+  const parsed = Array.isArray(value) ? value : safeParseJsonArray(value);
+  return parsed.filter(isRecord);
+}
+
+function safeParseJsonArray(value: unknown): unknown[] {
+  if (typeof value !== "string" || value.trim() === "") {
+    return [];
+  }
+  try {
+    const result: unknown = JSON.parse(value);
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export type BatchCallMissingField = {
+  callIndex: number;
+  fieldKey: "contractAddress" | "abi" | "abiFunction" | "network";
+  fieldLabel: string;
+};
+
+export function getMissingBatchCallFields(
+  callsValue: unknown,
+  hideNetworkColumn?: boolean
+): BatchCallMissingField[] {
+  const requiredFields = hideNetworkColumn
+    ? BATCH_CALL_REQUIRED_FIELDS
+    : [
+        ...BATCH_CALL_REQUIRED_FIELDS,
+        { key: "network", label: "Network" } as const,
+      ];
+  const missing: BatchCallMissingField[] = [];
+  for (const [callIndex, call] of parseBatchCalls(callsValue).entries()) {
+    for (const { key, label } of requiredFields) {
+      if (isMissingRequiredValue(call[key])) {
+        missing.push({ callIndex, fieldKey: key, fieldLabel: label });
+      }
+    }
+  }
+  return missing;
+}
+
 function flattenConfigFields(
   fields: ActionConfigField[]
 ): ActionConfigFieldBase[] {
@@ -439,6 +501,22 @@ export function validateWorkflowActionConfigs(
           message: `Missing required field "${field.key}" for action "${actionType}".`,
         });
         continue;
+      }
+
+      if (field.type === "call-list-builder") {
+        for (const missingCall of getMissingBatchCallFields(
+          value,
+          field.hideNetworkColumn
+        )) {
+          issues.push({
+            code: "MISSING_REQUIRED_FIELD",
+            path: `nodes[${nodeIndex}].data.config.${field.key}[${missingCall.callIndex}].${missingCall.fieldKey}`,
+            actionType,
+            field: `${field.key}[${missingCall.callIndex}].${missingCall.fieldKey}`,
+            expected: missingCall.fieldLabel,
+            message: `Missing required field "${missingCall.fieldLabel}" for call ${missingCall.callIndex + 1} on action "${actionType}".`,
+          });
+        }
       }
 
       const fieldCheck = validateFieldValue(field, value);

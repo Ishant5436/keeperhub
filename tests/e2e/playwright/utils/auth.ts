@@ -455,23 +455,35 @@ export async function signIn(
 
   // The email/password form renders inline (no chooser step on the landing).
   const emailField = page.locator("#auth-email");
-  await expect(emailField).toBeVisible({ timeout: 15_000 });
-  await emailField.fill(email);
-  await page.locator("#auth-password").fill(password);
+  const passwordField = page.locator("#auth-password");
+  const orgSwitcher = page.locator('button[role="combobox"]');
 
-  // Retry the submit: right after navigation the first click can land before
-  // the client handler is wired and be dropped, leaving the form in place.
-  // toPass re-clicks until the org switcher (canvas) resolves.
+  // An existing session redirects /welcome straight into the app, so there is
+  // no form to fill. Wait for whichever of the two lands and take that branch.
+  await expect(emailField.or(orgSwitcher).first()).toBeVisible({
+    timeout: 15_000,
+  });
+  if (await orgSwitcher.isVisible()) {
+    return;
+  }
+
+  // Retry the fill and the submit together: a fill that lands before hydration
+  // is wiped when React mounts the controlled inputs, and a click that lands
+  // before the handler is wired is dropped. Re-filling every attempt keeps the
+  // loop from clicking an empty form against native required validation.
   const signInButton = page.getByRole("button", {
     name: "Sign in",
     exact: true,
   });
-  const orgSwitcher = page.locator('button[role="combobox"]');
   await expect(async () => {
     if (await signInButton.isVisible()) {
+      await emailField.fill(email);
+      await passwordField.fill(password);
       await signInButton.click();
     }
-    await expect(orgSwitcher).toBeVisible({ timeout: 4000 });
+    // Give a submit that did land time to resolve before re-clicking, so a slow
+    // sign-in is not mistaken for a dropped click and re-submitted needlessly.
+    await expect(orgSwitcher).toBeVisible({ timeout: 10_000 });
   }).toPass({ timeout: 30_000 });
 }
 

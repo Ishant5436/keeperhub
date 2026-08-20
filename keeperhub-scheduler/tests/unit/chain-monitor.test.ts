@@ -317,6 +317,31 @@ describe("ChainMonitor", () => {
       expect(enqueueBlockTrigger).not.toHaveBeenCalled();
     });
 
+    // A refusal is not a transport failure: it must not fall through to the
+    // id-less enqueue the way a failed create does.
+    it("skips the enqueue when the dispatch is refused on plan grounds", async () => {
+      createPhantomExecution.mockResolvedValueOnce({
+        alreadyExisted: false,
+        refused: "execution_limit",
+      });
+      const monitor = new ChainMonitor({
+        chain: makeChain(),
+        workflows: [makeWorkflow()],
+      });
+
+      await monitor.start();
+
+      const { enqueueBlockTrigger } = await import(
+        "../../block-dispatcher/sqs-enqueue.js"
+      );
+      vi.mocked(enqueueBlockTrigger).mockClear();
+      latestProvider().emitBlock(10);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(enqueueBlockTrigger).not.toHaveBeenCalled();
+      expect(failPhantomExecution).not.toHaveBeenCalled();
+    });
+
     it("marks the phantom failed with BS-0001 when the enqueue fails", async () => {
       createPhantomExecution.mockResolvedValueOnce({
         executionId: "exec_ph",

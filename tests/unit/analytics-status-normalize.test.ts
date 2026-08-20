@@ -21,6 +21,13 @@ describe("normalizeStatus", () => {
     expect(normalizeStatus("cancelled", "workflow")).toBe("cancelled");
   });
 
+  // A refused run keeps its own status rather than collapsing into error, which
+  // is what keeps it out of the error count and the success-rate denominator.
+  it("keeps a refused run as skipped", () => {
+    expect(normalizeStatus("skipped", "workflow")).toBe("skipped");
+    expect(normalizeStatus("skipped", "workflow", "user")).toBe("skipped");
+  });
+
   it("maps direct completed/failed onto success/error", () => {
     expect(normalizeStatus("completed", "direct")).toBe("success");
     expect(normalizeStatus("failed", "direct")).toBe("error");

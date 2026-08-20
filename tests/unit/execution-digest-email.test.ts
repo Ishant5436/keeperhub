@@ -23,6 +23,7 @@ function baseData() {
       total: 5,
       success: 3,
       error: 2,
+      skipped: 0,
       distinctWorkflows: 2,
       transactionCount: 4,
       gasUsedWei: "0",
@@ -36,6 +37,7 @@ function baseData() {
       },
     ],
     mostExecuted: [{ workflowId: "wf-run", name: "Nightly sync", runs: 5 }],
+    topSkipped: [],
   };
 }
 
@@ -110,6 +112,37 @@ describe("sendWorkflowExecutionDigestEmail", () => {
     });
     const content = sentContent();
     expect(content).toContain("Succeeded: 3 (60%)");
+    expect(content).toContain("Failed: 2 (40%)");
+  });
+
+  it("omits the skipped section when nothing was refused", async () => {
+    await sendWorkflowExecutionDigestEmail(baseData());
+    const content = sentContent();
+    expect(content).not.toContain("Skipped:");
+  });
+
+  // A refused run never started, so it must read as its own outcome rather
+  // than inflating the failure count the recipient acts on.
+  it("reports refused runs under their own heading, apart from failures", async () => {
+    const data = baseData();
+    await sendWorkflowExecutionDigestEmail({
+      ...data,
+      stats: { ...data.stats, skipped: 12 },
+      topSkipped: [
+        {
+          workflowId: "wf-skip",
+          name: "Price watcher",
+          skipped: 12,
+          lastReason: "Execution limit reached",
+        },
+      ],
+    });
+    const content = sentContent();
+    expect(content).toContain("Skipped: 12");
+    expect(content).toContain("Price watcher");
+    expect(content).toContain("Execution limit reached");
+    expect(content).toContain("https://app.keeperhub.com/workflows/wf-skip");
+    // The failure count and rate stay untouched by the refusals.
     expect(content).toContain("Failed: 2 (40%)");
   });
 

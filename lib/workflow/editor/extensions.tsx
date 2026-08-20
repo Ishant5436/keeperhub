@@ -250,6 +250,7 @@ registerFieldRenderer(
       <div className="space-y-2" key={field.key}>
         <ProtocolFieldLabel field={field} />
         <CallListField
+          actionConfig={config}
           disabled={disabled}
           field={field}
           onChange={(val: string) => onUpdateConfig(field.key, val)}

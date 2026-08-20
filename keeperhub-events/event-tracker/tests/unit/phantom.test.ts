@@ -36,9 +36,9 @@ describe("createPhantomExecution (event-tracker)", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const id = await createPhantomExecution("wf_1", "owner_1");
+    const result = await createPhantomExecution("wf_1", "owner_1");
 
-    expect(id).toBe("exec_evt");
+    expect(result).toEqual({ executionId: "exec_evt" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/api\/internal\/executions$/);
     expect(init.method).toBe("POST");
@@ -51,23 +51,43 @@ describe("createPhantomExecution (event-tracker)", () => {
     });
   });
 
-  it("returns undefined on a non-2xx response (best-effort)", async () => {
+  it("returns no id and no refusal on a non-2xx response (best-effort)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 500 }),
     );
 
-    await expect(
-      createPhantomExecution("wf_1", "owner_1"),
-    ).resolves.toBeUndefined();
+    await expect(createPhantomExecution("wf_1", "owner_1")).resolves.toEqual(
+      {},
+    );
   });
 
-  it("returns undefined when fetch rejects", async () => {
+  it("returns no id and no refusal when fetch rejects", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
 
-    await expect(
-      createPhantomExecution("wf_1", "owner_1"),
-    ).resolves.toBeUndefined();
+    await expect(createPhantomExecution("wf_1", "owner_1")).resolves.toEqual(
+      {},
+    );
+  });
+
+  // A transport failure and a refusal must stay distinguishable: the first
+  // still falls back to the id-less enqueue, the second must not enqueue.
+  it("reports a refusal instead of an id when the platform declines", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          refused: true,
+          reason: "execution_limit",
+          error: "limit reached",
+        }),
+      }),
+    );
+
+    await expect(createPhantomExecution("wf_1", "owner_1")).resolves.toEqual({
+      refused: "execution_limit",
+    });
   });
 });
 

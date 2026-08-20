@@ -3,6 +3,7 @@ import { applyEdgeChanges, applyNodeChanges } from "@xyflow/react";
 import { atom } from "jotai";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
+import type { NodeExecutionStatus } from "@/lib/errors/execution-status";
 import { ErrorCategory, logSystemError, logUserError } from "@/lib/logging";
 import { computeAutoLayout } from "@/lib/workflow/editor/auto-layout";
 import { buildExecutionLogsMap } from "@/lib/workflow/editor/template-helpers";
@@ -189,7 +190,7 @@ export type ExecutionLogEntry = {
   nodeId: string;
   nodeName: string;
   nodeType: string;
-  status: "pending" | "running" | "success" | "error" | "cancelled";
+  status: NodeExecutionStatus;
   output?: unknown;
 };
 

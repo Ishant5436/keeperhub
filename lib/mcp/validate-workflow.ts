@@ -2,7 +2,10 @@
 // from tests and from the API route. Web3 + ABI checks land in
 // Plans 48-02 and 48-03 as additional exported functions.
 
-import { isWriteActionType } from "@/lib/mcp/calldata";
+import {
+  BATCH_WRITE_CONTRACT_ACTION_TYPE,
+  isWriteActionType,
+} from "@/lib/mcp/action-type";
 import {
   findBareAtLiterals,
   isInputSchemaPresent,
@@ -348,7 +351,11 @@ const ALLOWANCE_SPEND_METHODS = new Set([
 // a bare name ("redeem") or a full signature ("redeem(uint256,address,address)").
 const FUNCTION_SIGNATURE_ARGS_PATTERN = /\(.*$/;
 
-type NodeActionConfig = { actionType: unknown; abiFunction: unknown };
+type NodeActionConfig = {
+  actionType: unknown;
+  abiFunction: unknown;
+  calls: unknown;
+};
 
 function readNodeActionConfig(node: unknown): NodeActionConfig | null {
   if (node === null || typeof node !== "object" || !("data" in node)) {
@@ -365,7 +372,7 @@ function readNodeActionConfig(node: unknown): NodeActionConfig | null {
   const cfg = config as Record<string, unknown>;
   const actionType =
     cfg.actionType ?? (data as Record<string, unknown>).actionType;
-  return { actionType, abiFunction: cfg.abiFunction };
+  return { actionType, abiFunction: cfg.abiFunction, calls: cfg.calls };
 }
 
 function bareMethodName(abiFunction: unknown): string | null {
@@ -374,6 +381,30 @@ function bareMethodName(abiFunction: unknown): string | null {
   }
   const name = abiFunction.replace(FUNCTION_SIGNATURE_ARGS_PATTERN, "").trim();
   return name === "" ? null : name;
+}
+
+// batch-write-contract's `calls` config field is a JSON-stringified array of
+// { contractAddress, abi, abiFunction, args } entries (see
+// plugins/web3/steps/batch-write-contract-core.ts's RawCallEntry). Kept as a
+// standalone parse here rather than importing the step's core module, which
+// pulls in ethers/DB/RPC deps this pure validator deliberately avoids.
+function parseBatchCallAbiFunctions(callsValue: unknown): unknown[] {
+  let parsed: unknown = callsValue;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.map((entry) =>
+    entry !== null && typeof entry === "object" && "abiFunction" in entry
+      ? (entry as Record<string, unknown>).abiFunction
+      : undefined
+  );
 }
 
 function workflowHasCheckAllowanceNode(nodes: unknown[]): boolean {
@@ -401,11 +432,24 @@ function runAllowancePreflightCheck(
   }
   for (const [idx, node] of workflow.nodes.entries()) {
     const cfg = readNodeActionConfig(node);
-    if (
-      cfg === null ||
-      typeof cfg.actionType !== "string" ||
-      !cfg.actionType.includes("write-contract")
-    ) {
+    if (cfg === null) {
+      continue;
+    }
+    if (cfg.actionType === BATCH_WRITE_CONTRACT_ACTION_TYPE) {
+      const abiFunctions = parseBatchCallAbiFunctions(cfg.calls);
+      for (const [callIdx, abiFunction] of abiFunctions.entries()) {
+        const method = bareMethodName(abiFunction);
+        if (method !== null && ALLOWANCE_SPEND_METHODS.has(method)) {
+          warnings.push({
+            code: VALIDATION_WARNING_CODES.MISSING_ALLOWANCE_PREFLIGHT,
+            message: `nodes[${idx}].config.calls[${callIdx}] calls "${method}", which moves tokens via an existing allowance, but the workflow has no web3/check-allowance node. Add an upstream web3/check-allowance node before this write to avoid an "insufficient allowance" revert at execution time. Note: batch calls run with msg.sender set to the Multicall3 contract, not your wallet, so a "${method}" call that relies on a wallet allowance will not work in a batch; keep it in a standalone write node instead.`,
+            parameterPath: `nodes[${idx}].config.calls[${callIdx}].abiFunction`,
+          });
+        }
+      }
+      continue;
+    }
+    if (!isWriteActionType(cfg.actionType)) {
       continue;
     }
     const method = bareMethodName(cfg.abiFunction);

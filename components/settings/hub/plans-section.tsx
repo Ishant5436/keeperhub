@@ -3,14 +3,20 @@
 import { PricingTable } from "@/components/billing/pricing-table";
 import { useBillingPlan } from "./hooks/use-billing-plan";
 import { SectionHeader } from "./section";
+import { useSettingsContext } from "./settings-context";
 
 export function PlansSection(): React.ReactElement {
   const billing = useBillingPlan();
+  const { isOwner } = useSettingsContext();
 
   return (
     <>
       <SectionHeader
-        description="What this organization is on, and what it could move to."
+        description={
+          isOwner
+            ? "What this organization is on, and what it could move to."
+            : "What this organization is on, and what it could move to. Only the owner can change the plan."
+        }
         title="Plans"
       />
 
@@ -18,6 +24,7 @@ export function PlansSection(): React.ReactElement {
           comes from a package with no loading state of its own, so it renders
           straight away and only the highlighted plan arrives late. */}
       <PricingTable
+        canManage={isOwner}
         currentInterval={billing.interval}
         currentPlan={billing.plan}
         currentTier={billing.tier}

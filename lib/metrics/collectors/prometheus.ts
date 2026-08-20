@@ -1031,6 +1031,28 @@ export function recordWorkflowExecutionFinished(labels: {
   });
 }
 
+// Runs the platform refused before they started: over the plan's execution
+// limit, a gated action, or an unpaid pay-as-you-go charge. Deliberately its own
+// series rather than a `finished` status: a refused run never executed, so it
+// belongs in neither the error count nor the success-rate denominator, but it
+// still has to be visible or the refusals become invisible in Prometheus.
+const workflowExecutionsSkipped = getOrCreateCounter(
+  apiRegistry,
+  "keeperhub_workflow_executions_skipped_total",
+  "Workflow executions refused before starting, by org_slug and reason (execution_limit, plan_feature, payg_unpaid). Not failures: these runs never executed.",
+  ["org_slug", "reason"]
+);
+
+export function recordWorkflowExecutionSkipped(labels: {
+  orgSlug: string;
+  reason: string;
+}): void {
+  workflowExecutionsSkipped.inc({
+    org_slug: labels.orgSlug,
+    reason: labels.reason,
+  });
+}
+
 // Compensation series for the finished counter. selfHealWorkflowAfterLateStepCommit
 // flips error -> success after finalization has already emitted
 // finished{status="error"|"system_error"}, and a counter cannot be

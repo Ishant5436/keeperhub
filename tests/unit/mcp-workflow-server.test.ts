@@ -150,6 +150,75 @@ describe("createWorkflowMcpServer", () => {
     fetchSpy.mockRestore();
   });
 
+  it("readOnlyHint is true for a read workflow with no nodes", () => {
+    createWorkflowMcpServer({
+      slug: "aave-position-monitor",
+      listing: baseListing,
+      internalApiBaseUrl: "http://localhost:3000",
+      authHeader: "Bearer kh_test",
+    });
+
+    const config = mockRegisterTool.mock.calls[0][1] as {
+      annotations: { readOnlyHint: boolean };
+    };
+    expect(config.annotations.readOnlyHint).toBe(true);
+  });
+
+  it("readOnlyHint is false for a write workflow", () => {
+    createWorkflowMcpServer({
+      slug: "aave-position-monitor",
+      listing: { ...baseListing, workflowType: "write" },
+      internalApiBaseUrl: "http://localhost:3000",
+      authHeader: "Bearer kh_test",
+    });
+
+    const config = mockRegisterTool.mock.calls[0][1] as {
+      annotations: { readOnlyHint: boolean };
+    };
+    expect(config.annotations.readOnlyHint).toBe(false);
+  });
+
+  it.each([
+    ["web3/batch-write-contract"],
+    ["web3/approve-token"],
+    ["web3/transfer-funds"],
+    ["web3/transfer-token"],
+  ])("readOnlyHint is false for a read-typed workflow whose only node is %s", (actionType) => {
+    createWorkflowMcpServer({
+      slug: "aave-position-monitor",
+      listing: {
+        ...baseListing,
+        workflowType: "read",
+        nodes: [{ data: { config: { actionType } } }],
+      },
+      internalApiBaseUrl: "http://localhost:3000",
+      authHeader: "Bearer kh_test",
+    });
+
+    const config = mockRegisterTool.mock.calls[0][1] as {
+      annotations: { readOnlyHint: boolean };
+    };
+    expect(config.annotations.readOnlyHint).toBe(false);
+  });
+
+  it("readOnlyHint stays true for a read-typed workflow whose only node reads", () => {
+    createWorkflowMcpServer({
+      slug: "aave-position-monitor",
+      listing: {
+        ...baseListing,
+        workflowType: "read",
+        nodes: [{ data: { config: { actionType: "web3/read-contract" } } }],
+      },
+      internalApiBaseUrl: "http://localhost:3000",
+      authHeader: "Bearer kh_test",
+    });
+
+    const config = mockRegisterTool.mock.calls[0][1] as {
+      annotations: { readOnlyHint: boolean };
+    };
+    expect(config.annotations.readOnlyHint).toBe(true);
+  });
+
   it("server name includes the slug", () => {
     createWorkflowMcpServer({
       slug: "aave-position-monitor",

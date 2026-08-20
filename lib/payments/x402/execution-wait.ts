@@ -17,7 +17,12 @@ import { isErrorStatus } from "@/lib/errors/execution-status";
 export const DEFAULT_CALL_WAIT_TIMEOUT_MS = 25_000;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 
-type TerminalStatus = "success" | "error" | "system_error" | "cancelled";
+type TerminalStatus =
+  | "success"
+  | "error"
+  | "system_error"
+  | "cancelled"
+  | "skipped";
 
 type ExecutionResult = {
   status: TerminalStatus;
@@ -27,7 +32,12 @@ type ExecutionResult = {
 
 function isTerminalStatus(status: string): status is TerminalStatus {
   return (
-    status === "success" || isErrorStatus(status) || status === "cancelled"
+    status === "success" ||
+    isErrorStatus(status) ||
+    status === "cancelled" ||
+    // A refused run never starts, so a caller waiting on it must stop here
+    // rather than poll until the timeout.
+    status === "skipped"
   );
 }
 
@@ -253,6 +263,13 @@ export async function buildCallCompletionResponse(
   }
   if (result.status === "cancelled") {
     return { executionId, status: "error", error: "Execution cancelled" };
+  }
+  if (result.status === "skipped") {
+    return {
+      executionId,
+      status: "error",
+      error: result.error ?? "Execution skipped",
+    };
   }
   return {
     executionId,

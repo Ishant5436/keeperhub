@@ -21,6 +21,7 @@ export type UnifiedStatus =
   | "running"
   | "success"
   | "error"
+  | "skipped"
   | "cancelled"
   | "completed"
   | "failed";
@@ -32,6 +33,10 @@ export type NormalizedStatus =
   | "error"
   | "system_error"
   | "external_error"
+  // Refused before it started (over the plan limit, a gated action, an unpaid
+  // pay-as-you-go charge). Its own status so it stays out of the error count and
+  // the success-rate denominator.
+  | "skipped"
   | "cancelled";
 
 export type UnifiedRun = {
@@ -73,6 +78,7 @@ export type AnalyticsSummary = {
   successCount: number;
   errorCount: number;
   cancelledCount: number;
+  skippedCount: number;
   successRate: number;
   avgDurationMs: number | null;
   /** Every wei the runs burned over the range, sponsored gas included. */
@@ -90,6 +96,7 @@ export type AnalyticsSummary = {
     successCount: number;
     errorCount: number;
     cancelledCount: number;
+    skippedCount: number;
     avgDurationMs: number | null;
     totalGasWei: string;
     sponsoredGasWei: string;
@@ -101,6 +108,7 @@ export type TimeSeriesBucket = {
   success: number;
   error: number;
   cancelled: number;
+  skipped: number;
   pending: number;
   running: number;
 };

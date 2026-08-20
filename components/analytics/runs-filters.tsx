@@ -24,6 +24,7 @@ const STATUS_OPTIONS: Array<{
   { value: "external_error", label: "External" },
   { value: "system_error", label: "System Error" },
   { value: "cancelled", label: "Cancelled" },
+  { value: "skipped", label: "Skipped" },
   { value: "running", label: "Running" },
   { value: "pending", label: "Pending" },
 ];

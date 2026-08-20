@@ -782,6 +782,30 @@ describe("dispatch", () => {
     expect(failPhantomExecution).not.toHaveBeenCalled();
   });
 
+  // A refusal is not a transport failure: it must not fall through to the
+  // id-less enqueue the way a failed create does.
+  it("skips the enqueue when the dispatch is refused on plan grounds", async () => {
+    createPhantomExecution.mockResolvedValue({
+      alreadyExisted: false,
+      refused: "execution_limit",
+    });
+    stubFetch([
+      {
+        id: "sched-1",
+        workflowId: "wf-1",
+        cronExpression: "0 9 * * *",
+        timezone: "UTC",
+      },
+    ]);
+    mockedSqsSend.mockResolvedValue(sqsOkResponse);
+
+    const result = await dispatch();
+
+    expect(result).toEqual({ evaluated: 1, triggered: 0, errors: 0 });
+    expect(mockedSqsSend).not.toHaveBeenCalled();
+    expect(failPhantomExecution).not.toHaveBeenCalled();
+  });
+
   it("marks the phantom failed with CS-0001 when the enqueue fails", async () => {
     createPhantomExecution.mockResolvedValue({
       executionId: "exec_ph",

@@ -24,6 +24,7 @@ import { signSqsMessageAttributes } from "../lib/sqs-message-auth.js";
 import type { Schedule, ScheduleMessage } from "../lib/types.js";
 import {
   errorsTotal,
+  refusedTotal,
   runDurationSeconds,
   runsTotal,
   triggeredTotal,
@@ -325,12 +326,24 @@ export async function dispatch(
         // recomputes this occurrence collides on the unique index and we skip
         // the duplicate enqueue below.
         const dispatchKey = `schedule:${schedule.id}:${occurrence.toISOString()}`;
-        const { executionId, alreadyExisted } = await createPhantomExecution(
-          schedule.workflowId,
-          "schedule",
-          undefined,
-          dispatchKey,
-        );
+        const { executionId, alreadyExisted, refused } =
+          await createPhantomExecution(
+            schedule.workflowId,
+            "schedule",
+            undefined,
+            dispatchKey,
+          );
+
+        // Refused on plan grounds: the executor would refuse the same run, so
+        // enqueueing costs an SQS message and an executor round-trip to reach
+        // the same answer. The refusal is already recorded for the author.
+        if (refused) {
+          console.log(
+            `[${runId}] Skipping refused dispatch for ${dispatchKey} (${refused})`,
+          );
+          refusedTotal.inc({ reason: refused });
+          continue;
+        }
 
         if (alreadyExisted) {
           console.log(

@@ -103,7 +103,10 @@ async function processOrg(
       since,
       until
     );
-    if (digest.total === 0) {
+    // Skipped runs are excluded from `total`, but an org whose triggers were
+    // all refused is exactly the one that needs the email, so they still count
+    // as activity here.
+    if (digest.total === 0 && digest.skipped === 0) {
       // No activity this window; send nothing and leave this cadence's last-sent
       // so the next run re-evaluates once there is something to report.
       continue;
@@ -122,6 +125,7 @@ async function processOrg(
           total: digest.total,
           success: digest.success,
           error: digest.error,
+          skipped: digest.skipped,
           distinctWorkflows: digest.distinctWorkflows,
           transactionCount: digest.transactionCount,
           gasUsedWei: digest.gasUsedWei,
@@ -129,6 +133,7 @@ async function processOrg(
         },
         topFailing: digest.topFailing,
         mostExecuted: digest.mostExecuted,
+        topSkipped: digest.topSkipped,
       });
     }
 

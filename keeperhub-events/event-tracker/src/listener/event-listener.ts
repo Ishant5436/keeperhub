@@ -228,9 +228,12 @@ export class EventListener {
       const payload = buildEventPayload(log, parsed, args);
       await this.sendToSqs(payload);
 
-      // Mark after the send. A crash between send and mark would re-fire
-      // the event on the next reconnect (documented best-effort trade).
-      // A mark failure here does not un-send SQS - fine, dedup is best-effort.
+      // Mark after the send, and after a refusal too: a refused event is
+      // settled, and leaving it unmarked only buys another admission
+      // round-trip the next time a reconnect replays the log.
+      // A crash between send and mark would re-fire the event on the next
+      // reconnect (documented best-effort trade). A mark failure here does not
+      // un-send SQS - fine, dedup is best-effort.
       try {
         await this.opts.dedup.markProcessed(this.opts.workflowId, txHash);
       } catch (err) {
@@ -249,10 +252,19 @@ export class EventListener {
     // KEEP-693: pre-create a phantom row (best-effort) so the run is visible
     // even if it never reaches the executor, and carry its id so the executor
     // upgrades that row instead of inserting.
-    const executionId = await createPhantomExecution(
+    const { executionId, refused } = await createPhantomExecution(
       this.opts.workflowId,
       this.opts.userId,
     );
+
+    // Refused on plan grounds: the executor would refuse the same run, and a
+    // busy contract would otherwise pay for that round-trip on every match.
+    if (refused) {
+      logger.log(
+        `[EventListener:${this.opts.workflowId}] skipping refused dispatch (${refused})`,
+      );
+      return;
+    }
 
     try {
       await enqueueWorkflowEventTrigger(this.opts.sqs, this.opts.sqsQueueUrl, {
