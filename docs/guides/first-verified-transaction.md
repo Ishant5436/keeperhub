@@ -62,7 +62,7 @@ to read. Four roles are easy to conflate, and they are frequently different addr
 
 | Role | What it does |
 | --- | --- |
-| Turnkey EOA | signs and broadcasts the outer transaction, and pays gas |
+| Turnkey EOA | signs the transaction. On an unsponsored route it also broadcasts the outer transaction and pays the gas. On a [sponsored](/wallet-management/gas) route a relayer submits and pays instead, so `receipt.from` is not your wallet |
 | Safe | `msg.sender` at the target contract, when signer routing is on |
 | Zodiac Roles modifier | validates the call against an allowlist and per-token allowances, when enabled |
 | Token holder | the account whose balance actually decreases |

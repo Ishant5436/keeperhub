@@ -43,10 +43,12 @@ function uniqueIp(): string {
 beforeEach(() => {
   delete process.env.IPINFO_TOKEN;
   delete process.env.IPAPI_KEY;
+  delete process.env.GEOIP_ENABLED;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.GEOIP_ENABLED;
 });
 
 describe("parseLatLon", () => {
@@ -220,5 +222,54 @@ describe("resolveLocationFromIp provider chain", () => {
     });
     await resolveLocationFromIp(uniqueIp());
     expect(seen.some((u) => hostIs(u, "ipinfo.io"))).toBe(false);
+  });
+});
+
+describe("GEOIP_ENABLED", () => {
+  // The whole point of the switch. Every provider in the chain is keyless, so
+  // "configured nothing" is not the same as "sends nothing" without this.
+  it("makes no request at all when disabled", async () => {
+    process.env.GEOIP_ENABLED = "false";
+    const seen: string[] = [];
+    stubFetch((url) => {
+      seen.push(url);
+      return { ok: true, body: { country_code: "US" } };
+    });
+    const location = await resolveLocationFromIp(uniqueIp());
+    expect(seen).toEqual([]);
+    expect(location).toEqual({
+      country: null,
+      region: null,
+      city: null,
+      latitude: null,
+      longitude: null,
+    });
+  });
+
+  // Unset must reproduce today exactly, which is the production invariant for
+  // this whole branch.
+  it("resolves normally when unset", async () => {
+    stubFetch((url) =>
+      hostIs(url, "ipapi.co")
+        ? { ok: true, body: { country_code: "US", city: "Reno" } }
+        : { ok: false, body: {} }
+    );
+    const location = await resolveLocationFromIp(uniqueIp());
+    expect(location.country).toBe("US");
+    expect(location.city).toBe("Reno");
+  });
+
+  // A gate that switches off on any truthy value gets switched off by accident.
+  it("treats values other than the literal false as enabled", async () => {
+    process.env.GEOIP_ENABLED = "true";
+    stubFetch((url) =>
+      hostIs(url, "ipapi.co")
+        ? { ok: true, body: { country_code: "DE" } }
+        : { ok: false, body: {} }
+    );
+    expect((await resolveLocationFromIp(uniqueIp())).country).toBe("DE");
+
+    process.env.GEOIP_ENABLED = "0";
+    expect((await resolveLocationFromIp(uniqueIp())).country).toBe("DE");
   });
 });

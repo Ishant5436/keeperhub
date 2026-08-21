@@ -83,6 +83,11 @@ export const viewport: Viewport = {
 const ROOT_DEV_BFCACHE_RELOAD =
   "if(typeof window!=='undefined'&&typeof performance!=='undefined'){var n=performance.getEntriesByType('navigation')[0];if(n&&n.type==='back_forward'){window.location.reload();}}";
 
+// Absent unless a deployment names a status page to embed. KeeperHub's own
+// environments set it in their Helm values; every other deployment gets no
+// third-party script and no outbound request.
+const STATUS_EMBED_SRC = process.env.STATUS_EMBED_SRC;
+
 // Width values MUST match COLLAPSED_WIDTH (60) and EXPANDED_WIDTH (200)
 // in components/navigation-sidebar.tsx. DEFAULT_STATE.sidebar=true in
 // lib/hooks/use-persisted-nav-state.ts means new users default to
@@ -146,10 +151,18 @@ const RootLayout = async ({ children }: RootLayoutProps) => {
             {ROOT_DEV_BFCACHE_RELOAD}
           </Script>
         )}
-        <Script
-          src="https://status.keeperhub.com/embed/script.js"
-          strategy="lazyOnload"
-        />
+        {/*
+          The status widget, loaded only where one is configured.
+
+          It used to be unconditional, which meant every page load of every
+          deployment fetched a script from a host KeeperHub operates - including
+          deployments run by someone else, whose users then beaconed us on every
+          visit. Read at runtime rather than through a NEXT_PUBLIC_ variable so a
+          deployment running a prebuilt image can change it without rebuilding.
+        */}
+        {STATUS_EMBED_SRC && (
+          <Script src={STATUS_EMBED_SRC} strategy="lazyOnload" />
+        )}
       </body>
     </html>
   );

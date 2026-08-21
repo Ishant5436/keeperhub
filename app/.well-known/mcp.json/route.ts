@@ -6,28 +6,23 @@
 // `authenticatedEndpoint` (OAuth-gated /mcp).
 
 import {
-  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
-  ETHEREUM_MAINNET_CHAIN_ID,
-  KEEPERHUB_ERC_8004_AGENT_ID,
-} from "@/lib/agentic-wallet/constants";
+  agentDescription,
+  agentName,
+  deriveBaseUrl,
+  onChainIdentity,
+} from "@/lib/agent-identity";
 import { getAuthenticatedToolsForDiscovery } from "@/lib/mcp/mcp-tool-catalog";
 import { PUBLIC_TOOLS } from "@/lib/mcp/oauth-scopes";
 
-const TRAILING_SLASH = /\/$/;
-
-function deriveBaseUrl(request: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL;
-  if (envUrl) {
-    return envUrl.replace(TRAILING_SLASH, "");
-  }
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
+// Server names are slugs, so a configured display name has to be reduced to
+// one. Matches the shape of the previous hardcoded "keeperhub".
+const NON_SLUG_CHARS = /[^a-z0-9]+/g;
 
 const TOOLS = getAuthenticatedToolsForDiscovery();
 
 export function GET(request: Request): Response {
   const baseUrl = deriveBaseUrl(request);
+  const onChain = onChainIdentity();
   const card = {
     $schema:
       "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
@@ -35,12 +30,13 @@ export function GET(request: Request): Response {
     version: "1.0.0",
     protocolVersion: "2025-06-18",
     serverInfo: {
-      name: "keeperhub",
-      title: "KeeperHub",
+      name: agentName().toLowerCase().replace(NON_SLUG_CHARS, "-"),
+      title: agentName(),
       version: "1.0.0",
     },
-    description:
-      "Web3 workflow automation platform. Build and deploy on-chain automations through a visual builder. Workflows are callable by AI agents via MCP and x402 micropayments.",
+    description: agentDescription(
+      "Web3 workflow automation platform. Build and deploy on-chain automations through a visual builder. Workflows are callable by AI agents via MCP and x402 micropayments."
+    ),
     iconUrl: `${baseUrl}/keeperhub_logo.png`,
     endpoint: `${baseUrl}/mcp/public`,
     transport: {
@@ -68,12 +64,19 @@ export function GET(request: Request): Response {
         resource_metadata: `${baseUrl}/.well-known/oauth-protected-resource`,
       },
     },
-    erc8004: {
-      agent_id: KEEPERHUB_ERC_8004_AGENT_ID,
-      chain: "ethereum",
-      chain_id: ETHEREUM_MAINNET_CHAIN_ID,
-      registry: ERC_8004_IDENTITY_REGISTRY_ADDRESS,
-    },
+    // Omitted entirely when there is no registration this deployment can
+    // truthfully claim - see onChainIdentity(). Republishing ours under another
+    // name would send reputation readers to the wrong host.
+    ...(onChain
+      ? {
+          erc8004: {
+            agent_id: onChain.agentId,
+            chain: onChain.chain,
+            chain_id: onChain.chainId,
+            registry: onChain.registry,
+          },
+        }
+      : {}),
   };
 
   return Response.json(card, {

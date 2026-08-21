@@ -174,6 +174,24 @@ function getBaseURL() {
 const SIGNUP_CAPTCHA_ENDPOINT = "/sign-up/email";
 const captchaSecretKey = process.env.TURNSTILE_SECRET_KEY;
 const captchaForceEnabled = process.env.TURNSTILE_ENFORCE === "true";
+// start custom keeperhub code //
+/**
+ * Deliberate opt-out of the captcha, for a deployment that cannot use
+ * Cloudflare.
+ *
+ * Without this the only way to boot without TURNSTILE_SECRET_KEY is CI=true,
+ * which also disables unrelated behaviour and misdescribes the environment. The
+ * other workaround, Cloudflare's always-pass test key pair, is worse than it
+ * looks: signup still calls challenges.cloudflare.com twice and the captcha
+ * verifies nothing, so the deployment carries the dependency without the
+ * protection.
+ *
+ * TURNSTILE_ENFORCE wins over this, so a deployment that has explicitly asked
+ * for the captcha cannot lose it by also setting this.
+ */
+const captchaDisabled =
+  !captchaForceEnabled && process.env.TURNSTILE_DISABLED === "true";
+// end keeperhub code //
 const captchaSkippedForTests =
   process.env.CI === "true" ||
   process.env.NODE_ENV === "test" ||
@@ -191,8 +209,13 @@ const captchaSkippedForTests =
 // but no runtime secrets injected, so skip the assertion during that phase to
 // avoid crashing the build. The assertion still fires at server boot
 // (phase-production-server) of any environment that actually enforces captcha.
+// start custom keeperhub code //
+// The two reasons the captcha plugin is left out: the test-mode skips above, or
+// a deployment that explicitly opted out because it cannot use Cloudflare.
+const captchaOmitted = captchaSkippedForTests || captchaDisabled;
+// end keeperhub code //
 const captchaRequired =
-  !captchaSkippedForTests &&
+  !captchaOmitted &&
   (process.env.NODE_ENV === "production" || captchaForceEnabled) &&
   process.env.NEXT_PHASE !== "phase-production-build";
 if (captchaRequired && !captchaSecretKey) {
@@ -200,6 +223,16 @@ if (captchaRequired && !captchaSecretKey) {
     "TURNSTILE_SECRET_KEY is required in production (or when TURNSTILE_ENFORCE=true) - refusing to expose /sign-up/email without captcha verification"
   );
 }
+// start custom keeperhub code //
+// Say it out loud once at boot. Turning the captcha off leaves /sign-up/email
+// open to automated signups, and an operator who inherited this configuration
+// should find out from the log rather than from the account table.
+if (captchaDisabled && process.env.NEXT_PHASE !== "phase-production-build") {
+  logWarn(
+    "[Auth] TURNSTILE_DISABLED=true - signup captcha is off and /sign-up/email accepts automated requests"
+  );
+}
+// end keeperhub code //
 
 // Wrap the captcha plugin's onRequest so trusted load-test / e2e traffic can
 // skip the Turnstile check on signup. A real challenge cannot be solved
@@ -227,8 +260,10 @@ function buildTurnstilePlugin(secretKey: string): ReturnType<typeof captcha> {
   };
 }
 
+// captchaOmitted covers the opt-out too, so a deployment that opted out but
+// still has a secret key lying around in its config makes no Cloudflare request.
 const captchaPlugins =
-  !captchaSkippedForTests && captchaSecretKey
+  !captchaOmitted && captchaSecretKey
     ? [buildTurnstilePlugin(captchaSecretKey)]
     : [];
 

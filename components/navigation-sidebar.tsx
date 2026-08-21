@@ -60,10 +60,9 @@ type WorkflowEntry = {
   updatedAt: string;
   projectId?: string | null;
   tagId?: string | null;
-  // Soft-delete timestamp. Hidden from the sidebar picker via
-  // filterPickerVisible(), but the API still returns these rows so audit /
-  // recovery surfaces (executions history, marketplace listings) can render
-  // them.
+  // Soft-delete timestamp. The list route already excludes these rows;
+  // filterPickerVisible() re-checks it so a stale cached payload cannot put
+  // one back in the picker.
   deletedAt?: string | null;
   // The trigger type drives whether the "Disabled" label is meaningful --
   // see shouldShowDisabledBadge. Derived once at the SavedWorkflow boundary

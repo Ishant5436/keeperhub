@@ -272,7 +272,11 @@ services:
     hostname: sandbox
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      # Loopback only. This published the sandbox on every host interface, so
+      # any machine on the LAN could reach /run and execute code on a
+      # developer's box. In-cluster the NetworkPolicy restricts ingress to the
+      # keeperhub namespace; compose has no such control.
+      - "127.0.0.1:8787:8787"
     environment:
       NODE_ENV: production
       SANDBOX_PORT: "8787"

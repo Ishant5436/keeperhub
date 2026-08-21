@@ -2,27 +2,23 @@
 // agent registry as the "A2A" service so 8004scan can discover capabilities
 // without an MCP handshake.
 
-const TRAILING_SLASH = /\/$/;
-
-function deriveBaseUrl(request: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL;
-  if (envUrl) {
-    return envUrl.replace(TRAILING_SLASH, "");
-  }
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
+import {
+  agentDescription,
+  agentName,
+  deriveBaseUrl,
+} from "@/lib/agent-identity";
 
 export function GET(request: Request): Response {
   const baseUrl = deriveBaseUrl(request);
   const card = {
-    name: "KeeperHub",
-    description:
-      "Execution layer for AI agents operating onchain. Discover and call DeFi workflows via MCP and ERC-8004, pay per execution in USDC over x402 on Base or MPP on Tempo. Managed DeFi 24/7 with onchain audit trail.",
+    name: agentName(),
+    description: agentDescription(
+      "Execution layer for AI agents operating onchain. Discover and call DeFi workflows via MCP and ERC-8004, pay per execution in USDC over x402 on Base or MPP on Tempo. Managed DeFi 24/7 with onchain audit trail."
+    ),
     url: baseUrl,
     version: "1.0.0",
     provider: {
-      organization: "KeeperHub",
+      organization: agentName(),
       url: baseUrl,
     },
     capabilities: {

@@ -20,6 +20,7 @@ jobs:
       workflows: ${{ steps.filter.outputs.workflows }}
       dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
       plugins: ${{ steps.filter.outputs.plugins }}
+      selfhosted: ${{ steps.filter.outputs.selfhosted }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -38,6 +39,8 @@ jobs:
               - '.hadolint.yaml'
             plugins:
               - 'plugins/**'
+            selfhosted:
+              - 'deploy/keeperhub-stack/self-hosted/**'
 
   compose-validation:
     name: Docker Compose Validation
@@ -319,3 +322,76 @@ jobs:
             exit 1
           fi
           echo "Plugin registry is up to date."
+
+  self-hosted-profile:
+    name: Self-hosted Profile Render
+    needs: changes
+    if: needs.changes.outputs.selfhosted == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v3
+        with:
+          version: v3.18.4
+
+      # Nothing else validates this directory. The values files are the artifact
+      # a client derives an install from, and a change that breaks the render
+      # would otherwise only be found by installing it.
+      - name: Render every supported mode combination
+        working-directory: deploy/keeperhub-stack/self-hosted
+        run: |
+          set -euo pipefail
+          helm repo add techops-services https://techops-services.github.io/helm-charts
+          helm repo update techops-services
+
+          chart_version=$(grep -E '^CHART_VERSION=' config.sh | sed 's/.*:-\([0-9.]*\)}.*/\1/')
+          echo "Rendering against keeperhub-stack $chart_version"
+
+          # Values a client must supply. Synthetic, and identical for every case:
+          # this proves the profile renders, not that any particular value works.
+          common_args=(
+            --namespace keeperhub
+            --version "$chart_version"
+            --set global.image.repository=registry.example.com/keeperhub
+            --set global.image.tag=citest
+            --set global.appHost=keeperhub.example.com
+            --set global.tlsIssuer=ci-issuer
+            --set global.fromAddress=noreply@example.com
+            --set global.turnstileSecretKey=ci-turnstile
+          )
+          byo_args=(
+            --set global.queue.url=https://sqs.us-east-1.amazonaws.com/000000000000/q
+            --set global.queue.dlqUrl=https://sqs.us-east-1.amazonaws.com/000000000000/q-dlq
+            --set secrets.values.DATABASE_URL=postgresql://u:p@db.example.svc.cluster.local:5432/kh
+          )
+
+          failed=0
+          for db in bundled byo; do
+            for queue in bundled byo; do
+              for overlay in "" values.minikube.yaml; do
+                label="db=$db queue=$queue${overlay:+ +minikube}"
+                args=(-f values.yaml -f "values.db-$db.yaml" -f "values.queue-$queue.yaml")
+                [ -n "$overlay" ] && args+=(-f "$overlay")
+                out=$(helm template ci techops-services/keeperhub-stack \
+                        "${common_args[@]}" "${byo_args[@]}" "${args[@]}" 2>&1) || {
+                  echo "::error::render failed for $label"
+                  echo "$out" | head -20
+                  failed=1
+                  continue
+                }
+                # An unsubstituted placeholder or an unrendered action reaching a
+                # manifest is the exact failure this directory used to have.
+                if echo "$out" | grep -nE '\$\{[A-Z_]+\}'; then
+                  echo "::error::$label left an envsubst placeholder in the output"
+                  failed=1
+                fi
+                if echo "$out" | grep -nE '^\s+(image|host|value):.*\{\{'; then
+                  echo "::error::$label left an unrendered template action in the output"
+                  failed=1
+                fi
+                echo "ok: $label ($(echo "$out" | grep -c '^kind:') resources)"
+              done
+            done
+          done
+          exit $failed

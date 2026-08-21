@@ -303,10 +303,20 @@ const nextConfig = {
     ];
   },
   async redirects() {
+    // Points agent crawlers at the docs. DOCS_BASE_URL lets a deployment send
+    // them to its own docs, or drop the redirect entirely by setting the
+    // variable empty - otherwise every deployment permanently redirects its own
+    // /llms.txt to a host KeeperHub runs. Read at build time like the rest of
+    // this file, so it is set for the image build rather than at runtime.
+    const docsBaseUrl =
+      process.env.DOCS_BASE_URL ?? "https://docs.keeperhub.com";
+    if (!docsBaseUrl) {
+      return [];
+    }
     return [
       {
         source: "/llms.txt",
-        destination: "https://docs.keeperhub.com/llms.txt",
+        destination: `${docsBaseUrl}/llms.txt`,
         permanent: true,
       },
     ];

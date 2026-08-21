@@ -10,6 +10,22 @@ import { workflows } from "@/lib/db/schema";
 // Font loading (Anek Latin, bundled locally)
 // ---------------------------------------------------------------------------
 
+// The host printed as a watermark on every generated card. Derived from the
+// deployment's own URL so a deployment KeeperHub does not run does not stamp
+// our domain onto its social previews. Server-only module, so this is a runtime
+// read; unset reproduces the literal both sites carried.
+const OG_WATERMARK_HOST = (() => {
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  if (!configured) {
+    return "app.keeperhub.com";
+  }
+  try {
+    return new URL(configured).host;
+  } catch {
+    return "app.keeperhub.com";
+  }
+})();
+
 const fontsDir = join(process.cwd(), "app/api/og/fonts");
 
 const fontRegularPromise = readFile(
@@ -334,7 +350,7 @@ export function generateDefaultOGImage(): Promise<ImageResponse> {
           color: "rgba(255,255,255,0.3)",
         }}
       >
-        app.keeperhub.com
+        {OG_WATERMARK_HOST}
       </div>
     </OGBase>,
     86_400
@@ -1015,7 +1031,7 @@ function Header(): React.JSX.Element {
           color: "rgba(255,255,255,0.3)",
         }}
       >
-        app.keeperhub.com
+        {OG_WATERMARK_HOST}
       </div>
     </div>
   );

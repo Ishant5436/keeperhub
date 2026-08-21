@@ -65,10 +65,13 @@ describe("agentic-wallet.ts: file-specific invariants", () => {
     "utf8"
   );
 
-  it("defines AGENTIC_RPID exactly once as keeperhub.com", () => {
-    const matches = source.match(AGENTIC_RPID_DEFINITION);
-    expect(matches).toHaveLength(1);
-    expect(source).toContain('AGENTIC_RPID = "keeperhub.com"');
+  // The module defined an AGENTIC_RPID passkey relying-party id that nothing
+  // ever imported, and there is no WebAuthn code in the tree. It was removed
+  // rather than made configurable. This asserts it stays gone, so a future
+  // passkey feature has to choose its relying-party id deliberately instead of
+  // inheriting a hardcoded keeperhub.com from a constant nobody remembers.
+  it("defines no AGENTIC_RPID", () => {
+    expect(source.match(AGENTIC_RPID_DEFINITION)).toBeNull();
   });
 
   it("exports createAgenticWallet and getTurnkeyClientForOrg", () => {

@@ -152,6 +152,32 @@ jobs:
             exit 1
           fi
 
+      - name: Forbid KeeperHub-operated hosts in RPC and chain defaults
+        # A deployment that configures no RPCs falls through to the defaults in
+        # lib/rpc/, and scripts/seed/ writes those into the chains table on
+        # every deploy. An endpoint we operate in either place would silently
+        # and durably route that deployment's chain traffic - addresses,
+        # contracts, transaction payloads - through our infrastructure.
+        #
+        # tests/unit/rpc-config.test.ts asserts the same rule over the exported
+        # table, which catches real values; this catches a literal anywhere in
+        # those directories, including one that never reaches the export.
+        # Comments are matched too, on purpose: a commented-out endpoint is an
+        # invitation to paste it back.
+        # Uses git grep on the checked-out tree; no user input is interpolated.
+        run: |
+          MATCHES=$(git grep -nE 'https?://[^"'"'"'`[:space:]]*(techops\.services|keeperhub\.com)' -- \
+            'lib/rpc/' \
+            'scripts/seed/' \
+            ':!*.test.ts' \
+            ':!*.md' \
+            || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::A KeeperHub-operated host is used as an RPC or chain default. Use a third-party public endpoint; deployments that configure nothing inherit these, and the chain seeder makes them durable."
+            echo "$MATCHES"
+            exit 1
+          fi
+
       - name: Check public API docs match route files
         # Parses every documented (METHOD /api/...) entry in docs/api/*.md
         # and asserts the corresponding app/api/<path>/route.ts exists and

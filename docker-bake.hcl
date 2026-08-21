@@ -18,6 +18,12 @@ variable "NEXT_PUBLIC_SCAN_ENABLED" { default = "" }
 variable "NEXT_PUBLIC_TURNSTILE_SITE_KEY" { default = "" }
 variable "ENVIRONMENT_TAG" { default = "" }
 variable "NEXT_PUBLIC_SENTRY_DSN" { default = "" }
+# The /llms.txt redirect destination, baked by next.config.ts at build time.
+# Defaults to today's value so a build that says nothing keeps production
+# behaviour; an empty value drops the redirect. See the ARG in Dockerfile.
+# Deliberately NOT plumbed through build-images.yml: a workflow passing an unset
+# repository variable would send "" and quietly remove the redirect from prod.
+variable "DOCS_BASE_URL" { default = "https://docs.keeperhub.com" }
 variable "SENTRY_ORG" { default = "" }
 variable "SENTRY_PROJECT" { default = "" }
 variable "SENTRY_AUTH_TOKEN" { default = "" }
@@ -73,6 +79,7 @@ target "app" {
     NEXT_PUBLIC_SCAN_ENABLED = NEXT_PUBLIC_SCAN_ENABLED
     NEXT_PUBLIC_TURNSTILE_SITE_KEY = NEXT_PUBLIC_TURNSTILE_SITE_KEY
     NEXT_PUBLIC_SENTRY_DSN       = NEXT_PUBLIC_SENTRY_DSN
+    DOCS_BASE_URL                = DOCS_BASE_URL
     INCLUDE_TEST_ENDPOINTS       = INCLUDE_TEST_ENDPOINTS
   }
   tags = ECR_REGISTRY != "" ? compact([
@@ -99,6 +106,7 @@ target "sentry-upload" {
     NEXT_PUBLIC_SCAN_ENABLED = NEXT_PUBLIC_SCAN_ENABLED
     NEXT_PUBLIC_TURNSTILE_SITE_KEY = NEXT_PUBLIC_TURNSTILE_SITE_KEY
     NEXT_PUBLIC_SENTRY_DSN       = NEXT_PUBLIC_SENTRY_DSN
+    DOCS_BASE_URL                = DOCS_BASE_URL
     INCLUDE_TEST_ENDPOINTS       = INCLUDE_TEST_ENDPOINTS
     SENTRY_ORG                   = SENTRY_ORG
     SENTRY_PROJECT               = SENTRY_PROJECT
@@ -140,6 +148,7 @@ target "workflow-runner" {
     NEXT_PUBLIC_SCAN_ENABLED = NEXT_PUBLIC_SCAN_ENABLED
     NEXT_PUBLIC_TURNSTILE_SITE_KEY = NEXT_PUBLIC_TURNSTILE_SITE_KEY
     NEXT_PUBLIC_SENTRY_DSN       = NEXT_PUBLIC_SENTRY_DSN
+    DOCS_BASE_URL                = DOCS_BASE_URL
     INCLUDE_TEST_ENDPOINTS       = INCLUDE_TEST_ENDPOINTS
   }
   tags = compact([
@@ -234,6 +243,7 @@ target "executor" {
     NEXT_PUBLIC_SCAN_ENABLED = NEXT_PUBLIC_SCAN_ENABLED
     NEXT_PUBLIC_TURNSTILE_SITE_KEY = NEXT_PUBLIC_TURNSTILE_SITE_KEY
     NEXT_PUBLIC_SENTRY_DSN       = NEXT_PUBLIC_SENTRY_DSN
+    DOCS_BASE_URL                = DOCS_BASE_URL
     INCLUDE_TEST_ENDPOINTS       = INCLUDE_TEST_ENDPOINTS
   }
   tags = compact([

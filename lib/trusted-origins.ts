@@ -22,6 +22,74 @@ const DEV_HTTPS_ORIGINS: readonly string[] =
     ? ["https://localhost:*", "https://127.0.0.1:*"]
     : [];
 
+// start custom keeperhub code //
+/**
+ * Extra origins for a deployment served on a domain we do not own.
+ *
+ * The list below is fixed at build time, so an install on a client domain has
+ * every cookie-authenticated write rejected: the UI loads and reads fine, then
+ * saving returns 403 with `[csrf] blocked: untrusted origin` and nothing else.
+ * This is the seam that makes such a deployment possible.
+ *
+ * Comma-separated, same wildcard syntax as the entries below, e.g.
+ *   ADDITIONAL_TRUSTED_ORIGINS=https://keeperhub.acme.example,https://*.acme.internal
+ *
+ * Unset yields exactly the list this file had before the variable existed, so
+ * production is unaffected.
+ *
+ * Deliberately NOT prefixed NEXT_PUBLIC_. Next inlines those into the server
+ * bundle too whenever they are set at build time, which would bake the
+ * builder's value into every image built from this tree.
+ */
+function parseAdditionalOrigins(raw: string | undefined): readonly string[] {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && isSafeOriginPattern(entry));
+}
+
+/**
+ * Rejects patterns that would trust far more than the operator intended.
+ *
+ * `compilePattern` below maps `*` to `[^/\\]*`, which matches `.` and `:` as
+ * well as ordinary characters. So `https://*` matches every https origin on the
+ * internet, and `*` matches every origin of any scheme - either would turn the
+ * CSRF guard off while looking like configuration. A wildcard is still allowed
+ * in the host, which is what makes `https://*.acme.internal` work.
+ */
+function isSafeOriginPattern(pattern: string): boolean {
+  const separator = pattern.indexOf("://");
+  if (separator <= 0) {
+    return false;
+  }
+
+  const scheme = pattern.slice(0, separator);
+  if (scheme !== "http" && scheme !== "https") {
+    return false;
+  }
+
+  // A path would never match anyway - callers compare against a bare origin
+  // from `new URL(value).origin` - so its presence means the entry is wrong.
+  const host = pattern.slice(separator + 3);
+  if (host.length === 0 || host.includes("/")) {
+    return false;
+  }
+
+  // One leading `*.` is the only wildcard worth supporting: it is what makes
+  // `https://*.acme.internal` work. The part it qualifies must be a literal
+  // suffix, so `https://*.`, `https://*.*` and a bare `https://*` are all out.
+  const suffix = host.startsWith("*.") ? host.slice(2) : host;
+  return suffix.length > 0 && !suffix.includes("*");
+}
+
+const ADDITIONAL_TRUSTED_ORIGINS: readonly string[] = parseAdditionalOrigins(
+  process.env.ADDITIONAL_TRUSTED_ORIGINS
+);
+// end keeperhub code //
+
 export const TRUSTED_ORIGINS: readonly string[] = [
   // HTTP localhost poses no CSRF risk (same machine only) and must work in
   // all environments including CI (NODE_ENV=test) so worktrees on any port pass.
@@ -29,6 +97,7 @@ export const TRUSTED_ORIGINS: readonly string[] = [
   ...DEV_HTTPS_ORIGINS,
   // start custom keeperhub code //
   "http://127.0.0.1:*", // CLI browser auth callback (dynamic port)
+  ...ADDITIONAL_TRUSTED_ORIGINS,
   // end keeperhub code //
   "https://*.keeperhub.com",
 ];

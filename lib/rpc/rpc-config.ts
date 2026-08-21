@@ -27,9 +27,18 @@ import { ErrorCategory, logSystemError, logWarn } from "@/lib/logging";
 /**
  * Public RPC defaults (no API keys required)
  * These are used as last resort when no config is provided
+ *
+ * Every entry must be a third-party endpoint. A deployment that reaches this
+ * table has configured nothing, so anything we operate here would silently
+ * route that deployment's chain traffic - addresses, contracts, transaction
+ * payloads - through our infrastructure. It is also durable: seed-chains.ts
+ * writes these into the chains table, and re-seeds on every deploy.
+ *
+ * tests/unit/rpc-config.test.ts asserts this over the whole table, so a new
+ * entry pointing at us fails there rather than in someone else's install.
  */
 export const PUBLIC_RPCS = {
-  ETH_MAINNET: "https://chain.techops.services/eth-mainnet",
+  ETH_MAINNET: "https://ethereum-rpc.publicnode.com",
   ETH_MAINNET_FALLBACK: "https://1rpc.io/eth",
   SEPOLIA: "https://ethereum-sepolia-rpc.publicnode.com",
   BASE_MAINNET: "https://mainnet.base.org",

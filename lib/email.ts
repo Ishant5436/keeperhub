@@ -16,7 +16,34 @@ import { SUPPORT_EMAIL } from "@/lib/social-links";
 
 const isTestEnv = !!process.env.CI || process.env.NODE_ENV === "test";
 
-const SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send";
+// start custom keeperhub code //
+/**
+ * Where the mail send is posted.
+ *
+ * Transactional mail carries signup OTPs, invites, password resets and MFA
+ * step-up codes, so a deployment that cannot reach SendGrid cannot complete a
+ * signup. Overriding this lets an operator point at their own relay - anything
+ * that accepts SendGrid's v3 mail/send request shape - instead of patching the
+ * source. Unset keeps the value this constant has always had.
+ */
+const SENDGRID_API_URL =
+  process.env.SENDGRID_API_URL || "https://api.sendgrid.com/v3/mail/send";
+
+/**
+ * Logo shown at the top of transactional email.
+ *
+ * The recipient's mail client fetches this when the message is opened, so the
+ * host learns their IP address and roughly when they read it. The default sits
+ * in KeeperHub's own public repository, which means a deployment KeeperHub does
+ * not run still shows our logo and still reports its users to GitHub.
+ *
+ * Point it at your own asset, or set it empty to send no logo at all - the
+ * templates omit the image entirely rather than rendering a broken one.
+ */
+const EMAIL_LOGO_URL =
+  process.env.EMAIL_LOGO_URL ??
+  "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+// end keeperhub code //
 
 // Cap the outbound SendGrid call so a stalled connection surfaces as a
 // failed send (returns false) instead of hanging the request that's
@@ -180,8 +207,7 @@ export async function sendVerificationOTP(
 ): Promise<boolean> {
   const { email, otp, type } = data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const subjectMap = {
     "sign-in": "Your KeeperHub sign-in code",
@@ -235,7 +261,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -301,8 +327,7 @@ export async function sendOAuthPasswordResetEmail(
 ): Promise<boolean> {
   const { email, providerName } = data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const subject = "Password Reset Request - KeeperHub";
 
@@ -330,7 +355,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -391,8 +416,7 @@ export async function sendInvitationEmail(
   const { inviteeEmail, inviterName, organizationName, role, inviteLink } =
     data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const subject = `You've been invited to join ${organizationName} on KeeperHub`;
 
@@ -422,7 +446,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -498,8 +522,7 @@ export async function sendNewDeviceEmail(
 ): Promise<boolean> {
   const { email, ip, country, device, when } = data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const subject = "New device signed in to your KeeperHub account";
 
@@ -530,7 +553,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -748,8 +771,7 @@ export async function sendWorkflowExecutionDigestEmail(
     stats.total === 1 ? "" : "s"
   }, ${stats.error} failed (last ${period})`;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const workflowUrl = (id: string): string =>
     `${appUrl}/workflows/${encodeURIComponent(id)}`;
@@ -933,7 +955,7 @@ ${socialText}
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px; text-align: center;">
     <div style="margin:0 0 14px;">
@@ -1004,8 +1026,7 @@ export async function sendApiKeyChangeEmail(
 ): Promise<boolean> {
   const { email, action, tokenName, keyPrefix, when } = data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const created = action === "created";
   const subject = created
@@ -1042,7 +1063,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -1121,8 +1142,7 @@ export async function sendSecurityAlertEmail(
   data: SecurityAlertData
 ): Promise<boolean> {
   const { email, actionPhrase, actorLabel, when, resourceType } = data;
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
   const whenFormatted = when.toUTCString();
   const summary = `${actorLabel} ${actionPhrase}`;
   const subject = "Security alert: a high-risk action on your organization";
@@ -1150,7 +1170,7 @@ KeeperHub - Blockchain Workflow Automation
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">
@@ -1218,8 +1238,7 @@ export async function sendAccountDeactivatedEmail(
 ): Promise<boolean> {
   const { email, name } = data;
 
-  const logoUrl =
-    "https://raw.githubusercontent.com/KeeperHub/keeperhub/staging/public/keeperhub_logo_email.png";
+  const logoUrl = EMAIL_LOGO_URL;
 
   const subject = "Your KeeperHub account access has been suspended";
 
@@ -1261,7 +1280,7 @@ ${socialText}
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    <img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />
+    ${logoUrl ? `<img src="${logoUrl}" alt="KeeperHub" style="max-width: 200px; height: auto;" />` : ""}
   </div>
 
   <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e5e5; border-top: none; border-radius: 0 0 12px 12px;">

@@ -14,6 +14,10 @@
  * providers (ipapi.co, ipwho.is, freeipapi) still answer, so a missing
  * IPINFO_TOKEN / IPAPI_KEY degrades quota, not availability.
  *
+ * Because those providers need no credential, a deployment that configures
+ * nothing still sends every user's IP to them. Set GEOIP_ENABLED=false to stop
+ * that; every caller then sees NULL_LOCATION and simply shows no location.
+ *
  * Results are kept in a 24h in-memory cache keyed on IP, since session
  * creation only needs the resolve once and IPs don't change location.
  * Concurrent lookups for the same IP coalesce onto one chain walk.
@@ -90,9 +94,35 @@ async function resolveViaChain(ip: string): Promise<ResolvedLocation> {
   return NULL_LOCATION;
 }
 
+// start custom keeperhub code //
+/**
+ * Whether to resolve locations at all.
+ *
+ * Every provider in the chain is a third-party service, and the keyless ones
+ * answer without any credential, so a deployment that configures nothing still
+ * sends each signing-in user's IP address to ipapi.co, then ipwho.is, then
+ * freeipapi.com. A deployment that does not want that had no way to stop it.
+ *
+ * The polarity is deliberately the opposite of the NEXT_PUBLIC_*_ENABLED flags
+ * elsewhere. Those default off and read `=== "true"`; this one must default on
+ * so that leaving it unset reproduces today's behaviour exactly.
+ *
+ * Read per call rather than at module load so it can be flipped without a
+ * restart, and checked before the cache so a flip takes effect at once.
+ */
+function geoIpEnabled(): boolean {
+  return process.env.GEOIP_ENABLED !== "false";
+}
+// end keeperhub code //
+
 export async function resolveLocationFromIp(
   ip: string | null
 ): Promise<ResolvedLocation> {
+  // start custom keeperhub code //
+  if (!geoIpEnabled()) {
+    return NULL_LOCATION;
+  }
+  // end keeperhub code //
   if (!ip) {
     return NULL_LOCATION;
   }

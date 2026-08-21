@@ -1,5 +1,5 @@
 import { getCookies } from "better-auth/cookies";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   hasSessionCookie,
   isTrustedOrigin,
@@ -180,5 +180,106 @@ describe("better-auth cookie name pinning", () => {
     expect(SESSION_COOKIE_RE.test(`${cookies.sessionToken.name}=tok`)).toBe(
       true
     );
+  });
+});
+
+describe("ADDITIONAL_TRUSTED_ORIGINS", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    // The list is built once at module load, so the module has to be
+    // re-imported after the env changes rather than merely re-read.
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  async function loadWith(
+    value: string | undefined
+  ): Promise<typeof import("@/lib/trusted-origins")> {
+    // The env is rebuilt without the key rather than having it removed, so the
+    // unset case really is absent. Assigning undefined would not do: that
+    // stores the literal string "undefined", which the parser would then treat
+    // as a value and try to validate.
+    const { ADDITIONAL_TRUSTED_ORIGINS: _omitted, ...rest } = originalEnv;
+    process.env =
+      value === undefined
+        ? (rest as NodeJS.ProcessEnv)
+        : { ...rest, ADDITIONAL_TRUSTED_ORIGINS: value };
+    return await import("@/lib/trusted-origins");
+  }
+
+  // The whole backward-compatibility claim. Production sets nothing, so the
+  // list must be what it was before this variable existed.
+  it("unset reproduces the built-in list exactly", async () => {
+    const { TRUSTED_ORIGINS } = await loadWith(undefined);
+    expect([...TRUSTED_ORIGINS]).toEqual([
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://*.keeperhub.com",
+    ]);
+  });
+
+  it("trusts an exact client origin", async () => {
+    const { isTrustedOrigin } = await loadWith(
+      "https://keeperhub.acme.example"
+    );
+    expect(isTrustedOrigin("https://keeperhub.acme.example")).toBe(true);
+    expect(isTrustedOrigin("https://evil.example.com")).toBe(false);
+  });
+
+  it("trusts a wildcard subdomain and still rejects the bare suffix", async () => {
+    const { isTrustedOrigin } = await loadWith("https://*.acme.internal");
+    expect(isTrustedOrigin("https://kh.acme.internal")).toBe(true);
+    expect(isTrustedOrigin("https://a.b.acme.internal")).toBe(true);
+    expect(isTrustedOrigin("https://acme.internal")).toBe(false);
+    expect(isTrustedOrigin("https://acme.internal.evil.com")).toBe(false);
+  });
+
+  it("accepts several entries and tolerates whitespace", async () => {
+    const { isTrustedOrigin } = await loadWith(
+      " https://one.example , https://two.example "
+    );
+    expect(isTrustedOrigin("https://one.example")).toBe(true);
+    expect(isTrustedOrigin("https://two.example")).toBe(true);
+  });
+
+  it("keeps the built-in entries when extra origins are added", async () => {
+    const { isTrustedOrigin } = await loadWith(
+      "https://keeperhub.acme.example"
+    );
+    expect(isTrustedOrigin("https://app.keeperhub.com")).toBe(true);
+    expect(isTrustedOrigin("http://localhost:3000")).toBe(true);
+  });
+
+  // A `*` compiles to [^/\\]*, which matches "." and ":" as well. Any of these
+  // would trust the whole internet while looking like configuration, so they
+  // are dropped rather than honoured.
+  it.each([
+    ["a bare wildcard", "*"],
+    ["a wildcard host", "https://*"],
+    ["a wildcard scheme", "*://acme.example"],
+    ["an empty host", "https://"],
+    ["a wildcard-only suffix", "https://*.*"],
+    ["a dangling wildcard label", "https://*."],
+    ["a scheme we do not serve", "ftp://acme.example"],
+    ["no scheme at all", "acme.example"],
+    ["an entry carrying a path", "https://acme.example/admin"],
+  ])("drops %s", async (_label, value) => {
+    const { TRUSTED_ORIGINS, isTrustedOrigin } = await loadWith(value);
+    expect([...TRUSTED_ORIGINS]).toEqual([
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://*.keeperhub.com",
+    ]);
+    expect(isTrustedOrigin("https://evil.example.com")).toBe(false);
+  });
+
+  it("keeps the valid entries when one in the list is unsafe", async () => {
+    const { isTrustedOrigin } = await loadWith("https://*,https://ok.example");
+    expect(isTrustedOrigin("https://ok.example")).toBe(true);
+    expect(isTrustedOrigin("https://evil.example.com")).toBe(false);
   });
 });

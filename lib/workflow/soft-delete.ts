@@ -7,9 +7,7 @@ import { workflows } from "@/lib/db/schema";
  * Workflows are soft-deleted (`deletedAt` set) instead of hard-deleted so the
  * listed slug stays bound to the row and cannot be re-claimed by another
  * workflow. Every read that should treat a deleted workflow as gone must
- * compose this into its WHERE clause. The owner-facing workflow list is the
- * deliberate exception -- it keeps showing deleted rows so the UI can mark
- * them as deleted.
+ * compose this into its WHERE clause, the owner-facing list included.
  */
 export function workflowNotDeleted(): SQL {
   return isNull(workflows.deletedAt);
@@ -43,10 +41,10 @@ export function softDeleteValues(): {
 
 /**
  * Filter the owner-facing workflow list down to entries that belong in the
- * sidebar picker. Soft-deleted rows are dropped (audit/recovery still keeps
- * them in the API payload for other surfaces) and the internal `__current__`
- * stub is excluded. Disabled rows are intentionally kept -- the picker greys
- * them out and tags them rather than hiding them.
+ * sidebar picker: the internal `__current__` stub is excluded, and the
+ * deletedAt check is a second line of defence behind the route's own
+ * workflowNotDeleted() filter. Disabled rows are intentionally kept -- the
+ * picker greys them out and tags them rather than hiding them.
  */
 export function filterPickerVisible<
   T extends { name: string; deletedAt?: Date | string | null },

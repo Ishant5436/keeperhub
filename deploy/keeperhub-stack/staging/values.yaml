@@ -184,6 +184,12 @@ app:
 
   env:
     <<: *shared_env
+    # Status page embedded in the app shell. The application renders the
+    # script only when this is set, so a deployment that does not run a status
+    # page - which is any deployment but ours - makes no request for it.
+    STATUS_EMBED_SRC:
+      type: kv
+      value: "https://status.keeperhub.com/embed/script.js"
     LOG_LEVEL:
       type: kv
       value: "info"

@@ -20,7 +20,16 @@ export type SocialLink = {
   brand: SocialBrand;
 };
 
-/** Address users can email for support. */
+/**
+ * Address users can email for support.
+ *
+ * Deliberately not configurable. The only consumer,
+ * `components/support/contact-support-dialog.tsx`, is a client component, so a
+ * NEXT_PUBLIC_ read here would be inlined at build time and a deployment
+ * running a prebuilt image could never change it. A seam that cannot be used
+ * is worse than an honest constant: see DEPENDENCIES.md, which lists this and
+ * the links below among the things a deployment still shows KeeperHub for.
+ */
 export const SUPPORT_EMAIL = "human@keeperhub.com";
 
 /** Community + resource links, ordered most-direct-help first. */

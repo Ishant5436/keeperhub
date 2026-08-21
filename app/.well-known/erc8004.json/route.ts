@@ -8,40 +8,48 @@
 // already exists (see the erc8004 block in the mcp.json route); only the
 // well-known wrapper was missing.
 //
-// Identity and reputation are SEPARATE ERC-8004 contracts. Every address and
-// id below is imported from lib/agentic-wallet/constants.ts — the same source
-// of truth the feedback route and the Turnkey policy use — so the pointers we
-// publish cannot drift from where feedback is actually written on chain.
+// Identity and reputation are SEPARATE ERC-8004 contracts. The identity block
+// comes from lib/agent-identity.ts, so a deployment can publish its own
+// registration. The reputation address is imported from
+// lib/agentic-wallet/constants.ts — the same source of truth the feedback route
+// and the Turnkey policy use — so the pointer we publish cannot drift from
+// where feedback is actually written on chain.
 
 import {
-  ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+  agentDescription,
+  agentName,
+  deriveBaseUrl,
+  onChainIdentity,
+} from "@/lib/agent-identity";
+import {
   ERC_8004_REPUTATION_REGISTRY_ADDRESS,
   ETHEREUM_MAINNET_CHAIN_ID,
-  KEEPERHUB_ERC_8004_AGENT_ID,
 } from "@/lib/agentic-wallet/constants";
 
-const TRAILING_SLASH = /\/$/;
-
-function deriveBaseUrl(request: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL;
-  if (envUrl) {
-    return envUrl.replace(TRAILING_SLASH, "");
-  }
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
-
 export function GET(request: Request): Response {
+  const onChain = onChainIdentity();
+
+  // This document IS an on-chain registration - there is no version of it
+  // without one. A deployment that renamed the agent but registered no agent of
+  // its own has nothing true to publish here, and republishing ours under their
+  // name would point reputation readers at the wrong host while looking
+  // entirely plausible. 404 is the honest answer; the endpoint returned exactly
+  // that before the registration existed.
+  if (!onChain) {
+    return new Response(null, { status: 404 });
+  }
+
   const baseUrl = deriveBaseUrl(request);
   const card = {
     schema_version: "1",
-    name: "KeeperHub",
-    description:
-      "Execution layer for AI agents operating onchain. ERC-8004 agent identity for KeeperHub workflows.",
-    agent_id: KEEPERHUB_ERC_8004_AGENT_ID,
-    chain: "ethereum",
-    chain_id: ETHEREUM_MAINNET_CHAIN_ID,
-    registry: ERC_8004_IDENTITY_REGISTRY_ADDRESS,
+    name: agentName(),
+    description: agentDescription(
+      "Execution layer for AI agents operating onchain. ERC-8004 agent identity for KeeperHub workflows."
+    ),
+    agent_id: onChain.agentId,
+    chain: onChain.chain,
+    chain_id: onChain.chainId,
+    registry: onChain.registry,
     cards: {
       mcp: `${baseUrl}/.well-known/mcp.json`,
       a2a: `${baseUrl}/.well-known/agent-card.json`,
@@ -54,7 +62,9 @@ export function GET(request: Request): Response {
       type: "erc-8004",
       // Feedback writes flow through the agentic-wallet path; consumers
       // read directly from the on-chain ReputationRegistry — a different
-      // contract from the IdentityRegistry above.
+      // contract from the IdentityRegistry above. Not part of the deployment
+      // identity seam: the reputation contract is a fixed public deployment,
+      // not something an operator registers.
       registry: ERC_8004_REPUTATION_REGISTRY_ADDRESS,
       chain_id: ETHEREUM_MAINNET_CHAIN_ID,
     },

@@ -20,6 +20,7 @@ function clearTurnstileEnv(): void {
   delete process.env.ALLOW_TEST_ENDPOINTS;
   delete process.env.NEXT_PHASE;
   delete process.env.TURNSTILE_ENFORCE;
+  delete process.env.TURNSTILE_DISABLED;
   delete process.env.LOAD_TEST_BYPASS_TOKEN;
 }
 
@@ -137,6 +138,76 @@ describe("signup defenses: captcha plugin", () => {
     await expect(import("@/lib/auth")).rejects.toThrow(
       MISSING_CAPTCHA_SECRET_ERROR
     );
+  });
+
+  // A deployment that cannot use Cloudflare needs a way to boot that is not
+  // CI=true. These cases fix what that opt-out does and, more importantly, what
+  // it does not do when it is absent.
+  describe("TURNSTILE_DISABLED opt-out", () => {
+    it("boots in production without the secret", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TURNSTILE_DISABLED", "true");
+      const { auth } = await import("@/lib/auth");
+      expect(auth).toBeDefined();
+      const plugin = (auth.options.plugins ?? []).find(
+        (p) => (p as CaptchaPluginShape).id === "captcha"
+      );
+      expect(plugin).toBeUndefined();
+    });
+
+    // The point of the opt-out is no Cloudflare request. A leftover secret in
+    // the deployment's config must not quietly reinstate one.
+    it("loads no captcha plugin even when a secret is present", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TURNSTILE_DISABLED", "true");
+      process.env.TURNSTILE_SECRET_KEY = "test-secret";
+      const { auth } = await import("@/lib/auth");
+      const plugin = (auth.options.plugins ?? []).find(
+        (p) => (p as CaptchaPluginShape).id === "captcha"
+      );
+      expect(plugin).toBeUndefined();
+    });
+
+    // Fail safe. A deployment that asked for the captcha explicitly cannot lose
+    // it by also carrying this variable.
+    it("loses to TURNSTILE_ENFORCE", async () => {
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TURNSTILE_ENFORCE", "true");
+      vi.stubEnv("TURNSTILE_DISABLED", "true");
+      process.env.TURNSTILE_SECRET_KEY = "test-secret";
+      const { auth } = await import("@/lib/auth");
+      const plugin = (auth.options.plugins ?? []).find(
+        (p) => (p as CaptchaPluginShape).id === "captcha"
+      ) as CaptchaPluginShape | undefined;
+      expect(plugin).toBeDefined();
+      expect(plugin?.options.endpoints).toEqual(["/sign-up/email"]);
+    });
+
+    // And still throws when enforce is on and the secret is missing, so the
+    // opt-out cannot be used to dodge that assertion either.
+    it("does not suppress the missing-secret throw under TURNSTILE_ENFORCE", async () => {
+      vi.stubEnv("NODE_ENV", "development");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TURNSTILE_ENFORCE", "true");
+      vi.stubEnv("TURNSTILE_DISABLED", "true");
+      await expect(import("@/lib/auth")).rejects.toThrow(
+        MISSING_CAPTCHA_SECRET_ERROR
+      );
+    });
+
+    // Any value other than the exact string "true" is not an opt-out. Guards
+    // that accept truthiness get switched off by accident.
+    it("ignores values other than the literal true", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TURNSTILE_DISABLED", "1");
+      await expect(import("@/lib/auth")).rejects.toThrow(
+        MISSING_CAPTCHA_SECRET_ERROR
+      );
+    });
   });
 });
 

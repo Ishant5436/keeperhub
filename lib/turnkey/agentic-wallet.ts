@@ -17,16 +17,7 @@
  */
 import { Turnkey } from "@turnkey/sdk-server";
 import { provisionAgenticWallet } from "@/lib/agentic-wallet/provision";
-
-/**
- * Passkey Relying Party ID for agentic-wallet passkey enrollment.
- *
- * Apex domain (NOT the `app.` subdomain) so credentials registered via the
- * webapp can be used by future subdomains without re-enrollment (ONBOARD-05).
- *
- * This is the ONLY definition of the agentic-wallet RPID in the codebase.
- */
-export const AGENTIC_RPID = "keeperhub.com";
+import { TURNKEY_API_BASE_URL } from "./api-base-url";
 
 export type CreateAgenticWalletResult = {
   subOrgId: string;
@@ -59,7 +50,7 @@ function readTurnkeyEnv(): {
 export function getTurnkeyParentClient(): Turnkey {
   const { apiPublicKey, apiPrivateKey, organizationId } = readTurnkeyEnv();
   return new Turnkey({
-    apiBaseUrl: "https://api.turnkey.com",
+    apiBaseUrl: TURNKEY_API_BASE_URL,
     apiPublicKey,
     apiPrivateKey,
     defaultOrganizationId: organizationId,
@@ -77,7 +68,7 @@ export function getTurnkeyParentClient(): Turnkey {
 export function getTurnkeyClientForOrg(subOrgId: string): Turnkey {
   const { apiPublicKey, apiPrivateKey } = readTurnkeyEnv();
   return new Turnkey({
-    apiBaseUrl: "https://api.turnkey.com",
+    apiBaseUrl: TURNKEY_API_BASE_URL,
     apiPublicKey,
     apiPrivateKey,
     defaultOrganizationId: subOrgId,

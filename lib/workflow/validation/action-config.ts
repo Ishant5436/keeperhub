@@ -4,6 +4,7 @@ import {
   type ActionConfigField,
   type ActionConfigFieldBase,
   findActionById,
+  getAllActions,
 } from "@/plugins/registry";
 
 const SYSTEM_ACTION_TYPES = new Set([
@@ -35,6 +36,37 @@ const INTEGER_PATTERN = /^-?\d+$/;
 const UNSIGNED_INTEGER_PATTERN = /^\d+$/;
 const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/;
 
+// Maximum characters for a node label rendered into the top-level message.
+// Matches the 500-char cap in export-schema.ts but shorter for readability.
+const NODE_LABEL_MAX_CHARS = 100;
+
+// Control characters, Unicode bidi overrides and isolates that can inject
+// invisible text or alter rendering order in error messages. Stripped from
+// node labels before interpolation into the summary.
+//
+// Covers: C0 + DEL + C1 controls, line/paragraph separators, zero-width
+// chars (ZWSP/ZWNJ/ZWJ/LRM/RLM), bidi overrides (LRE/RLE/PDF/LRO/RLO),
+// bidi isolates (LRI/RLI/FSI/PDI), Arabic letter mark, BOM, and soft
+// hyphen.
+const NODE_LABEL_CONTROL_CHARS_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matching control chars + Unicode separators + bidi-overrides/isolates to neutralise log-injection / hidden-text vectors before rendering upstream-supplied strings
+  /[\u0000-\u001f\u007f-\u009f\u00ad\ufeff\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+function sanitiseNodeLabel(label: string): string {
+  let stripped = label.replace(NODE_LABEL_CONTROL_CHARS_RE, " ");
+  // Escape format delimiters to prevent a malicious label from rendering a
+  // convincing fake entry in the summary.
+  stripped = stripped
+    .replace(/"/g, "'")
+    .replace(/\(/g, "[")
+    .replace(/\)/g, "]");
+  stripped = stripped.trim();
+  if (stripped.length > NODE_LABEL_MAX_CHARS) {
+    return `${stripped.slice(0, NODE_LABEL_MAX_CHARS - 3)}...`;
+  }
+  return stripped;
+}
+
 export type ActionConfigValidationIssueCode =
   | "UNKNOWN_ACTION_TYPE"
   | "UNKNOWN_FIELD"
@@ -49,6 +81,9 @@ export type ActionConfigValidationIssue = {
   field?: string;
   expected?: string;
   received?: unknown;
+  nodeId?: string;
+  nodeLabel?: string;
+  suggestion?: string;
 };
 
 export type ActionConfigValidationResult = {
@@ -61,6 +96,7 @@ export type WorkflowNodeForValidation = {
   type?: unknown;
   data?: {
     type?: unknown;
+    label?: unknown;
     config?: Record<string, unknown>;
   };
 };
@@ -75,6 +111,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isActionNode(node: WorkflowNodeForValidation): boolean {
   return node.type === "action" || node.data?.type === "action";
+}
+
+function nodeIdentity(
+  node: WorkflowNodeForValidation,
+  fallback: string
+): { nodeId?: string; nodeLabel?: string } {
+  const nodeId =
+    typeof node.id === "string" && node.id !== "" ? node.id : undefined;
+  const rawLabel = node.data?.label;
+  const nodeLabel =
+    typeof rawLabel === "string" && rawLabel !== "" ? rawLabel : nodeId;
+  return {
+    nodeId,
+    nodeLabel: nodeLabel ?? fallback,
+  };
+}
+
+// Best-effort "did you mean" for a mistyped actionType. Matches system action
+// types (e.g. "condition" -> "Condition") and plugin action ids
+// case-insensitively. Returns undefined when the input is empty.
+let _candidateSet: Set<string> | undefined;
+function suggestActionType(input: string): string | undefined {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (!_candidateSet) {
+    _candidateSet = new Set<string>();
+    for (const action of getAllActions()) {
+      _candidateSet.add(action.id);
+    }
+    for (const systemActionType of SYSTEM_ACTION_TYPES) {
+      _candidateSet.add(systemActionType);
+    }
+  }
+  for (const candidate of _candidateSet) {
+    if (candidate.toLowerCase() === normalized) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 function isMissingRequiredValue(value: unknown): boolean {
@@ -421,12 +498,19 @@ export function validateWorkflowActionConfigs(
 
     const action = findActionById(actionType);
     if (!action) {
+      const suggestion = suggestActionType(actionType);
+      const identity = nodeIdentity(node, `nodes[${nodeIndex}]`);
       issues.push({
         code: "UNKNOWN_ACTION_TYPE",
         path: `nodes[${nodeIndex}].data.config.actionType`,
         actionType,
+        nodeId: identity.nodeId,
+        nodeLabel: identity.nodeLabel,
         received: actionType,
-        message: `Unknown action type "${actionType}".`,
+        suggestion,
+        message: suggestion
+          ? `Unknown action type "${actionType}". Did you mean "${suggestion}"?`
+          : `Unknown action type "${actionType}".`,
       });
       continue;
     }
@@ -442,6 +526,7 @@ export function validateWorkflowActionConfigs(
       continue;
     }
 
+    const identity = nodeIdentity(node, `nodes[${nodeIndex}]`);
     const fields = flattenConfigFields(action.configFields);
     const fieldsByKey = new Map(fields.map((field) => [field.key, field]));
     const aliasMap = getLegacyAliasMap(actionType);
@@ -470,6 +555,8 @@ export function validateWorkflowActionConfigs(
         path: `nodes[${nodeIndex}].data.config.${key}`,
         actionType,
         field: key,
+        nodeId: identity.nodeId,
+        nodeLabel: identity.nodeLabel,
         received: value,
         message: `Unknown field "${key}" for action "${actionType}".`,
       });
@@ -497,6 +584,8 @@ export function validateWorkflowActionConfigs(
           path: `nodes[${nodeIndex}].data.config.${field.key}`,
           actionType,
           field: field.key,
+          nodeId: identity.nodeId,
+          nodeLabel: identity.nodeLabel,
           expected: field.label,
           message: `Missing required field "${field.key}" for action "${actionType}".`,
         });
@@ -526,6 +615,8 @@ export function validateWorkflowActionConfigs(
           path: `nodes[${nodeIndex}].data.config.${field.key}`,
           actionType,
           field: field.key,
+          nodeId: identity.nodeId,
+          nodeLabel: identity.nodeLabel,
           expected: fieldCheck.expected,
           received: fieldCheck.received,
           message: `Invalid value for field "${field.key}" on action "${actionType}".`,
@@ -575,10 +666,44 @@ export function hasDraftActionNodes(
 export function formatActionConfigValidationResponse(
   validation: ActionConfigValidationResult
 ) {
+  const summary =
+    validation.issues.length > 0
+      ? (() => {
+          const labels = new Map<string, { count: number; fallback: string }>();
+          for (const issue of validation.issues) {
+            const raw = issue.nodeLabel ?? issue.nodeId ?? issue.path;
+            const existing = labels.get(raw);
+            if (existing) {
+              existing.count++;
+            } else {
+              labels.set(raw, {
+                count: 1,
+                fallback: issue.nodeId ?? issue.path,
+              });
+            }
+          }
+          const entries: string[] = [];
+          let shown = 0;
+          for (const [raw, { count, fallback }] of labels) {
+            if (shown >= 3) {
+              entries.push(`and ${labels.size - 3} more`);
+              break;
+            }
+            let label = sanitiseNodeLabel(raw);
+            if (!label.trim()) {
+              label = fallback;
+            }
+            entries.push(
+              count > 1 ? `"${label}" (${count} issues)` : `"${label}"`
+            );
+            shown++;
+          }
+          return `Invalid node(s): ${entries.join(", ")}. `;
+        })()
+      : "";
   return {
     error: "INVALID_ACTION_CONFIG",
-    message:
-      "Workflow contains invalid action configuration. Fix the listed fields and save again.",
+    message: `Workflow contains invalid action configuration. ${summary}Fix the listed fields and save again.`,
     invalidFields: validation.issues,
   };
 }

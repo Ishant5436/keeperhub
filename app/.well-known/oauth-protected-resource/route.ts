@@ -6,16 +6,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const TRAILING_SLASH = /\/$/;
-
-function deriveBaseUrl(request: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.BETTER_AUTH_URL;
-  if (envUrl) {
-    return envUrl.replace(TRAILING_SLASH, "");
-  }
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
+import { agentName, deriveBaseUrl } from "@/lib/agent-identity";
 
 // RFC 9728 Protected Resource Metadata. Claude Desktop and other strict
 // MCP clients discover the authorization server via this document after
@@ -32,7 +23,7 @@ export function GET(request: Request): Response {
     authorization_servers: [baseUrl],
     scopes_supported: [SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_MCP_ADMIN],
     bearer_methods_supported: ["header"],
-    resource_name: "KeeperHub",
+    resource_name: agentName(),
     resource_documentation: `${baseUrl}/mcp`,
   };
   return Response.json(metadata);

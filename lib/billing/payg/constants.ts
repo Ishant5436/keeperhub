@@ -33,7 +33,18 @@ export const PAYG_OVERFLOW_REASON = "payg_overflow";
 export const X402_EXACT_SCHEME = "exact";
 export const USDC_EIP712_NAME = "USD Coin";
 export const USDC_EIP712_VERSION = "2";
-export const PAYG_RESOURCE_URL = "https://keeperhub.com/payg";
+/**
+ * The `resource` a pay-as-you-go x402 payment is signed against
+ * (`lib/billing/payg/autopay.ts`), so it ends up inside the payload the payer
+ * authorises.
+ *
+ * Deliberately an explicit variable rather than something derived from
+ * NEXT_PUBLIC_APP_URL: this is the apex domain, not the `app.` host, so
+ * deriving it would change the value production already signs. Unset keeps that
+ * value byte for byte.
+ */
+export const PAYG_RESOURCE_URL =
+  process.env.PAYG_RESOURCE_URL || "https://keeperhub.com/payg";
 
 /** CAIP-2 network id for an EVM chain (e.g. `eip155:8453`). */
 export function evmNetworkId(chainId: number): string {

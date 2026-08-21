@@ -6,6 +6,7 @@ import { ApiErrorCodes, apiError } from "@/lib/errors/api-envelope";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { MAX_PAGE_SIZE } from "@/lib/pagination";
+import { workflowNotDeleted } from "@/lib/workflow/soft-delete";
 
 /**
  * The largest offset worth forwarding. Past Number.MAX_SAFE_INTEGER a parsed
@@ -114,7 +115,14 @@ export async function GET(request: Request): Promise<NextResponse> {
       });
     }
 
-    const conditions = [eq(workflows.organizationId, organizationId)];
+    // A soft-deleted workflow is gone as far as every listing surface is
+    // concerned. Filtering here rather than in the client keeps this route in
+    // step with the other reads and covers the non-browser callers (MCP,
+    // API keys) that never ran the client-side filter.
+    const conditions = [
+      eq(workflows.organizationId, organizationId),
+      workflowNotDeleted(),
+    ];
 
     if (projectIdFilter) {
       conditions.push(eq(workflows.projectId, projectIdFilter));

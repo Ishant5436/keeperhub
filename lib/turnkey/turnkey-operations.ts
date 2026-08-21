@@ -11,6 +11,7 @@ import { decryptExportBundle, generateP256KeyPair } from "@turnkey/crypto";
 import { Turnkey } from "@turnkey/sdk-server";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { isSolanaWalletProvisioningEnabled } from "@/lib/turnkey/solana-provisioning-flag";
+import { TURNKEY_API_BASE_URL } from "./api-base-url";
 
 let turnkeyInstance: Turnkey | undefined;
 
@@ -30,7 +31,7 @@ function getTurnkeyClient(): Turnkey {
   }
 
   turnkeyInstance = new Turnkey({
-    apiBaseUrl: "https://api.turnkey.com",
+    apiBaseUrl: TURNKEY_API_BASE_URL,
     apiPublicKey,
     apiPrivateKey,
     defaultOrganizationId: organizationId,
@@ -428,7 +429,7 @@ export function getTurnkeySignerConfig(
   }
 
   const turnkey = new Turnkey({
-    apiBaseUrl: "https://api.turnkey.com",
+    apiBaseUrl: TURNKEY_API_BASE_URL,
     apiPublicKey,
     apiPrivateKey,
     defaultOrganizationId: subOrgId,

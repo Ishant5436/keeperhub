@@ -1,9 +1,18 @@
 # Multi-stage Dockerfile for Next.js application
 # Stage 1: Dependencies
 FROM node:24-alpine AS deps
+# CA bundle for TLS to Amazon RDS. Only a deployment whose database is RDS
+# needs it, so the URL is a build arg and an empty value skips the download -
+# a build for a cluster-local or self-managed Postgres then needs no AWS host
+# at all. The file is still created either way because the migrator stage
+# copies it unconditionally.
+ARG RDS_CA_BUNDLE_URL=https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 RUN apk add --no-cache libc6-compat && \
-    wget -q -O /etc/ssl/certs/rds-combined-ca-bundle.pem \
-      https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+    if [ -n "$RDS_CA_BUNDLE_URL" ]; then \
+      wget -q -O /etc/ssl/certs/rds-combined-ca-bundle.pem "$RDS_CA_BUNDLE_URL"; \
+    else \
+      : > /etc/ssl/certs/rds-combined-ca-bundle.pem; \
+    fi
 WORKDIR /app
 
 # Install pnpm
@@ -89,6 +98,18 @@ ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 # so this stage is cache-deterministic across commits (see sentry-upload stage).
 ARG NEXT_PUBLIC_SENTRY_DSN
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+
+# Where /llms.txt redirects. next.config.ts compiles redirects into
+# routes-manifest.json, so this is a build-time value and a runtime env var
+# cannot change it.
+#
+# The default is the current destination, on purpose. An empty value drops the
+# redirect entirely, so a bare `ARG DOCS_BASE_URL` would hand every build an
+# empty string and silently remove it from production. Build with
+# `--build-arg DOCS_BASE_URL=` to opt out; that is what the self-hosted harness
+# does, so an install does not redirect its users to a host KeeperHub runs.
+ARG DOCS_BASE_URL=https://docs.keeperhub.com
+ENV DOCS_BASE_URL=$DOCS_BASE_URL
 ENV CI=true
 
 # KEEP-237: Gate admin test routes at build time. Set to "true" for

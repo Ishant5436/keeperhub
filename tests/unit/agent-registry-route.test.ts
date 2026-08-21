@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const PROD_APP_URL = "https://app.keeperhub.com";
 
 const { mockDbSelect } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
@@ -24,8 +26,19 @@ vi.mock("@/lib/logging", () => ({
 }));
 
 describe("GET /api/agent-registry", () => {
+  const originalEnv = process.env;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // Endpoints are derived from the deployment's own URL rather than a
+    // hardcoded app.keeperhub.com, so the tests below pin that URL to the
+    // production value. That keeps them asserting exactly the payload
+    // production serves, while a deployment on another domain gets its own.
+    process.env = { ...originalEnv, NEXT_PUBLIC_APP_URL: PROD_APP_URL };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   function setupDbMock(rows: unknown[]) {
@@ -233,5 +246,34 @@ describe("GET /api/agent-registry", () => {
     const cacheControl = response.headers.get("Cache-Control");
     expect(cacheControl).toContain("max-age=300");
     expect(cacheControl).toContain("public");
+  });
+
+  // A deployment that renamed itself must not keep publishing KeeperHub's ENS
+  // name and agent wallet: a card carrying our wallet under someone else's name
+  // is worse than one without it, because a reader would act on it.
+  describe("when the deployment is not KeeperHub", () => {
+    it("uses its own name and withholds the KeeperHub-only services", async () => {
+      process.env = {
+        ...process.env,
+        AGENT_NAME: "Acme Automations",
+        NEXT_PUBLIC_APP_URL: "https://kh.acme.example",
+      };
+      vi.resetModules();
+      setupDbMock([]);
+      const { GET } = await import("@/app/api/agent-registry/route");
+      const response = await GET(
+        new Request("https://kh.acme.example/api/agent-registry")
+      );
+      const json = await response.json();
+
+      expect(json.name).toBe("Acme Automations");
+      const names = json.services.map((svc: { name: string }) => svc.name);
+      expect(names).not.toContain("ens");
+      expect(names).not.toContain("agentWallet");
+      for (const svc of json.services as { endpoint: string }[]) {
+        expect(svc.endpoint).not.toContain("keeperhub.com");
+      }
+      expect(json.image).not.toContain("keeperhub.com");
+    });
   });
 });
