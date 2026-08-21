@@ -11,7 +11,7 @@ Users and Agents can build and deploy Web3 automation workflows through a visual
 **Quick setup (no install needed):**
 
 ```bash
-claude mcp add --transport http keeperhub https://app.keeperhub.com/mcp
+claude mcp add --transport http --scope user keeperhub https://app.keeperhub.com/mcp
 ```
 
 Then run `/mcp` inside Claude Code to authorize via browser. That's it.
