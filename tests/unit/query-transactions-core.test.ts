@@ -52,6 +52,7 @@ const mockExecuteWithFailover = vi.fn();
 vi.mock("@/lib/rpc/provider-factory", () => ({
   getRpcProvider: () =>
     Promise.resolve({ executeWithFailover: mockExecuteWithFailover }),
+  isSolanaChain: (chainId: number) => chainId === 101 || chainId === 103,
 }));
 
 const mockFetch = vi.fn();

@@ -399,6 +399,7 @@ Conditions reference previous node outputs using template syntax: `{{@nodeId:Lab
 |--------|----------------|
 | `web3/check-balance` | `network`, `address` |
 | `web3/check-token-balance` | `network`, `address`, `tokenConfig` |
+| `web3/get-spl-token-balance` | `network`, `address`, `tokenConfig` |
 | `web3/read-contract` | `network`, `contractAddress`, `abi`, `abiFunction` |
 
 ### Write Actions (require a wallet integration)

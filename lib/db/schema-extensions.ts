@@ -469,7 +469,11 @@ export const supportedTokens = pgTable(
       .primaryKey()
       .$defaultFn(() => generateId()),
     chainId: integer("chain_id").notNull(),
-    tokenAddress: text("token_address").notNull(), // ERC20 contract address (lowercase)
+    // ERC20 contract address, stored lowercase - this convention is EVM-only.
+    // A Solana row (SPL mint) MUST be stored with its exact base58 case: base58
+    // has no checksum, so lowercasing can silently decode to a different, still
+    // -valid 32-byte key rather than failing loudly.
+    tokenAddress: text("token_address").notNull(),
     symbol: text("symbol").notNull(), // e.g., "USDC", "USDT", "DAI"
     name: text("name").notNull(), // e.g., "USD Coin", "Tether USD"
     decimals: integer("decimals").notNull(),

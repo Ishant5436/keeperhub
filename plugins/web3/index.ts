@@ -71,7 +71,7 @@ const web3Plugin: IntegrationPlugin = {
           label: "Address",
           type: "template-input",
           placeholder: "0x... / Solana address / {{NodeName.address}}",
-          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+          example: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
           required: true,
         },
       ],
@@ -143,7 +143,7 @@ const web3Plugin: IntegrationPlugin = {
           label: "Address",
           type: "template-input",
           placeholder: "0x... or {{NodeName.address}}",
-          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+          example: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
           required: true,
         },
         {
@@ -151,6 +151,87 @@ const web3Plugin: IntegrationPlugin = {
           label: "Token",
           type: "token-select",
           networkField: "network",
+          required: true,
+        },
+      ],
+    },
+    {
+      slug: "get-spl-token-balance",
+      label: "Get SPL Token Balance",
+      description: "Get SPL token balance of any Solana address",
+      category: "Web3",
+      stepFunction: "getSplTokenBalanceStep",
+      stepImportPath: "get-spl-token-balance",
+      outputFields: [
+        {
+          field: "success",
+          description: "Whether the balance check succeeded",
+        },
+        {
+          field: "balance",
+          description: "Token balance object",
+        },
+        {
+          field: "balance.balance",
+          description: "The token balance amount (human-readable string)",
+        },
+        {
+          field: "balance.balanceRaw",
+          description: "The token balance in raw units (string)",
+        },
+        {
+          field: "balance.symbol",
+          description: "The token symbol (e.g., USDC)",
+        },
+        {
+          field: "balance.decimals",
+          description: "The token decimals",
+        },
+        {
+          field: "balance.name",
+          description: "The token name",
+        },
+        {
+          field: "balance.tokenAddress",
+          description: "The token mint address",
+        },
+        {
+          field: "address",
+          description: "The wallet address that was checked",
+        },
+        {
+          field: "addressLink",
+          description: "Explorer link to the wallet address",
+        },
+        {
+          field: "error",
+          description: "Error message if the check failed",
+        },
+      ],
+      configFields: [
+        {
+          key: "network",
+          label: "Network",
+          type: "chain-select",
+          chainTypeFilter: "solana",
+          placeholder: "Select network",
+          required: true,
+        },
+        {
+          key: "address",
+          label: "Address",
+          type: "template-input",
+          placeholder: "Solana address or {{NodeName.address}}",
+          example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+          required: true,
+        },
+        {
+          key: "tokenConfig",
+          label: "Token",
+          type: "token-select",
+          networkField: "network",
+          example:
+            '{"mode":"custom","customToken":{"address":"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","symbol":"USDC"}}',
           required: true,
         },
       ],
@@ -207,7 +288,7 @@ const web3Plugin: IntegrationPlugin = {
           label: "Recipient Address",
           type: "template-input",
           placeholder: "0x... or {{NodeName.address}}",
-          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+          example: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
           required: true,
         },
         {
@@ -322,7 +403,7 @@ const web3Plugin: IntegrationPlugin = {
           label: "Recipient Address",
           type: "template-input",
           placeholder: "0x... or {{NodeName.address}}",
-          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+          example: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
           required: true,
         },
         {
@@ -616,6 +697,284 @@ const web3Plugin: IntegrationPlugin = {
       ],
     },
     {
+      slug: "read-solana-account",
+      label: "Read Solana Account",
+      description:
+        "Read the raw account info (owner, lamports, data) for a Solana address. Read-only - no wallet or credentials required.",
+      category: "Web3",
+      stepFunction: "readSolanaAccountStep",
+      stepImportPath: "read-solana-account",
+      outputFields: [
+        {
+          field: "success",
+          description: "Whether the read succeeded",
+        },
+        {
+          field: "exists",
+          description: "Whether the account exists on-chain",
+        },
+        {
+          field: "owner",
+          description: "The base58 address of the program that owns the account",
+        },
+        {
+          field: "lamports",
+          description: "Number of lamports assigned to the account",
+        },
+        {
+          field: "executable",
+          description: "Whether the account's data contains a loaded program",
+        },
+        {
+          field: "rentEpoch",
+          description: "The account's rent epoch, if applicable",
+        },
+        {
+          field: "dataBase64",
+          description: "The account's raw data, base64-encoded",
+        },
+        {
+          field: "dataLength",
+          description: "Length of the account's raw data in bytes",
+        },
+        {
+          field: "addressLink",
+          description: "Explorer link to view the account",
+        },
+        {
+          field: "error",
+          description: "Error message if the read failed",
+        },
+      ],
+      configFields: [
+        {
+          key: "network",
+          label: "Network",
+          type: "chain-select",
+          chainTypeFilter: "solana",
+          placeholder: "Select network",
+          required: true,
+        },
+        {
+          key: "accountAddress",
+          label: "Account Address",
+          type: "template-input",
+          placeholder: "Solana address or {{NodeName.address}}",
+          example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+          required: true,
+        },
+      ],
+    },
+    {
+      slug: "read-solana-program-anchor",
+      label: "Read Solana Program (Anchor)",
+      description:
+        "Read a Solana account and decode it against an Anchor program's IDL. Read-only - no wallet or credentials required.",
+      category: "Web3",
+      stepFunction: "readSolanaProgramStep",
+      stepImportPath: "read-solana-program",
+      outputFields: [
+        {
+          field: "success",
+          description: "Whether the read succeeded",
+        },
+        {
+          field: "result",
+          description: "The decoded account fields, per the IDL's account type",
+        },
+        {
+          field: "owner",
+          description: "The base58 address of the program that owns the account",
+        },
+        {
+          field: "lamports",
+          description: "Number of lamports assigned to the account",
+        },
+        {
+          field: "addressLink",
+          description: "Explorer link to view the account",
+        },
+        {
+          field: "error",
+          description: "Error message if the read or decode failed",
+        },
+      ],
+      configFields: [
+        {
+          key: "network",
+          label: "Network",
+          type: "chain-select",
+          chainTypeFilter: "solana",
+          placeholder: "Select network",
+          required: true,
+        },
+        {
+          key: "accountAddress",
+          label: "Account Address",
+          type: "template-input",
+          placeholder: "Solana address or {{NodeName.address}}",
+          example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+          helpTip: "The data account to read and decode - not the program's own address.",
+          required: true,
+        },
+        {
+          key: "programId",
+          label: "Program ID",
+          type: "template-input",
+          placeholder: "Program address (base58) or {{NodeName.programId}}",
+          example: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          helpTip:
+            "The base58 address of the Anchor program that owns this account. Verified against the account's actual owner before decoding.",
+          required: true,
+        },
+        {
+          key: "idl",
+          label: "Anchor IDL",
+          type: "json-editor",
+          placeholder:
+            '{ "address": "...", "metadata": {...}, "instructions": [...], "accounts": [...], "types": [...] }',
+          helpTip:
+            "The program's Anchor IDL as JSON (Anchor 0.30 or newer, with per-account discriminators). Paste the published IDL. Used to decode the account's raw data.",
+          required: true,
+        },
+        {
+          key: "accountType",
+          label: "Account Type",
+          type: "template-input",
+          placeholder: "Account type name, e.g. Vault",
+          helpTip:
+            "The name of the account type to decode as, exactly as it appears in the IDL's accounts array.",
+          required: true,
+        },
+      ],
+    },
+    {
+      slug: "query-solana-program-events",
+      label: "Query Solana Program Events",
+      description:
+        "Query historical Solana program events for backfill/reconciliation, paging backward through recent signatures",
+      category: "Web3",
+      stepFunction: "querySolanaProgramEventsStep",
+      stepImportPath: "query-solana-program-events",
+      outputFields: [
+        {
+          field: "success",
+          description: "Whether the query succeeded",
+        },
+        {
+          field: "events",
+          description:
+            "Array of events found, each with signature, slot, blockTime, and either a decoded eventName/args (Anchor IDL provided) or raw log lines (no IDL)",
+        },
+        {
+          field: "oldestSignature",
+          description: "The oldest signature scanned in this query",
+        },
+        {
+          field: "newestSignature",
+          description: "The newest signature scanned in this query",
+        },
+        {
+          field: "signatureCount",
+          description: "Number of signatures scanned",
+        },
+        {
+          field: "eventCount",
+          description: "Number of events returned",
+        },
+        {
+          field: "truncated",
+          description:
+            "Whether the scan hit its page/signature cap before exhausting the window - if true, more history may exist behind nextBeforeSignature",
+        },
+        {
+          field: "nextBeforeSignature",
+          description:
+            "Pass this as beforeSignature on a follow-up call to continue paging further back",
+        },
+        {
+          field: "failedSignatureCount",
+          description:
+            "Number of signatures whose transaction could not be fetched even after retrying - their true event count is unknown and is not included in events or eventCount",
+        },
+        {
+          field: "otherEventNamesSeen",
+          description:
+            "When eventName is set, the distinct names of other decoded events that were filtered out - empty if nothing else was seen, useful for catching an eventName typo",
+        },
+        {
+          field: "error",
+          description: "Error message if the query failed",
+        },
+      ],
+      configFields: [
+        {
+          key: "network",
+          label: "Network",
+          type: "chain-select",
+          chainTypeFilter: "solana",
+          placeholder: "Select network",
+          required: true,
+        },
+        {
+          key: "programId",
+          label: "Program ID",
+          type: "template-input",
+          placeholder: "Program address (base58) or {{NodeName.programId}}",
+          example: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          required: true,
+        },
+        {
+          key: "idl",
+          label: "Anchor IDL",
+          type: "json-editor",
+          placeholder:
+            '{ "address": "...", "metadata": {...}, "instructions": [...], "events": [...] }',
+          helpTip:
+            "The program's Anchor IDL as JSON. Used to decode event args. If omitted or invalid, events are returned as raw log lines instead of decoded fields.",
+        },
+        {
+          key: "eventName",
+          label: "Event Name",
+          type: "template-input",
+          placeholder: "Event name, e.g. Transfer",
+          helpTip:
+            "Only return events with this name (as it appears in the IDL's events array). Requires a valid Anchor IDL. Leave empty to return all decoded events.",
+        },
+        {
+          type: "group",
+          label: "Pagination",
+          defaultExpanded: true,
+          fields: [
+            {
+              key: "signatureLookback",
+              label: "Signature Lookback",
+              type: "template-input",
+              placeholder: "Number of signatures to scan (default: 1000)",
+              helpTip:
+                "How many recent signatures to scan backward from beforeSignature (or the newest signature). Default: 1000. Capped at 10000 per call.",
+            },
+            {
+              key: "beforeSignature",
+              label: "Before Signature",
+              type: "template-input",
+              placeholder: "Signature to page backward from (exclusive)",
+              helpTip:
+                "Start scanning just older than this signature. Pass a previous call's nextBeforeSignature here to continue a backfill. Defaults to the newest signature.",
+            },
+            {
+              key: "untilSignature",
+              label: "Until Signature",
+              type: "template-input",
+              placeholder: "Signature to stop at (exclusive lower bound)",
+              helpTip:
+                "Stop scanning just before this signature - it is not itself included in the results. Leave empty to stop only at the Signature Lookback cap.",
+            },
+          ],
+        },
+      ],
+    },
+    {
       slug: "read-contract",
       label: "Read Contract",
       description: "Read data from a smart contract (view/pure functions)",
@@ -720,7 +1079,13 @@ const web3Plugin: IntegrationPlugin = {
         },
         {
           field: "gasLimit",
-          description: "Gas limit for the transaction",
+          description:
+            "Gas limit for the transaction (EVM only; 0 for Solana, which has no comparable ceiling)",
+        },
+        {
+          field: "computeUnitsConsumed",
+          description:
+            "Solana only: actual compute units consumed by the transaction",
         },
         {
           field: "blockNumber",
@@ -748,7 +1113,7 @@ const web3Plugin: IntegrationPlugin = {
           key: "network",
           label: "Network",
           type: "chain-select",
-          chainTypeFilter: "evm",
+          // No chainType filter: supports EVM and Solana transaction lookups.
           placeholder: "Select network",
           required: true,
         },
@@ -756,7 +1121,7 @@ const web3Plugin: IntegrationPlugin = {
           key: "transactionHash",
           label: "Transaction Hash",
           type: "template-input",
-          placeholder: "0x... or {{NodeName.transactionHash}}",
+          placeholder: "0x... / Solana signature / {{NodeName.transactionHash}}",
           example:
             "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
           required: true,
@@ -1569,7 +1934,7 @@ const web3Plugin: IntegrationPlugin = {
           label: "Owner Address",
           type: "template-input",
           placeholder: "0x... or {{NodeName.address}}",
-          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+          example: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
           required: true,
         },
         {

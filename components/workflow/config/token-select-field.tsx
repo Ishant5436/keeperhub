@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toChecksumAddress } from "@/lib/address-utils";
+import { isSolanaAddressFormat, toChecksumAddress } from "@/lib/address-utils";
 import type {
   CustomToken,
   SupportedToken,
@@ -137,10 +137,14 @@ export function TokenSelectField({
       return;
     }
 
-    // If same token already selected, just clear input
-    if (
-      currentValue.customToken?.address.toLowerCase() === trimmed.toLowerCase()
-    ) {
+    // If same token already selected, just clear input. Solana addresses are
+    // case-sensitive base58 (lowercasing can decode to a different, valid key
+    // with no error), so only EVM addresses compare case-insensitively.
+    const currentCustomAddress = currentValue.customToken?.address;
+    const alreadySelected = isSolanaAddressFormat(trimmed)
+      ? currentCustomAddress === trimmed
+      : currentCustomAddress?.toLowerCase() === trimmed.toLowerCase();
+    if (alreadySelected) {
       setCustomInputValue("");
       setValidationError(null);
       return;

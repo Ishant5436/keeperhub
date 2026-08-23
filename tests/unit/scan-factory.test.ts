@@ -4,7 +4,10 @@
  * Requirements covered: PREFILL-01..07 + HF condition coercion (SC#1)
  * Wave 0 scaffold; Wave 2 (52-03) implementation turns all tests GREEN.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
 import {
   type ValidatorWorkflow,
   validateWorkflow,

@@ -8,6 +8,8 @@ import {
   VALIDATION_ERROR_CODES,
   type ValidationErrorCode,
 } from "@/lib/mcp/validate-workflow-codes";
+import { isSolanaChain } from "@/lib/rpc/provider-factory";
+import { validateChainAddress } from "@/lib/web3/validate-chain-address";
 
 type Web3Issue = {
   code: ValidationErrorCode;
@@ -87,12 +89,56 @@ export function chainExists(
 }
 
 /**
+ * Resolves a node's `network` config to a chain ID for format-checking
+ * purposes, or null when it can't be determined statically (missing, or a
+ * template reference resolved at execution time - same skip condition
+ * chainExists above uses). A null result means the address format check
+ * below falls back to accepting either EVM or Solana shape, since the
+ * chain family that will actually validate it is unknown here.
+ */
+function resolveNodeChainId(rawNode: NodeLike): number | null {
+  const network = readStringConfig(rawNode, "network");
+  if (network === null || isWholeTemplateReference(network)) {
+    return null;
+  }
+  const parsed = Number(network);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+// validateChainAddress only branches on isSolanaChain(chainId), never on the
+// specific chain ID within a family, so any Solana chain ID stands in for
+// "check base58 shape" when a node's actual chain is unknown (see the null
+// branch of isValidAddressForNode below).
+const ANY_SOLANA_CHAIN_ID = 101;
+
+/**
+ * Format-checks an address against the chain family resolved for this node.
+ * When the chain can't be determined statically, accepts either EVM or
+ * Solana shape rather than defaulting to EVM-only and false-positiving on
+ * every Solana workflow this validator has no chain context for.
+ */
+function isValidAddressForNode(
+  address: string,
+  chainId: number | null
+): boolean {
+  if (chainId !== null) {
+    return validateChainAddress(address, chainId);
+  }
+  return (
+    ethers.isAddress(address) ||
+    validateChainAddress(address, ANY_SOLANA_CHAIN_ID)
+  );
+}
+
+/**
  * VALID-06: per-node token / contract address format.
  *
  * Walks every node config; for any string-typed `contractAddress` (and
- * any address inside `tokenConfig` JSON), validates with ethers.isAddress.
- * Empty strings and missing fields are SKIPPED (those are a different
- * validation surface — required-field checks belong to the editor).
+ * any address inside `tokenConfig` JSON), validates against the node's
+ * resolved chain family (EVM 0x-hex or Solana base58 - see
+ * lib/web3/validate-chain-address.ts). Empty strings and missing fields are
+ * SKIPPED (those are a different validation surface — required-field checks
+ * belong to the editor).
  */
 export function tokenAddressFormat(nodes: unknown): Web3Issue[] {
   const issues: Web3Issue[] = [];
@@ -100,6 +146,10 @@ export function tokenAddressFormat(nodes: unknown): Web3Issue[] {
     return issues;
   }
   for (const [idx, rawNode] of nodes.entries()) {
+    const chainId = resolveNodeChainId(rawNode as NodeLike);
+    const formatLabel =
+      chainId !== null && isSolanaChain(chainId) ? "Solana" : "EVM";
+
     const contractAddress = readStringConfig(
       rawNode as NodeLike,
       "contractAddress"
@@ -108,11 +158,11 @@ export function tokenAddressFormat(nodes: unknown): Web3Issue[] {
       contractAddress !== null &&
       contractAddress.length > 0 &&
       !isTemplateReference(contractAddress) &&
-      !ethers.isAddress(contractAddress)
+      !isValidAddressForNode(contractAddress, chainId)
     ) {
       issues.push({
         code: VALIDATION_ERROR_CODES.INVALID_TOKEN_ADDRESS,
-        message: `nodes[${idx}].config.contractAddress "${contractAddress}" is not a valid EVM address`,
+        message: `nodes[${idx}].config.contractAddress "${contractAddress}" is not a valid ${formatLabel} address`,
         parameterPath: `nodes[${idx}].config.contractAddress`,
       });
     }
@@ -134,11 +184,11 @@ export function tokenAddressFormat(nodes: unknown): Web3Issue[] {
     if (
       embeddedAddress !== null &&
       !isTemplateReference(embeddedAddress) &&
-      !ethers.isAddress(embeddedAddress)
+      !isValidAddressForNode(embeddedAddress, chainId)
     ) {
       issues.push({
         code: VALIDATION_ERROR_CODES.INVALID_TOKEN_ADDRESS,
-        message: `nodes[${idx}].config.tokenConfig.customToken.address "${embeddedAddress}" is not a valid EVM address`,
+        message: `nodes[${idx}].config.tokenConfig.customToken.address "${embeddedAddress}" is not a valid ${formatLabel} address`,
         parameterPath: `nodes[${idx}].config.tokenConfig.customToken.address`,
       });
     }

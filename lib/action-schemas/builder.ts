@@ -77,7 +77,7 @@ function mapFieldType(field: ActionConfigFieldBase): string {
     case "chain-select":
       return "string (chain ID)";
     case "token-select":
-      return 'string (JSON) - Token selection config. Use: {"mode":"custom","customToken":{"address":"0x...","symbol":"USDC"}} for a known token address';
+      return 'string (JSON) - Token selection config. Use: {"mode":"custom","customToken":{"address":"0x...","symbol":"USDC"}} for a known token address. On Solana actions the address is the base58 mint, not a 0x address';
     case "abi-function-select":
       return "string (function name from ABI)";
     case "abi-function-args":
@@ -353,7 +353,7 @@ export async function buildActionSchemasResponse(
       "web3 read actions (check-balance, read-contract) don't require wallet integration",
       "web3 write actions (transfer-funds, write-contract) require wallet integration",
       "web3/query-transactions queries historical transactions by function call using block explorer APIs. Use it when the contract does not emit events for the operations you need to monitor. Provide functionArgs as a JSON array where empty strings are wildcards.",
-      'tokenConfig must be a JSON string with format: {"mode":"custom","customToken":{"address":"0x...","symbol":"USDC"}}. Do NOT use a flat {address, symbol, decimals} object',
+      'tokenConfig must be a JSON string with format: {"mode":"custom","customToken":{"address":"0x...","symbol":"USDC"}}. On Solana actions (get-spl-token-balance, transfer-spl-token) customToken.address is the base58 mint address. Do NOT use a flat {address, symbol, decimals} object',
       "Use projectId to organize related workflows into a project (e.g., all Sky ESM workflows in one project)",
       "Use tagId to label a workflow with a single tag (e.g., 'production', 'monitoring'). Each workflow supports one tag. Fetch available tags from GET /api/tags first.",
       `Use {{@${BUILTIN_NODE_ID}:${BUILTIN_NODE_LABEL}.unixTimestamp}} for current time comparisons in conditions (e.g., checking if a contract timestamp has passed)`,

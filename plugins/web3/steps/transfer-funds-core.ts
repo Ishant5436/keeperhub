@@ -28,7 +28,7 @@ import { rpcRelayErrorClass } from "@/lib/rpc/providers";
 import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { getErrorMessage } from "@/lib/utils";
 import { generateId } from "@/lib/utils/id";
-import { PublicKey } from "@solana/web3.js";
+import { validateChainAddress } from "@/lib/web3/validate-chain-address";
 import type { SolanaTransactionSigner } from "@/lib/web3/chain-adapter/types";
 import type { NonceSession } from "@/lib/web3/nonce-manager";
 import {
@@ -552,9 +552,7 @@ async function transferFundsSolana(args: {
   }
 
   // 2. Validate recipient address (must be valid Solana base58 address)
-  try {
-    new PublicKey(recipientAddress);
-  } catch {
+  if (!validateChainAddress(recipientAddress, chainId)) {
     return {
       success: false,
       error: `Invalid Solana recipient address: ${recipientAddress}`,

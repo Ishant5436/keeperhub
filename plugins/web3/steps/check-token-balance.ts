@@ -1,17 +1,25 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import ERC20_ABI from "@/lib/contracts/abis/erc20.json";
 import { db } from "@/lib/db";
-import { supportedTokens, workflowExecutions } from "@/lib/db/schema";
+import { workflowExecutions } from "@/lib/db/schema";
 import { ErrorCategory, logUserError } from "@/lib/logging";
+import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
-import { getRpcProvider } from "@/lib/rpc/provider-factory";
+import { getRpcProvider, isSolanaChain } from "@/lib/rpc/provider-factory";
+import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
-import type { CustomToken, TokenFieldValue } from "@/lib/wallet/types";
 import { getChainAdapter } from "@/lib/web3/chain-adapter";
+import { validateChainAddress } from "@/lib/web3/validate-chain-address";
+import {
+  getTokenAddress,
+  parseTokenConfig,
+  type TokenBalanceInfo,
+  type TokenConfigSource,
+} from "./token-config-core";
 
 /**
  * Get userId from executionId by querying the workflowExecutions table
@@ -32,219 +40,21 @@ async function getUserIdFromExecution(
   return execution[0]?.userId;
 }
 
-type TokenBalance = {
-  balance: string;
-  balanceRaw: string;
-  symbol: string;
-  decimals: number;
-  name: string;
-  tokenAddress: string;
-};
-
 type CheckTokenBalanceResult =
   | {
       success: true;
-      balance: TokenBalance;
+      balance: TokenBalanceInfo;
       address: string;
       addressLink: string;
     }
   | { success: false; error: string };
 
-export type CheckTokenBalanceCoreInput = {
+export type CheckTokenBalanceCoreInput = TokenConfigSource & {
   network: string;
   address: string;
-  tokenConfig: string | Record<string, unknown>;
-  // Legacy support
-  tokenAddress?: string;
 };
 
 export type CheckTokenBalanceInput = StepInput & CheckTokenBalanceCoreInput;
-
-/**
- * Extract mode from parsed config, defaulting to "supported"
- */
-function extractMode(parsed: unknown): "supported" | "custom" {
-  if (typeof parsed !== "object" || parsed === null) {
-    return "supported";
-  }
-
-  const config = parsed as Record<string, unknown>;
-  return config.mode === "supported" || config.mode === "custom"
-    ? (config.mode as "supported" | "custom")
-    : "supported";
-}
-
-/**
- * Extract supported token ID from parsed config
- * Handles both new (single) and legacy (array) formats
- */
-function extractSupportedTokenId(parsed: unknown): string | undefined {
-  if (typeof parsed !== "object" || parsed === null) {
-    return;
-  }
-
-  const config = parsed as Record<string, unknown>;
-
-  // New format: single token ID
-  if (typeof config.supportedTokenId === "string") {
-    return config.supportedTokenId;
-  }
-
-  // Legacy format: array - use first element
-  if (
-    Array.isArray(config.supportedTokenIds) &&
-    config.supportedTokenIds.length > 0
-  ) {
-    const firstId = config.supportedTokenIds[0];
-    return typeof firstId === "string" ? firstId : undefined;
-  }
-
-  return;
-}
-
-/**
- * Extract custom token from parsed config
- * Handles both new (single) and legacy (array/string) formats
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Handles multiple legacy formats for backwards compatibility
-function extractCustomToken(parsed: unknown): CustomToken | undefined {
-  if (typeof parsed !== "object" || parsed === null) {
-    return;
-  }
-
-  const config = parsed as Record<string, unknown>;
-
-  // New format: single custom token object
-  if (
-    config.customToken &&
-    typeof config.customToken === "object" &&
-    config.customToken !== null
-  ) {
-    const token = config.customToken as Record<string, unknown>;
-    if (typeof token.address === "string" && typeof token.symbol === "string") {
-      return { address: token.address, symbol: token.symbol };
-    }
-  }
-
-  // Legacy format: array of custom tokens - use first element
-  if (Array.isArray(config.customTokens) && config.customTokens.length > 0) {
-    const firstToken = config.customTokens[0];
-    if (
-      firstToken &&
-      typeof firstToken === "object" &&
-      typeof firstToken.address === "string" &&
-      typeof firstToken.symbol === "string"
-    ) {
-      return {
-        address: firstToken.address,
-        symbol: firstToken.symbol,
-      };
-    }
-  }
-
-  // Legacy format: array of addresses - convert first address to token
-  if (
-    Array.isArray(config.customTokenAddresses) &&
-    config.customTokenAddresses.length > 0
-  ) {
-    const address = config.customTokenAddresses.find(
-      (a): a is string => typeof a === "string" && a.trim() !== ""
-    );
-    if (address) {
-      return { address, symbol: "???" };
-    }
-  }
-
-  // Legacy format: single address string
-  if (typeof config.customTokenAddress === "string") {
-    return { address: config.customTokenAddress, symbol: "???" };
-  }
-
-  return;
-}
-
-/**
- * Parse token config from input
- * Supports both new (single token) and legacy (array) formats
- */
-function parseTokenConfig(input: CheckTokenBalanceInput): TokenFieldValue {
-  // Legacy support: if tokenAddress is provided directly, use custom mode
-  if (input.tokenAddress && !input.tokenConfig) {
-    return {
-      mode: "custom",
-      customToken: { address: input.tokenAddress, symbol: "???" },
-    };
-  }
-
-  if (!input.tokenConfig) {
-    return {
-      mode: "supported",
-    };
-  }
-
-  // Object values from API/MCP-created workflows
-  if (typeof input.tokenConfig === "object") {
-    return {
-      mode: extractMode(input.tokenConfig),
-      supportedTokenId: extractSupportedTokenId(input.tokenConfig),
-      customToken: extractCustomToken(input.tokenConfig),
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(input.tokenConfig);
-
-    return {
-      mode: extractMode(parsed),
-      supportedTokenId: extractSupportedTokenId(parsed),
-      customToken: extractCustomToken(parsed),
-    };
-  } catch {
-    // If parsing fails and it looks like an address, treat as custom
-    if (input.tokenConfig.startsWith("0x")) {
-      return {
-        mode: "custom",
-        customToken: { address: input.tokenConfig, symbol: "???" },
-      };
-    }
-    return {
-      mode: "supported",
-    };
-  }
-}
-
-/**
- * Get token address to check based on config
- * Returns a single token address (either supported or custom)
- */
-async function getTokenAddress(
-  config: TokenFieldValue,
-  chainId: number
-): Promise<string | null> {
-  // Get supported token address from database
-  if (config.supportedTokenId) {
-    const tokens = await db
-      .select({ tokenAddress: supportedTokens.tokenAddress })
-      .from(supportedTokens)
-      .where(
-        and(
-          eq(supportedTokens.chainId, chainId),
-          eq(supportedTokens.id, config.supportedTokenId)
-        )
-      )
-      .limit(1);
-    if (tokens[0]?.tokenAddress) {
-      return tokens[0].tokenAddress;
-    }
-  }
-
-  // Get custom token address
-  if (config.customToken?.address) {
-    return config.customToken.address;
-  }
-
-  return null;
-}
 
 /**
  * Fetch a string metadata field from a token contract, handling non-standard
@@ -281,7 +91,7 @@ async function fetchTokenBalance(
   provider: ethers.JsonRpcProvider,
   walletAddress: string,
   tokenAddress: string
-): Promise<TokenBalance> {
+): Promise<TokenBalanceInfo> {
   const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
 
   const [balanceRaw, decimals, symbol, name] = await Promise.all([
@@ -302,6 +112,63 @@ async function fetchTokenBalance(
     name,
     tokenAddress: tokenAddress.toLowerCase(),
   };
+}
+
+/**
+ * Resolve an RPC provider and read the ERC20 balance/metadata.
+ */
+async function checkEvmTokenBalance(
+  address: string,
+  tokenAddress: string,
+  chainId: number,
+  userId: string | undefined
+): Promise<CheckTokenBalanceResult> {
+  let rpcManager: RpcProviderManager;
+  try {
+    rpcManager = await getRpcProvider({ chainId, userId });
+  } catch (error) {
+    logUserError(
+      ErrorCategory.VALIDATION,
+      "[Check Token Balance] Failed to resolve RPC config:",
+      error,
+      {
+        plugin_name: "web3",
+        action_name: "check-token-balance",
+        chain_id: String(chainId),
+      }
+    );
+    return {
+      success: false,
+      error: getErrorMessage(error),
+    };
+  }
+
+  const adapter = getChainAdapter(chainId);
+
+  try {
+    const balance = await adapter.executeWithFailover(
+      rpcManager,
+      async (provider) => fetchTokenBalance(provider, address, tokenAddress)
+    );
+    const addressLink = await adapter.getAddressUrl(address);
+
+    return { success: true, balance, address, addressLink };
+  } catch (error) {
+    logUserError(
+      ErrorCategory.NETWORK_RPC,
+      "[Check Token Balance] Failed to check token balance:",
+      error,
+      {
+        plugin_name: "web3",
+        action_name: "check-token-balance",
+        chain_id: String(chainId),
+      }
+    );
+    return {
+      success: false,
+      error: `Failed to check token balance: ${getErrorMessage(error)}`,
+    };
+  }
 }
 
 /**
@@ -329,24 +196,6 @@ async function stepHandler(
     );
   }
 
-  // Validate wallet address
-  if (!ethers.isAddress(address)) {
-    logUserError(
-      ErrorCategory.VALIDATION,
-      "[Check Token Balance] Invalid wallet address:",
-      address,
-      {
-        plugin_name: "web3",
-        action_name: "check-token-balance",
-      }
-    );
-    return {
-      success: false,
-      error: `Invalid wallet address: ${address}`,
-    };
-  }
-
-  // Get chain ID from network name
   let chainId: number;
   try {
     chainId = getChainIdFromNetwork(network);
@@ -367,6 +216,31 @@ async function stepHandler(
     };
   }
 
+  if (isSolanaChain(chainId)) {
+    return {
+      success: false,
+      error:
+        "Solana chains are not supported by this action. Use the Get SPL Token Balance action for SPL tokens.",
+    };
+  }
+
+  // Validate wallet address
+  if (!validateChainAddress(address, chainId)) {
+    logUserError(
+      ErrorCategory.VALIDATION,
+      "[Check Token Balance] Invalid wallet address:",
+      address,
+      {
+        plugin_name: "web3",
+        action_name: "check-token-balance",
+      }
+    );
+    return {
+      success: false,
+      error: `Invalid wallet address: ${address}`,
+    };
+  }
+
   // Get token address to check
   const tokenAddress = await getTokenAddress(tokenConfig, chainId);
 
@@ -383,7 +257,7 @@ async function stepHandler(
   );
 
   // Validate token address
-  if (!ethers.isAddress(tokenAddress)) {
+  if (!validateChainAddress(tokenAddress, chainId)) {
     logUserError(
       ErrorCategory.VALIDATION,
       "[Check Token Balance] Invalid token address:",
@@ -399,60 +273,7 @@ async function stepHandler(
     };
   }
 
-  // Resolve RPC provider with failover support
-  let rpcManager: Awaited<ReturnType<typeof getRpcProvider>>;
-  try {
-    rpcManager = await getRpcProvider({ chainId, userId });
-  } catch (error) {
-    logUserError(
-      ErrorCategory.VALIDATION,
-      "[Check Token Balance] Failed to resolve RPC config:",
-      error,
-      {
-        plugin_name: "web3",
-        action_name: "check-token-balance",
-        chain_id: String(chainId),
-      }
-    );
-    return {
-      success: false,
-      error: getErrorMessage(error),
-    };
-  }
-
-  const adapter = getChainAdapter(chainId);
-
-  // Check balance for the token
-  try {
-    const balance = await adapter.executeWithFailover(
-      rpcManager,
-      async (provider) => fetchTokenBalance(provider, address, tokenAddress)
-    );
-
-    const addressLink = await adapter.getAddressUrl(address);
-
-    return {
-      success: true,
-      balance,
-      address,
-      addressLink,
-    };
-  } catch (error) {
-    logUserError(
-      ErrorCategory.NETWORK_RPC,
-      "[Check Token Balance] Failed to check token balance:",
-      error,
-      {
-        plugin_name: "web3",
-        action_name: "check-token-balance",
-        chain_id: String(chainId),
-      }
-    );
-    return {
-      success: false,
-      error: `Failed to check token balance: ${getErrorMessage(error)}`,
-    };
-  }
+  return checkEvmTokenBalance(address, tokenAddress, chainId, userId);
 }
 
 /**
@@ -465,7 +286,14 @@ export async function checkTokenBalanceStep(
 ): Promise<CheckTokenBalanceResult> {
   "use step";
 
-  return withStepLogging(input, () => stepHandler(input));
+  return withPluginMetrics(
+    {
+      pluginName: "web3",
+      actionName: "check-token-balance",
+      executionId: input._context?.executionId,
+    },
+    () => withStepLogging(input, () => stepHandler(input))
+  );
 }
 
 checkTokenBalanceStep.maxRetries = 0;

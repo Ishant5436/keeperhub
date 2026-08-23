@@ -8,6 +8,20 @@
 
 import { ethers } from "ethers";
 
+// Solana base58 addresses are 32-44 chars. Client-safe (no @solana/web3.js
+// import) - excludes 0/O/I/l so it never collides with 0x-prefixed EVM hex.
+// Format check only; full validation (32-byte decode) happens server-side
+// via lib/web3/validate-chain-address.ts.
+const SOLANA_BASE58_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * True when the value is shaped like a Solana base58 address. Does not
+ * decode or validate the key - see the pattern comment above.
+ */
+export function isSolanaAddressFormat(address: string): boolean {
+  return SOLANA_BASE58_ADDRESS_PATTERN.test(address);
+}
+
 /**
  * Returns the EIP-55 checksummed form of an EVM address.
  * If the address is invalid or corrupt, returns it unchanged so UI never crashes.

@@ -12,7 +12,8 @@ Interact with EVM-compatible blockchain networks and Solana. Read-only actions w
 | Action | Category | Credentials | Description |
 |--------|----------|-------------|-------------|
 | Get Native Token Balance | Web3 | No | Check ETH/MATIC/etc. balance of any address |
-| Get ERC20 Token Balance | Web3 | No | Check token balance of any address |
+| Get ERC20 Token Balance | Web3 | No | Check ERC20 token balance of any address |
+| Get SPL Token Balance | Web3 | No | Check SPL token balance of any Solana address |
 | Read Contract | Web3 | No | Call view/pure functions on smart contracts |
 | Batch Read Contract | Web3 | No | Batch multiple contract reads into one RPC call via Multicall3 |
 | Get Transaction | Web3 | No | Fetch full transaction details by hash |
@@ -53,13 +54,25 @@ Schedule (every hour)
 
 ## Get ERC20 Token Balance
 
-Check the balance of any ERC20 token for a given address.
+Check the balance of any ERC20 token for a given address on EVM chains. For SPL tokens on Solana, use Get SPL Token Balance.
 
 **Inputs:** Network, Address, Token (select from supported tokens or enter custom contract)
 
 **Outputs:** `success`, `balance.balance`, `balance.symbol`, `balance.decimals`, `balance.name`, `address`, `error`
 
 **When to use:** Track token holdings, monitor protocol positions, alert on balance changes.
+
+---
+
+## Get SPL Token Balance
+
+Check the balance of any SPL token for a given Solana address. Supports Token-2022 mints and program-owned (off-curve) wallet addresses. A wallet with no associated token account for the mint reports a zero balance. Token symbol and name resolve from the mint's on-chain metadata when the token is not in the supported list.
+
+**Inputs:** Network (Solana), Address, Token (select from supported tokens or enter a mint address)
+
+**Outputs:** `success`, `balance.balance`, `balance.symbol`, `balance.decimals`, `balance.name`, `address`, `error`
+
+**When to use:** Track SPL token holdings, monitor treasury balances on Solana, alert on balance changes.
 
 ---
 

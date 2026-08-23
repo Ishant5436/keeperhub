@@ -2,7 +2,9 @@
 // (token / contract address format). All tests must FAIL before
 // validate-workflow-web3.ts is created.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
 
 import {
   type ValidatorWorkflow,
@@ -338,6 +340,56 @@ describe("validateWorkflow — invalid-token-address (VALID-06)", () => {
     const result = validateWorkflow(wf);
     const err = result.errors.find((e) => e.code === "invalid-token-address");
     expect(err).toBeUndefined();
+  });
+
+  it("passes for a valid Solana base58 contractAddress on a Solana network", () => {
+    const wf = makeWorkflow({
+      nodes: [
+        triggerNode(),
+        actionNode("a1", {
+          network: "101",
+          contractAddress: "4zYdhhTJJKbYJ3Yqa2WGpBi25V1JcZVVBQWYKAY9tegL",
+        }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    const result = validateWorkflow(wf);
+    const err = result.errors.find((e) => e.code === "invalid-token-address");
+    expect(err).toBeUndefined();
+  });
+
+  it("errors for an EVM contractAddress on a Solana network, naming the Solana format", () => {
+    const wf = makeWorkflow({
+      nodes: [
+        triggerNode(),
+        actionNode("a1", {
+          network: "101",
+          contractAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+        }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    const result = validateWorkflow(wf);
+    const err = result.errors.find((e) => e.code === "invalid-token-address");
+    expect(err).toBeDefined();
+    expect(err?.message).toContain("not a valid Solana address");
+  });
+
+  it("errors for a Solana contractAddress on an EVM network, naming the EVM format", () => {
+    const wf = makeWorkflow({
+      nodes: [
+        triggerNode(),
+        actionNode("a1", {
+          network: "1",
+          contractAddress: "4zYdhhTJJKbYJ3Yqa2WGpBi25V1JcZVVBQWYKAY9tegL",
+        }),
+      ],
+      edges: [edge("e1", "trigger-1", "a1")],
+    });
+    const result = validateWorkflow(wf);
+    const err = result.errors.find((e) => e.code === "invalid-token-address");
+    expect(err).toBeDefined();
+    expect(err?.message).toContain("not a valid EVM address");
   });
 
   it("errors for an invalid address embedded in tokenConfig JSON (custom mode)", () => {

@@ -15,6 +15,7 @@ import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { serializeArg } from "@/lib/web3/serialize-arg";
+import { evmOnlyGuard } from "@/lib/web3/validate-chain-address";
 import { getErrorMessage } from "@/lib/utils";
 
 const DEFAULT_BLOCK_LOOKBACK = 6500;
@@ -356,6 +357,22 @@ function validateInputs(
 ): { success: true; data: ValidatedInput } | { success: false; error: string } {
   const { contractAddress, abi, abiFunction } = input;
 
+  // Resolve the chain first so the address check and the Solana guard below
+  // can branch on the chain family.
+  let chainId: number;
+  try {
+    chainId = getChainIdFromNetwork(input.network);
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
+  }
+
+  // Transaction querying decodes calls via an EVM ABI function selector,
+  // which has no Solana equivalent - not yet supported.
+  const evmOnlyResult = evmOnlyGuard(chainId);
+  if (evmOnlyResult) {
+    return evmOnlyResult;
+  }
+
   if (!ethers.isAddress(contractAddress)) {
     return {
       success: false,
@@ -375,13 +392,6 @@ function validateInputs(
       success: false,
       error: `Function '${abiFunction}' not found in ABI`,
     };
-  }
-
-  let chainId: number;
-  try {
-    chainId = getChainIdFromNetwork(input.network);
-  } catch (error) {
-    return { success: false, error: getErrorMessage(error) };
   }
 
   return {

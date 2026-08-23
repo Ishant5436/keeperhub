@@ -11,6 +11,7 @@ import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
+import { evmOnlyGuard } from "@/lib/web3/validate-chain-address";
 import {
   type AbiEntry,
   isNearHeadBatch,
@@ -293,6 +294,22 @@ async function stepHandler(
 
   const { contractAddress, network, abi, eventName, _context } = input;
 
+  // Resolve the chain first so the address check and the Solana guard below
+  // can branch on the chain family.
+  let chainId: number;
+  try {
+    chainId = getChainIdFromNetwork(network);
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
+  }
+
+  // Event querying decodes EVM ABI logs, which have no Solana equivalent
+  // (Solana program logs are untyped and unindexed) - not yet supported.
+  const evmOnlyResult = evmOnlyGuard(chainId);
+  if (evmOnlyResult) {
+    return evmOnlyResult;
+  }
+
   if (!ethers.isAddress(contractAddress)) {
     return {
       success: false,
@@ -310,13 +327,6 @@ async function stepHandler(
   );
   if (!eventAbiEntry) {
     return { success: false, error: `Event '${eventName}' not found in ABI` };
-  }
-
-  let chainId: number;
-  try {
-    chainId = getChainIdFromNetwork(network);
-  } catch (error) {
-    return { success: false, error: getErrorMessage(error) };
   }
 
   const userId = await getUserIdFromExecution(_context?.executionId);

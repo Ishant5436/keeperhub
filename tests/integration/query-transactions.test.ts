@@ -147,6 +147,7 @@ vi.mock("@/lib/rpc/network-utils", () => ({
 // ---------------------------------------------------------------------------
 vi.mock("@/lib/rpc/provider-factory", () => ({
   getRpcProvider: mockGetRpcProvider,
+  isSolanaChain: (chainId: number) => chainId === 101 || chainId === 103,
 }));
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 import "server-only";
 
-import { PublicKey } from "@solana/web3.js";
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "@/lib/db";
@@ -14,6 +13,7 @@ import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import { getChainAdapter } from "@/lib/web3/chain-adapter";
+import { validateChainAddress } from "@/lib/web3/validate-chain-address";
 
 /**
  * Get userId from executionId by querying the workflowExecutions table
@@ -99,35 +99,20 @@ async function stepHandler(
   const isSolana = isSolanaChain(chainId);
 
   // Validate the address for the chain family.
-  if (isSolana) {
-    try {
-      // Throws on non-base58 / wrong-length input.
-      new PublicKey(address);
-    } catch {
-      logUserError(
-        ErrorCategory.VALIDATION,
-        "[Check Balance] Invalid Solana address:",
-        address,
-        { plugin_name: "web3", action_name: "check-balance" }
-      );
-      return {
-        success: false,
-        error: `Invalid Solana address: ${address}`,
-      };
-    }
-  } else if (!ethers.isAddress(address)) {
+  if (!validateChainAddress(address, chainId)) {
     logUserError(
       ErrorCategory.VALIDATION,
-      "[Check Balance] Invalid address:",
+      isSolana
+        ? "[Check Balance] Invalid Solana address:"
+        : "[Check Balance] Invalid address:",
       address,
-      {
-        plugin_name: "web3",
-        action_name: "check-balance",
-      }
+      { plugin_name: "web3", action_name: "check-balance" }
     );
     return {
       success: false,
-      error: `Invalid Ethereum address: ${address}`,
+      error: isSolana
+        ? `Invalid Solana address: ${address}`
+        : `Invalid Ethereum address: ${address}`,
     };
   }
 
