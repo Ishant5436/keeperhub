@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
@@ -6,6 +6,7 @@ import { workflowExecutionLogs } from "@/lib/db/schema";
 import { redactAllUrls, redactSecretUrls } from "@/lib/rpc/scrub-rpc-urls";
 import { redactSensitiveData } from "@/lib/utils/redact";
 import { resolveAuthorizedExecution } from "@/lib/workflow/execution-access";
+import { executionLogNotDeleted } from "@/lib/workflow/soft-delete";
 
 type TruncatedMarker = {
   _truncated: true;
@@ -76,7 +77,10 @@ export async function GET(
     };
 
     const logs = await db.query.workflowExecutionLogs.findMany({
-      where: eq(workflowExecutionLogs.executionId, executionId),
+      where: and(
+        eq(workflowExecutionLogs.executionId, executionId),
+        executionLogNotDeleted()
+      ),
       orderBy: [desc(workflowExecutionLogs.timestamp)],
     });
 

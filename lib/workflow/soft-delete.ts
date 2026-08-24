@@ -1,5 +1,5 @@
 import { isNull, type SQL } from "drizzle-orm";
-import { workflows } from "@/lib/db/schema";
+import { workflowExecutionLogs, workflows } from "@/lib/db/schema";
 
 /**
  * KEEP-440: Drizzle predicate that excludes soft-deleted workflow rows.
@@ -37,6 +37,29 @@ export function softDeleteValues(): {
     isListed: false,
     shareExecutionStatus: false,
   };
+}
+
+/**
+ * Drizzle predicate that excludes soft-deleted step logs.
+ *
+ * Step logs are soft-deleted instead of erased because they carry the per-step
+ * network and gas the analytics breakdown aggregates. Compose this into the
+ * WHERE of any read that shows a user their own steps. Aggregate readers
+ * deliberately omit it and count every row, the same way the billing quota
+ * counters already treat soft-deleted runs, and so does the executor resume
+ * path, which must still read `output_raw` for a run purged mid-flight.
+ */
+export function executionLogNotDeleted(): SQL {
+  return isNull(workflowExecutionLogs.deletedAt);
+}
+
+/**
+ * The column write that retires a step log. Takes the timestamp so every row
+ * in one purge shares a single instant, which is what makes a purge
+ * identifiable after the fact.
+ */
+export function executionLogSoftDeleteValues(at: Date): { deletedAt: Date } {
+  return { deletedAt: at };
 }
 
 /**

@@ -8,7 +8,8 @@ import { workflowExecutions, workflows } from "@/lib/db/schema";
  * Get organizationId from executionId
  *
  * Workflow executions are scoped to organizations, not individual users.
- * This helper joins workflow_executions → workflows to get the organizationId.
+ * Reads the run's own `organization_id`, written at insert, and falls back to
+ * the workflow join for rows that predate the column.
  *
  * @param executionId - Execution ID (passed via _context in workflow steps)
  * @returns organizationId - Organization that owns the workflow
@@ -21,11 +22,10 @@ export async function getOrganizationIdFromExecution(
     throw new Error("Execution ID is required to get organization ID");
   }
 
-  // Join workflow_executions with workflows to get organizationId
   const result = await db
     .select({
-      organizationId: workflows.organizationId,
-      workflowId: workflowExecutions.workflowId,
+      executionOrganizationId: workflowExecutions.organizationId,
+      workflowOrganizationId: workflows.organizationId,
     })
     .from(workflowExecutions)
     .innerJoin(workflows, eq(workflowExecutions.workflowId, workflows.id))
@@ -36,7 +36,8 @@ export async function getOrganizationIdFromExecution(
     throw new Error(`Execution not found: ${executionId}`);
   }
 
-  const { organizationId } = result[0];
+  const { executionOrganizationId, workflowOrganizationId } = result[0];
+  const organizationId = executionOrganizationId ?? workflowOrganizationId;
 
   if (!organizationId) {
     throw new Error(

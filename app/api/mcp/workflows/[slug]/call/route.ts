@@ -161,6 +161,7 @@ async function prepareExecution(
         .insert(workflowExecutions)
         .values({
           workflowId: workflow.id,
+          organizationId: workflow.organizationId,
           userId: workflow.userId,
           status: "running",
           input: body,

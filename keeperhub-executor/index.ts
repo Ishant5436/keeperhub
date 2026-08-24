@@ -481,6 +481,7 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
           db.insert(workflowExecutions).values({
             id: blockedExecutionId,
             workflowId,
+            organizationId: workflow.organizationId,
             userId: blockedUserId,
             status: "skipped",
             billable: false,
@@ -648,6 +649,7 @@ async function processExecutorMessage(message: ExecutorMessage): Promise<void> {
       db.insert(workflowExecutions).values({
         id: executionId,
         workflowId,
+        organizationId: workflow.organizationId,
         userId,
         status: "pending",
         input: serializedInput,

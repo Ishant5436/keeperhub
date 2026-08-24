@@ -25,12 +25,15 @@ vi.mock("@/lib/db/schema", () => ({
   workflowExecutionLogs: {
     executionId: "executionId",
     timestamp: "timestamp",
+    deletedAt: "deletedAt",
   },
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
   desc: () => ({}),
+  and: () => ({}),
+  isNull: () => ({}),
 }));
 
 vi.mock("@/lib/middleware/auth-helpers", () => ({

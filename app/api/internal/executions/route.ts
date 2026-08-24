@@ -62,6 +62,7 @@ function resolveTriggerSource(value: unknown): TriggerSource {
 async function recordRefusedDispatch(params: {
   request: Request;
   workflowId: string;
+  organizationId: string;
   userId: string;
   source: TriggerSource;
   refusal: DispatchRefusal;
@@ -75,6 +76,7 @@ async function recordRefusedDispatch(params: {
       .insert(workflowExecutions)
       .values({
         workflowId: params.workflowId,
+        organizationId: params.organizationId,
         userId: params.userId,
         // Refused before it started, so it is neither a failure nor billable.
         // Matches what the executor writes when it refuses the same run.
@@ -180,6 +182,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       await recordRefusedDispatch({
         request,
         workflowId,
+        organizationId: workflow.organizationId,
         userId: ownerId,
         source,
         refusal,
@@ -213,6 +216,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         .insert(workflowExecutions)
         .values({
           workflowId,
+          organizationId: workflow.organizationId,
           userId: ownerId,
           status: isPhantom ? "phantom" : "running",
           // KEEP-693: a phantom has not run yet, so it must not count toward the

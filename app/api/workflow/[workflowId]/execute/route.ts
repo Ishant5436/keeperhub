@@ -266,6 +266,7 @@ export async function POST(
             db.insert(workflowExecutions).values({
               id: executionId,
               workflowId,
+              organizationId: workflow.organizationId,
               userId,
               status: "pending",
               input,
@@ -285,6 +286,7 @@ export async function POST(
             .insert(workflowExecutions)
             .values({
               workflowId,
+              organizationId: workflow.organizationId,
               userId,
               status: "pending",
               input,

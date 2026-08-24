@@ -401,6 +401,7 @@ export async function POST(
           .insert(workflowExecutions)
           .values({
             workflowId,
+            organizationId: workflow.organizationId,
             userId: workflow.userId,
             status: "pending",
             input: body,

@@ -1030,6 +1030,13 @@
       "when": 1786974522606,
       "tag": "0146_keep_1175_execution_quota_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1787253008362,
+      "tag": "0147_keep_1199_soft_delete_execution_logs",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   gte,
   inArray,
   isNotNull,
+  isNull,
   lt,
   type SQL,
   sql,
@@ -31,6 +32,7 @@ import {
   sumOrgValueTodayWei,
 } from "@/lib/execute/value-ledger";
 import { redactAllUrls, redactSecretUrls } from "@/lib/rpc/scrub-rpc-urls";
+import { executionLogNotDeleted } from "@/lib/workflow/soft-delete";
 import { analyticsCacheKey, cachedAnalytics } from "./cache";
 import {
   getBucketInterval,
@@ -979,6 +981,9 @@ async function fetchWorkflowRuns(
     sql`${workflowExecutions.workflowId} IN (${orgWorkflowIds})`,
     gte(workflowExecutions.startedAt, rangeStart),
     lt(workflowExecutions.startedAt, rangeEnd),
+    // A purged run leaves the listing. Its gas stays in the summary tiles and
+    // the network breakdown, which count every row on purpose.
+    isNull(workflowExecutions.deletedAt),
   ];
 
   if (status) {
@@ -1221,6 +1226,9 @@ async function getWorkflowRunsTotal(
     eq(workflows.organizationId, organizationId),
     gte(workflowExecutions.startedAt, rangeStart),
     lt(workflowExecutions.startedAt, rangeEnd),
+    // Must match fetchWorkflowRuns: a total that counts rows the listing drops
+    // leaves the last page short and the cursor pointing at nothing.
+    isNull(workflowExecutions.deletedAt),
   ];
   if (projectId) {
     conditions.push(eq(workflows.projectId, projectId));
@@ -1351,7 +1359,10 @@ export async function getStepLogs(
     .where(
       and(
         eq(workflowExecutionLogs.executionId, executionId),
-        eq(workflows.organizationId, organizationId)
+        eq(workflows.organizationId, organizationId),
+        // Purged steps stay in the table for the gas aggregates, but this is
+        // the run detail a user reads, so it shows what they kept.
+        executionLogNotDeleted()
       )
     )
     .orderBy(workflowExecutionLogs.startedAt);

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { ErrorCategory, logSystemError, logSystemWarn } from "@/lib/logging";
@@ -33,7 +33,11 @@ import { getWorkflowAccess } from "@/lib/workflow/access";
 import { hashWorkflowDefinition } from "@/lib/workflow/content-hash";
 import { recordWorkflowSnapshot } from "@/lib/workflow/history";
 import { sanitizeWorkflowData } from "@/lib/workflow/editor/sanitize-nodes";
-import { softDeleteValues } from "@/lib/workflow/soft-delete";
+import {
+  executionLogNotDeleted,
+  executionLogSoftDeleteValues,
+  softDeleteValues,
+} from "@/lib/workflow/soft-delete";
 import { isReservedSlug } from "@/lib/workflow/reserved-slugs";
 import {
   formatActionConfigValidationResponse,
@@ -962,35 +966,49 @@ export async function DELETE(
 
     // KEEP-440: soft-delete the workflow row instead of hard-deleting it. The
     // surviving row keeps its listedSlug bound in idx_workflows_listed_slug, so
-    // the slug can never be re-claimed by another workflow. On force, the bulky
-    // per-step logs are hard-deleted to reclaim storage but the execution runs
-    // are soft-deleted (deleted_at) so usage counters, which count every row,
-    // stay accurate; schedules are removed explicitly -- the ON DELETE CASCADE
-    // that used to clean them up no longer fires now that the row is not
-    // actually deleted.
+    // the slug can never be re-claimed by another workflow. On force, the runs
+    // and their per-step logs are soft-deleted (deleted_at) so usage counters
+    // and the analytics gas history, which both count every row, stay whole;
+    // schedules are removed explicitly -- the ON DELETE CASCADE that used to
+    // clean them up no longer fires now that the row is not actually deleted.
     const softDelete = softDeleteValues();
 
     if (hasExecutions && force) {
       const { workflowExecutionLogs } = await import("@/lib/db/schema");
-      const { inArray } = await import("drizzle-orm");
 
       await db.transaction(async (tx) => {
+        // Only the runs not already purged, so a second pass cannot restamp
+        // a run to a later instant than the logs it was purged with.
         const executions = await tx.query.workflowExecutions.findMany({
-          where: eq(workflowExecutions.workflowId, workflowId),
+          where: and(
+            eq(workflowExecutions.workflowId, workflowId),
+            isNull(workflowExecutions.deletedAt)
+          ),
           columns: { id: true },
         });
 
         const executionIds = executions.map((e) => e.id);
 
         if (executionIds.length > 0) {
-          await tx
-            .delete(workflowExecutionLogs)
-            .where(inArray(workflowExecutionLogs.executionId, executionIds));
+          const purgedAt = new Date();
 
           await tx
+            .update(workflowExecutionLogs)
+            .set(executionLogSoftDeleteValues(purgedAt))
+            .where(
+              and(
+                inArray(workflowExecutionLogs.executionId, executionIds),
+                executionLogNotDeleted()
+              )
+            );
+
+          // Same set the logs update used. Re-reading by workflow_id here would
+          // catch a run that committed after the snapshot and mark it deleted
+          // while its logs stay visible, with nothing left to stamp them.
+          await tx
             .update(workflowExecutions)
-            .set({ deletedAt: new Date() })
-            .where(eq(workflowExecutions.workflowId, workflowId));
+            .set({ deletedAt: purgedAt })
+            .where(inArray(workflowExecutions.id, executionIds));
         }
 
         await tx

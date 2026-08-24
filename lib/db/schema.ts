@@ -672,6 +672,19 @@ export const workflowExecutions = pgTable(
     workflowId: text("workflow_id")
       .notNull()
       .references(() => workflows.id),
+    /**
+     * Owning organisation, denormalised off `workflows.organization_id` at
+     * insert. Every org-scoped read used to reach the org only by joining
+     * `workflows`, so the run's billing and analytics attribution lived in a
+     * row the run does not control. This column holds the attribution on the
+     * run itself, so quota counts and gas history survive whatever happens to
+     * the workflow.
+     *
+     * Nullable on rows written before the column existed, until
+     * scripts/backfill-execution-organization-id.ts has run. Read it through
+     * getOrganizationIdFromExecution, which falls back to the join.
+     */
+    organizationId: text("organization_id").references(() => organization.id),
     // Audit lineage only (the workflow's createdBy, or the triggering user
     // where one exists). Execution AUTHORITY - quotas, billing, credentials -
     // is the owning org: resolve it via getOrganizationIdFromExecution.
@@ -813,6 +826,9 @@ export const workflowExecutions = pgTable(
   (table) => [
     index("idx_workflow_executions_status").on(table.status),
     index("idx_workflow_executions_user_id").on(table.userId),
+    // Backs the FK to organization: without it the RI check on an organization
+    // delete or key change scans this table, the largest one, under lock.
+    index("idx_workflow_executions_organization_id").on(table.organizationId),
     // Resolve "which runs executed this snapshot" / join to workflow_history.
     index("idx_workflow_executions_executed_hash").on(
       table.executedWorkflowHash
@@ -865,6 +881,18 @@ export const workflowExecutionLogs = pgTable(
      */
     network: text("network"),
     gasUsedWei: numeric("gas_used_wei"),
+    /**
+     * Set when a user purges run history or force-deletes a workflow. These
+     * rows carry the per-step network and gas that the analytics gas
+     * breakdown aggregates, so erasing them tore a hole in historical spend
+     * that no query could explain. Soft-deleting keeps the history whole and
+     * hides the steps from the run detail views.
+     *
+     * Aggregate readers count every row, matching how the billing quota
+     * counters already treat soft-deleted runs. Only the views that show a
+     * user their own steps filter on it.
+     */
+    deletedAt: timestamp("deleted_at"),
   },
   (table) => [index("idx_exec_logs_started_at").on(table.startedAt)]
 );
