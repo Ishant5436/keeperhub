@@ -3,6 +3,7 @@ import "server-only";
 import { ethers } from "ethers";
 import AAVE_V3_POOL_ABI from "@/lib/scan/abis/aave-v3-pool.json";
 import { AAVE_V3_POOLS } from "@/lib/scan/adapters/protocol-registry";
+import { decodeUint256 } from "@/lib/scan/decode-uint256";
 import type {
   AdapterCallDescriptor,
   MulticallResult,
@@ -139,19 +140,10 @@ export function decodeAaveV3Results(
 
   // Decode eMode category (0 = no eMode). Soft-miss: default to 0 on failure.
   let emodeCategory = 0;
-  if (
-    eModeResult?.success &&
-    eModeResult.returnData &&
-    eModeResult.returnData !== "0x"
-  ) {
-    try {
-      const [eMode] = ethers.AbiCoder.defaultAbiCoder().decode(
-        ["uint256"],
-        eModeResult.returnData
-      );
-      emodeCategory = Number(eMode as bigint);
-    } catch {
-      emodeCategory = 0;
+  if (eModeResult?.success) {
+    const eMode = decodeUint256(eModeResult.returnData);
+    if (eMode !== null) {
+      emodeCategory = Number(eMode);
     }
   }
 

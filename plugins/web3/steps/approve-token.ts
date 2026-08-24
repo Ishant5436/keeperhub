@@ -1,10 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { explorerConfigs } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
-import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import type {
   ApproveTokenCoreInput,
@@ -28,25 +24,12 @@ export async function approveTokenStep(
 ): Promise<ApproveTokenResult> {
   "use step";
 
-  let enrichedInput: ApproveTokenInput & { spenderAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const spenderAddressLink = getAddressUrl(
-        explorerConfig,
-        input.spenderAddress
-      );
-      if (spenderAddressLink) {
-        enrichedInput = { ...input, spenderAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const spenderAddressLink = await resolveExplorerLink(
+    input.network,
+    input.spenderAddress
+  );
+  const enrichedInput: ApproveTokenInput & { spenderAddressLink?: string } =
+    spenderAddressLink ? { ...input, spenderAddressLink } : input;
 
   return withStepLogging(enrichedInput, () => approveTokenCore(input));
 }

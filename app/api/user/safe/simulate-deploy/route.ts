@@ -21,6 +21,19 @@ import {
 } from "@/lib/safe/roles-orchestrator";
 import type { DroppedInput } from "@/lib/safe/route-input";
 import { buildFailoverRpcManager } from "@/lib/safe/rpc";
+import {
+  type DirectRuleBody,
+  GAS_ASSIGN_ROLES,
+  GAS_DEPLOY_MODULE,
+  GAS_ENABLE_MODULE,
+  GAS_OUTER_WRAPPER,
+  GAS_SCOPE_FUNCTION,
+  GAS_SCOPE_TARGET,
+  GAS_SET_ALLOWANCE,
+  GAS_SET_DEFAULT_ROLE,
+  type OperationSummary,
+  type TokenLimitBody,
+} from "../_lib/role-body";
 
 /**
  * Pre-deploy simulation: tells the wizard what will land on chain when the
@@ -32,33 +45,7 @@ import { buildFailoverRpcManager } from "@/lib/safe/rpc";
  */
 
 const GAS_DEPLOY_SAFE = BigInt(300_000);
-const GAS_DEPLOY_MODULE = BigInt(350_000);
-const GAS_ENABLE_MODULE = BigInt(55_000);
-const GAS_ASSIGN_ROLES = BigInt(80_000);
-const GAS_SET_DEFAULT_ROLE = BigInt(45_000);
-const GAS_SCOPE_TARGET = BigInt(60_000);
-const GAS_SCOPE_FUNCTION = BigInt(70_000);
-const GAS_SET_ALLOWANCE = BigInt(75_000);
-const GAS_OUTER_WRAPPER = BigInt(50_000);
 const DEFAULT_GAS_PRICE_WEI = BigInt(25_000_000_000);
-
-type TokenLimitBody = {
-  tokenAddress?: string;
-  tokenSymbol?: string;
-  tokenDecimals?: number;
-  amountHuman?: string;
-  periodSeconds?: number;
-};
-
-type DirectRuleBody = {
-  kind?: "erc20-transfer" | "erc20-approve" | "native-transfer";
-  tokenAddress?: string | null;
-  tokenSymbol?: string;
-  tokenDecimals?: number;
-  counterparty?: string;
-  amountHuman?: string;
-  periodSeconds?: number;
-};
 
 type SimulateBody = {
   chainId?: number;
@@ -72,12 +59,6 @@ type SimulateBody = {
 const GAS_DIRECT_RULE_TRANSFER = BigInt(70_000);
 const GAS_DIRECT_RULE_APPROVE = BigInt(70_000);
 const GAS_DIRECT_RULE_NATIVE = BigInt(60_000);
-
-type OperationSummary = {
-  label: string;
-  detail: string;
-  gasUnits: string;
-};
 
 function normaliseProtocols(body: SimulateBody): {
   protocols: ProtocolInput[];

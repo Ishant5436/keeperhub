@@ -13,6 +13,7 @@ import { resolveOrganizationId } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
+import { sleep } from "@/lib/sleep";
 
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || "";
 
@@ -417,10 +418,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
   );
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 type FacetFetchResult = {
   address: string;
   name: string | null;
@@ -505,7 +502,7 @@ async function fetchDiamondFacets(
 
   for (const [i, chunkAddresses] of chunks.entries()) {
     if (i > 0) {
-      await delay(DIAMOND_FACET_CHUNK_DELAY_MS);
+      await sleep(DIAMOND_FACET_CHUNK_DELAY_MS);
     }
     const results = await Promise.all(
       chunkAddresses.map((addr) => fetchOneFacet(baseUrl, chainId, addr))

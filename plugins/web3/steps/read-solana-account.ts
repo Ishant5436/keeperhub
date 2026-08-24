@@ -1,7 +1,6 @@
 import "server-only";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import {
   type ReadSolanaAccountCoreInput,
   type ReadSolanaAccountResult,
@@ -24,13 +23,10 @@ export async function readSolanaAccountStep(
 ): Promise<ReadSolanaAccountResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "read-solana-account",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => readSolanaAccountCore(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "read-solana-account" },
+    input,
+    readSolanaAccountCore
   );
 }
 

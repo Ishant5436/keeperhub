@@ -1,17 +1,18 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
-import { db } from "@/lib/db";
-import { explorerConfigs, workflowExecutions } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
+import { getRpcPreferenceUserId } from "@/lib/workflow/executor/helpers";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import { evmOnlyGuard } from "@/lib/web3/validate-chain-address";
+import {
+  type BlockRange,
+  resolveBlockRange,
+} from "./block-range-helpers";
 import {
   type AbiEntry,
   isNearHeadBatch,
@@ -19,23 +20,6 @@ import {
 } from "./query-events-core";
 
 const DEFAULT_BATCH_SIZE = 2000;
-const DEFAULT_BLOCK_LOOKBACK = 6500;
-
-async function getUserIdFromExecution(
-  executionId: string | undefined
-): Promise<string | undefined> {
-  if (!executionId) {
-    return;
-  }
-
-  const execution = await db
-    .select({ userId: workflowExecutions.userId })
-    .from(workflowExecutions)
-    .where(eq(workflowExecutions.id, executionId))
-    .limit(1);
-
-  return execution[0]?.userId;
-}
 
 type DecodedEvent = {
   blockNumber: number;
@@ -65,13 +49,6 @@ export type QueryEventsCoreInput = {
 };
 
 export type QueryEventsInput = StepInput & QueryEventsCoreInput;
-
-// `toBlockIsLatest` marks a range whose end was resolved by us (from an empty
-// or "latest" input) rather than given explicitly by the user. Only that case
-// is safe to re-verify/clamp against a fresher head at query time -- an
-// explicit user-provided toBlock must surface a real error if it turns out to
-// be beyond the chain, not get silently truncated.
-type BlockRange = { fromBlock: number; toBlock: number; toBlockIsLatest: boolean };
 
 function serializeBigInts(value: unknown): unknown {
   return JSON.parse(
@@ -110,111 +87,6 @@ function parseAbi(
   }
 
   return { success: true, parsed: parsedAbi as AbiEntry[] };
-}
-
-function parseBlockCount(
-  blockCountInput: number | string | undefined
-): { success: true; value: number } | { success: false; error: string } | null {
-  if (blockCountInput === undefined || blockCountInput === null) {
-    return null;
-  }
-
-  const strVal =
-    typeof blockCountInput === "string" ? blockCountInput.trim() : "";
-  if (typeof blockCountInput === "string" && strVal === "") {
-    return null;
-  }
-
-  const parsed =
-    typeof blockCountInput === "number"
-      ? blockCountInput
-      : Number.parseInt(strVal, 10);
-
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    return {
-      success: false,
-      error: `Invalid blockCount value: ${blockCountInput}`,
-    };
-  }
-
-  return { success: true, value: parsed };
-}
-
-function resolveFromBlock(
-  fromBlockInput: string | undefined,
-  blockCountInput: number | string | undefined,
-  resolvedToBlock: number
-): { success: true; value: number } | { success: false; error: string } {
-  const fromBlockStr = fromBlockInput?.toString().trim() ?? "";
-
-  if (fromBlockStr !== "") {
-    const parsed = Number.parseInt(fromBlockStr, 10);
-    if (Number.isNaN(parsed)) {
-      return {
-        success: false,
-        error: `Invalid fromBlock value: ${fromBlockInput}`,
-      };
-    }
-    return { success: true, value: parsed };
-  }
-
-  const blockCountResult = parseBlockCount(blockCountInput);
-  if (blockCountResult !== null && !blockCountResult.success) {
-    return { success: false, error: blockCountResult.error };
-  }
-
-  const lookback =
-    blockCountResult !== null ? blockCountResult.value : DEFAULT_BLOCK_LOOKBACK;
-
-  return { success: true, value: Math.max(0, resolvedToBlock - lookback) };
-}
-
-async function resolveBlockRange(
-  provider: ethers.JsonRpcProvider,
-  fromBlockInput: string | undefined,
-  toBlockInput: string | undefined,
-  blockCountInput: number | string | undefined
-): Promise<
-  { success: true; range: BlockRange } | { success: false; error: string }
-> {
-  const toBlockStr = toBlockInput?.toString().trim() ?? "";
-  let resolvedToBlock: number;
-  const toBlockIsLatest =
-    toBlockStr === "" || toBlockStr.toLowerCase() === "latest";
-
-  if (toBlockIsLatest) {
-    // This is a planning estimate only -- how many batches to run and where
-    // `fromBlock` starts. It is NOT the authoritative bound used for the
-    // final eth_getLogs call; see queryBatchWithRetry's tip-batch handling.
-    resolvedToBlock = await provider.getBlockNumber();
-    console.log("[Query Events] Resolved latest block:", resolvedToBlock);
-  } else {
-    resolvedToBlock = Number.parseInt(toBlockStr, 10);
-    if (Number.isNaN(resolvedToBlock)) {
-      return {
-        success: false,
-        error: `Invalid toBlock value: ${toBlockInput}`,
-      };
-    }
-  }
-
-  const fromBlockResult = resolveFromBlock(
-    fromBlockInput,
-    blockCountInput,
-    resolvedToBlock
-  );
-  if (!fromBlockResult.success) {
-    return { success: false, error: fromBlockResult.error };
-  }
-
-  return {
-    success: true,
-    range: {
-      fromBlock: fromBlockResult.value,
-      toBlock: resolvedToBlock,
-      toBlockIsLatest,
-    },
-  };
 }
 
 type EventBatchesResult = { events: DecodedEvent[]; actualToBlock: number };
@@ -329,7 +201,7 @@ async function stepHandler(
     return { success: false, error: `Event '${eventName}' not found in ABI` };
   }
 
-  const userId = await getUserIdFromExecution(_context?.executionId);
+  const userId = await getRpcPreferenceUserId(_context?.executionId);
 
   // Validate event exists in ABI using ethers Interface (no provider needed)
   const iface = new ethers.Interface(abiResult.parsed);
@@ -365,6 +237,9 @@ async function stepHandler(
     return { success: false, error: blockRangeResult.error };
   }
   const { range } = blockRangeResult;
+  if (range.toBlockIsLatest) {
+    console.log("[Query Events] Resolved latest block:", range.toBlock);
+  }
 
   if (range.fromBlock > range.toBlock) {
     return {
@@ -410,33 +285,17 @@ export async function queryEventsStep(
 ): Promise<QueryEventsResult> {
   "use step";
 
-  let enrichedInput: QueryEventsInput & { contractAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const contractAddressLink = getAddressUrl(
-        explorerConfig,
-        input.contractAddress
-      );
-      if (contractAddressLink) {
-        enrichedInput = { ...input, contractAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const contractAddressLink = await resolveExplorerLink(
+    input.network,
+    input.contractAddress
+  );
+  const enrichedInput: QueryEventsInput & { contractAddressLink?: string } =
+    contractAddressLink ? { ...input, contractAddressLink } : input;
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "query-events",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(enrichedInput, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "query-events" },
+    enrichedInput,
+    () => stepHandler(input)
   );
 }
 

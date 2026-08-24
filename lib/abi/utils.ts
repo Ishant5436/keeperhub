@@ -1,10 +1,8 @@
 import { ethers } from "ethers";
+import type { AbiParam } from "@/lib/abi/types";
 
-export type AbiItemComponent = {
-  name: string;
-  type: string;
-  components?: AbiItemComponent[];
-};
+/** Compatibility alias for the canonical AbiParam shape. */
+export type AbiItemComponent = AbiParam;
 
 type AbiInput = {
   type: string;

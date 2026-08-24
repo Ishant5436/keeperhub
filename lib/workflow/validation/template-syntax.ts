@@ -9,18 +9,19 @@
  *   - Legacy $: `{{$nodeId[.path]}}`        — content after `$` nonempty
  *   - Display:  `{{Label[.path]}}`          — nonempty after trim, no leading `@`/`$`
  *
- * Any token that doesn't match one of the three is reported. The walker
- * mirrors `findBareAtLiterals` (lib/mcp/listing-validators.ts) so DB-rooted
+ * Any token that doesn't match one of the three is reported. The walk is the
+ * shared bounded traversal `walkNodeConfigStrings` (also used by
+ * `findBareAtLiterals` in lib/mcp/listing-validators.ts) so DB-rooted
  * adversarial input can't pin a worker: bounded depth, string length, and
  * finding count.
  */
+
+import { walkNodeConfigStrings } from "@/lib/workflow/node-config-read";
 
 const TEMPLATE_PATTERN = /\{\{([^{}]*)\}\}/g;
 const STORED_PATTERN = /^@([^:]+):([\s\S]+)$/;
 const DOLLAR_PATTERN = /^\$([\s\S]+)$/;
 
-const MAX_DEPTH = 100;
-const MAX_STRING_LEN = 256_000;
 const MAX_FINDINGS = 25;
 
 export type InvalidTemplateReason =
@@ -37,7 +38,6 @@ export type InvalidTemplate = {
 
 type NodeLike = {
   id?: unknown;
-  data?: { config?: Record<string, unknown> } & Record<string, unknown>;
 } & Record<string, unknown>;
 
 /**
@@ -97,40 +97,11 @@ export function validateTemplateBody(
  * template tokens. Returns an empty array when every `{{...}}` parses.
  */
 export function findInvalidTemplateTokens(nodes: unknown): InvalidTemplate[] {
-  if (!Array.isArray(nodes)) {
-    return [];
-  }
-
   const findings: InvalidTemplate[] = [];
 
-  for (const node of nodes as NodeLike[]) {
-    if (findings.length >= MAX_FINDINGS) {
-      break;
-    }
-    const config = node?.data?.config;
-    if (config === undefined || config === null) {
-      continue;
-    }
-    const nodeId = typeof node?.id === "string" ? node.id : undefined;
-    visit(config, findings, nodeId, 0);
-  }
-
-  return findings;
-}
-
-function visit(
-  value: unknown,
-  findings: InvalidTemplate[],
-  nodeId: string | undefined,
-  depth: number
-): void {
-  if (depth > MAX_DEPTH || findings.length >= MAX_FINDINGS) {
-    return;
-  }
-  if (typeof value === "string") {
-    if (value.length > MAX_STRING_LEN) {
-      return;
-    }
+  walkNodeConfigStrings(nodes, (value, node) => {
+    const id = (node as NodeLike)?.id;
+    const nodeId = typeof id === "string" ? id : undefined;
     for (const match of value.matchAll(TEMPLATE_PATTERN)) {
       const result = validateTemplateBody(match[1]);
       if (result) {
@@ -141,27 +112,12 @@ function visit(
           ...(nodeId ? { nodeId } : {}),
         });
         if (findings.length >= MAX_FINDINGS) {
-          return;
+          return true;
         }
       }
     }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      visit(item, findings, nodeId, depth + 1);
-      if (findings.length >= MAX_FINDINGS) {
-        return;
-      }
-    }
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const item of Object.values(value as Record<string, unknown>)) {
-      visit(item, findings, nodeId, depth + 1);
-      if (findings.length >= MAX_FINDINGS) {
-        return;
-      }
-    }
-  }
+    return false;
+  });
+
+  return findings;
 }

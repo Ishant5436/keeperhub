@@ -1,9 +1,8 @@
 import "server-only";
 
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { assertUrlIsPublic, safeFetch, SsrfBlockedError } from "@/lib/safe-fetch";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 
 type SendWebhookResult =
@@ -243,13 +242,10 @@ export async function sendWebhookStep(
 ): Promise<SendWebhookResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "webhook",
-      actionName: "send-webhook",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "webhook", actionName: "send-webhook" },
+    input,
+    stepHandler
   );
 }
 sendWebhookStep.maxRetries = 0;

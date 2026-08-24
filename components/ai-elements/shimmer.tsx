@@ -25,9 +25,14 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
+  // The cast keeps type-checking cheap: motion.create over the full
+  // JSX.IntrinsicElements union instantiates motion's generics for every
+  // intrinsic element (~1.7s of tsc check measured via --generateTrace).
+  // Runtime is unchanged; the props used below are common to all elements,
+  // so checking them against the default element's motion component is sound.
   const MotionComponent = motion.create(
     Component as keyof JSX.IntrinsicElements
-  );
+  ) as typeof motion.p;
 
   const dynamicSpread = useMemo(
     () => (children?.length ?? 0) * spread,

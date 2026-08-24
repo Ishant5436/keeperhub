@@ -1,12 +1,7 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { explorerConfigs } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import {
   type ReadContractCoreInput,
   type ReadContractResult,
@@ -25,33 +20,17 @@ export async function readContractStep(
   "use step";
 
   // Enrich input with contract address explorer link for the execution log
-  let enrichedInput: ReadContractInput & { contractAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const contractAddressLink = getAddressUrl(
-        explorerConfig,
-        input.contractAddress
-      );
-      if (contractAddressLink) {
-        enrichedInput = { ...input, contractAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const contractAddressLink = await resolveExplorerLink(
+    input.network,
+    input.contractAddress
+  );
+  const enrichedInput: ReadContractInput & { contractAddressLink?: string } =
+    contractAddressLink ? { ...input, contractAddressLink } : input;
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "read-contract",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(enrichedInput, () => readContractCore(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "read-contract" },
+    enrichedInput,
+    () => readContractCore(input)
   );
 }
 

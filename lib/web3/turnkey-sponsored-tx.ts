@@ -1,6 +1,7 @@
 import "server-only";
 import { getAddress, type Hex } from "viem";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { sleep } from "@/lib/sleep";
 import { getTurnkeyClientForOrg } from "@/lib/turnkey/agentic-wallet";
 import {
   formatRevertChain,
@@ -71,12 +72,6 @@ export type TurnkeySponsoredTxResult = {
   txHash: Hex;
   sendTransactionStatusId: string;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 /**
  * Submit a sponsored EVM transaction via Turnkey Gas Station and wait

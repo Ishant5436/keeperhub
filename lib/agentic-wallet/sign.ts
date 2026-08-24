@@ -32,6 +32,12 @@ import { Challenge, Credential } from "mppx";
 import { TxEnvelopeTempo } from "ox/tempo";
 import { encodeFunctionData, keccak256 } from "viem";
 import { Abis } from "viem/tempo";
+import {
+  runTurnkeyActivity,
+  type TurnkeyActivityErrorSpec,
+  type TurnkeySignature,
+  type TurnkeySignRawPayloadActivityResult,
+} from "@/lib/turnkey/activity";
 import { getTurnkeyClientForOrg } from "@/lib/turnkey/agentic-wallet";
 import { BASE_CHAIN_ID, USDC_BASE_ADDRESS } from "./constants";
 
@@ -125,6 +131,14 @@ export class TurnkeyUpstreamError extends Error {
   readonly name = "TurnkeyUpstreamError";
 }
 
+const SIGN_ACTIVITY_ERRORS: TurnkeyActivityErrorSpec = {
+  policyBlockedError: PolicyBlockedError,
+  upstreamError: TurnkeyUpstreamError,
+  policyBlockedMessage:
+    "Turnkey policy blocked the activity (CONSENSUS_NEEDED)",
+  missingResultMessage: "Signature missing from Turnkey response",
+};
+
 // Source: lib/x402/reconcile.ts:4 + @x402/evm domain constant. Base USDC
 // domain is the canonical TransferWithAuthorization EIP-712 domain.
 export const BASE_USDC_DOMAIN = {
@@ -189,17 +203,6 @@ export type MppProofChallenge = {
   serialized: string;
 };
 
-type TurnkeySignature = { r: string; s: string; v: string };
-
-type TurnkeyActivityResponse = {
-  activity?: {
-    status?: string;
-    result?: {
-      signRawPayloadResult?: TurnkeySignature;
-    };
-  };
-};
-
 /**
  * Calls Turnkey `signRawPayload` with a precomputed hex hash. Returned
  * signature is a raw ECDSA triple `{r, s, v}` where v is the yParity bit as
@@ -208,40 +211,27 @@ type TurnkeyActivityResponse = {
  * (Ethereum v+27 for secp256k1 signatures, Tempo SignatureEnvelope's raw
  * yParity, Solana raw concat, etc). See the two callers below for examples.
  */
-async function signRawHash(
+function signRawHash(
   subOrgId: string,
   walletAddress: string,
   hexHash: string
 ): Promise<TurnkeySignature> {
   const client = getTurnkeyClientForOrg(subOrgId).apiClient();
-  const response = (await (
-    client as unknown as {
-      signRawPayload: (args: unknown) => Promise<TurnkeyActivityResponse>;
-    }
-  ).signRawPayload({
-    signWith: walletAddress,
-    payload: hexHash,
-    encoding: "PAYLOAD_ENCODING_HEXADECIMAL",
-    hashFunction: "HASH_FUNCTION_NO_OP",
-  })) as TurnkeyActivityResponse;
-
-  const activity = response?.activity;
-  const status = activity?.status;
-  if (status === "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
-    throw new PolicyBlockedError(
-      "Turnkey policy blocked the activity (CONSENSUS_NEEDED)"
-    );
-  }
-  if (status !== "ACTIVITY_STATUS_COMPLETED") {
-    throw new TurnkeyUpstreamError(
-      `Turnkey returned status ${status ?? "unknown"}`
-    );
-  }
-  const result = activity?.result?.signRawPayloadResult;
-  if (!result) {
-    throw new TurnkeyUpstreamError("Signature missing from Turnkey response");
-  }
-  return result;
+  return runTurnkeyActivity<
+    TurnkeySignRawPayloadActivityResult,
+    TurnkeySignature
+  >(
+    client,
+    "signRawPayload",
+    {
+      signWith: walletAddress,
+      payload: hexHash,
+      encoding: "PAYLOAD_ENCODING_HEXADECIMAL",
+      hashFunction: "HASH_FUNCTION_NO_OP",
+    },
+    (result) => result?.signRawPayloadResult,
+    SIGN_ACTIVITY_ERRORS
+  );
 }
 
 async function signTypedData(
@@ -254,34 +244,21 @@ async function signTypedData(
   // under a `parameters` object as the raw v1 activity API required). The
   // original v1 envelope `{type, organizationId, timestampMs, parameters}`
   // was rejected with "field required: signWith / payload / encoding".
-  const response = (await (
-    client as unknown as {
-      signRawPayload: (args: unknown) => Promise<TurnkeyActivityResponse>;
-    }
-  ).signRawPayload({
-    signWith: walletAddress,
-    payload: JSON.stringify(typedData),
-    encoding: "PAYLOAD_ENCODING_EIP712",
-    hashFunction: "HASH_FUNCTION_NO_OP",
-  })) as TurnkeyActivityResponse;
-
-  const activity = response?.activity;
-  const status = activity?.status;
-  if (status === "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
-    throw new PolicyBlockedError(
-      "Turnkey policy blocked the activity (CONSENSUS_NEEDED)"
-    );
-  }
-  if (status !== "ACTIVITY_STATUS_COMPLETED") {
-    throw new TurnkeyUpstreamError(
-      `Turnkey returned status ${status ?? "unknown"}`
-    );
-  }
-
-  const result = activity?.result?.signRawPayloadResult;
-  if (!result) {
-    throw new TurnkeyUpstreamError("Signature missing from Turnkey response");
-  }
+  const result = await runTurnkeyActivity<
+    TurnkeySignRawPayloadActivityResult,
+    TurnkeySignature
+  >(
+    client,
+    "signRawPayload",
+    {
+      signWith: walletAddress,
+      payload: JSON.stringify(typedData),
+      encoding: "PAYLOAD_ENCODING_EIP712",
+      hashFunction: "HASH_FUNCTION_NO_OP",
+    },
+    (activityResult) => activityResult?.signRawPayloadResult,
+    SIGN_ACTIVITY_ERRORS
+  );
 
   // serializeSignature assembles `0x${r}${s}${hex(v+27)}` (65 bytes / 132 hex
   // chars). It handles the Turnkey `v: "00"|"01"` -> Ethereum `v: 27|28`

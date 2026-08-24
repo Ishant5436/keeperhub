@@ -18,6 +18,7 @@ import { ethers } from "ethers";
 import { resolveRpcConfig } from "@/lib/rpc/config-service";
 import { isSolanaChain } from "@/lib/rpc/provider-factory";
 import { RpcProviderManager } from "@/lib/rpc/providers";
+import { sleep } from "@/lib/sleep";
 
 export type ReceiptStatus =
   | "success"
@@ -85,12 +86,6 @@ const VERIFY_CONCURRENCY_LIMIT = 20;
 // unconfirmed state and the reconciler then own.
 const LOOKUP_BUDGET_MS = 12_000;
 const LOOKUP_RETRY_DELAY_MS = 1500;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 // Gnosis Safe's execTransaction always emits exactly one of these -- never
 // neither. A receipt with status 1 (outer tx succeeded) can still carry

@@ -2,10 +2,9 @@ import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { fetchCredentials } from "@/lib/credential-fetcher";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import type { BlockscoutCredentials } from "../credentials";
 import { blockscoutGet } from "./blockscout-core";
@@ -78,13 +77,10 @@ export async function getAddressBalanceStep(
     ? await fetchCredentials(input.integrationId, { organizationId: input._context?.organizationId ?? null })
     : {};
 
-  return withPluginMetrics(
-    {
-      pluginName: "blockscout",
-      actionName: "get-address-balance",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input, credentials))
+  return runPluginStep(
+    { pluginName: "blockscout", actionName: "get-address-balance" },
+    input,
+    () => stepHandler(input, credentials)
   );
 }
 

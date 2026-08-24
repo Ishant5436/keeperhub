@@ -7,6 +7,12 @@
  */
 
 import type {
+  AbiEntry,
+  AbiEventEntry,
+  AbiFunctionEntry,
+  AbiParam,
+} from "@/lib/abi/types";
+import type {
   ProtocolAction,
   ProtocolActionInput,
   ProtocolActionInputComponent,
@@ -67,35 +73,6 @@ export type AbiEventOverride = {
   label?: string;
   description?: string;
 };
-
-// -- ABI JSON types (subset of ethers ABI format) ----------------------------
-
-type AbiParam = {
-  name: string;
-  type: string;
-  components?: AbiParam[];
-  indexed?: boolean;
-};
-
-type AbiFunctionEntry = {
-  type: "function";
-  name: string;
-  stateMutability: "view" | "pure" | "nonpayable" | "payable";
-  inputs: AbiParam[];
-  outputs: AbiParam[];
-};
-
-type AbiEventEntry = {
-  type: "event";
-  name: string;
-  inputs: AbiParam[];
-  anonymous?: boolean;
-};
-
-type AbiEntry =
-  | AbiFunctionEntry
-  | AbiEventEntry
-  | { type: string; [key: string]: unknown };
 
 // -- Helpers -----------------------------------------------------------------
 

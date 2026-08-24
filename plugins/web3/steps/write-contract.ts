@@ -1,12 +1,8 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { explorerConfigs } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
 import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { withStepValueCap } from "@/lib/execute/value-ledger";
-import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import {
   applyFailOnError,
@@ -36,25 +32,12 @@ export async function writeContractStep(
   "use step";
 
   // Enrich input with contract address explorer link for the execution log
-  let enrichedInput: WriteContractInput & { contractAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const contractAddressLink = getAddressUrl(
-        explorerConfig,
-        input.contractAddress
-      );
-      if (contractAddressLink) {
-        enrichedInput = { ...input, contractAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const contractAddressLink = await resolveExplorerLink(
+    input.network,
+    input.contractAddress
+  );
+  const enrichedInput: WriteContractInput & { contractAddressLink?: string } =
+    contractAddressLink ? { ...input, contractAddressLink } : input;
 
   return withPluginMetrics(
     {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Monaco, OnMount } from "@monaco-editor/react";
+import type { EditorProps, Monaco, OnMount } from "@monaco-editor/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -33,6 +33,25 @@ import {
 // Component
 // ---------------------------------------------------------------------------
 
+const DEFAULT_EDITOR_OPTIONS: EditorProps["options"] = {
+  minimap: { enabled: false },
+  lineNumbers: "on",
+  scrollBeyondLastLine: false,
+  fontSize: 13,
+  tabSize: 2,
+  wordWrap: "on",
+  wordBasedSuggestions: "off",
+  quickSuggestions: false,
+  padding: { top: 8, bottom: 8 },
+  renderLineHighlight: "gutter",
+  overviewRulerLanes: 0,
+  hideCursorInOverviewRuler: true,
+  scrollbar: {
+    vertical: "auto",
+    horizontal: "auto",
+  },
+};
+
 export type TemplateCodeEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -40,6 +59,11 @@ export type TemplateCodeEditorProps = {
   disabled?: boolean;
   height?: string;
   placeholder?: string;
+  /**
+   * Replaces the default Monaco options wholesale (readOnly is still driven
+   * by `disabled`). Lets variants keep their exact editor configuration.
+   */
+  editorOptions?: EditorProps["options"];
 };
 
 export function TemplateCodeEditor({
@@ -49,6 +73,7 @@ export function TemplateCodeEditor({
   disabled,
   height = "320px",
   placeholder,
+  editorOptions,
 }: TemplateCodeEditorProps): React.ReactElement {
   const nodes = useAtomValue(nodesAtom);
   const edges = useAtomValue(edgesAtom);
@@ -145,7 +170,7 @@ export function TemplateCodeEditor({
     lastFetchWorkflowIdRef.current = workflowId;
     let cancelled = false;
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async fetch with cancellation guard mirrors sql-template-editor.tsx
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async fetch with cancellation guard mirrors template-autocomplete.tsx
     const fetchLogs = async (): Promise<void> => {
       try {
         const executions = await api.workflow.getExecutions(workflowId);
@@ -465,23 +490,8 @@ export function TemplateCodeEditor({
           onChange={(v) => handleEditorChange(v || "")}
           onMount={handleMount}
           options={{
-            minimap: { enabled: false },
-            lineNumbers: "on",
-            scrollBeyondLastLine: false,
-            fontSize: 13,
-            tabSize: 2,
-            wordWrap: "on",
+            ...(editorOptions ?? DEFAULT_EDITOR_OPTIONS),
             readOnly: disabled,
-            wordBasedSuggestions: "off",
-            quickSuggestions: false,
-            padding: { top: 8, bottom: 8 },
-            renderLineHighlight: "gutter",
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
-            scrollbar: {
-              vertical: "auto",
-              horizontal: "auto",
-            },
           }}
           value={displayValue}
         />

@@ -45,10 +45,9 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { db } from "@/lib/db";
 import { workflowExecutions } from "@/lib/db/schema";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 
 // Type definitions (exported)
@@ -77,13 +76,10 @@ export async function myActionStep(
 ): Promise<MyActionResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "my-plugin",
-      actionName: "my-action",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "my-plugin", actionName: "my-action" },
+    input,
+    stepHandler
   );
 }
 
@@ -94,8 +90,13 @@ Key points:
 - `import "server-only"` at the top
 - Types are exported, helper functions are NOT exported
 - Step function uses `"use step"` directive inside the function body
-- Wrapped in `withPluginMetrics` and `withStepLogging`
+- Wrapped in `runPluginStep` (the standard epilogue: `withPluginMetrics` wrapping `withStepLogging`, with `executionId` read from `input._context`)
 - Security-critical steps: set `stepFunction.maxRetries = 0` on the action definition
+
+Two deliberate exceptions to `runPluginStep`:
+
+- **Value-cap steps** (write-contract, transfer-funds, and the other steps that use `withStepValueCap`) compose `withPluginMetrics` / `withStepLogging` / `withStepValueCap` manually because the cap's reserve/settle ordering relative to logging matters. Follow the comments in those files; do not convert them to `runPluginStep` without preserving that ordering.
+- **Some older steps** call `withStepLogging` alone and report no plugin metrics. That is a gap, not a pattern to copy - new steps use `runPluginStep`.
 
 ## Signer Routing + RPC Failover
 
@@ -123,9 +124,15 @@ Required mocks (must appear BEFORE importing the step file):
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/lib/workflow/executor/step-handler", () => ({
+  runPluginStep: (
+    _options: unknown,
+    input: unknown,
+    fn: (input: unknown) => unknown
+  ) => fn(input),
   withStepLogging: (_input: unknown, fn: () => unknown) => fn(),
 }));
 
+// Only needed for steps that compose metrics manually (value-cap steps).
 vi.mock("@/lib/metrics/instrumentation/plugin", () => ({
   withPluginMetrics: (_opts: unknown, fn: () => unknown) => fn(),
 }));

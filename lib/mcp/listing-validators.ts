@@ -8,8 +8,12 @@
  * inputSchema (which leaves bazaar consumers unable to render or validate
  * inputs).
  *
- * Kept dependency-free so they're easy to unit-test without DB mocks.
+ * Kept free of DB/framework dependencies so they're easy to unit-test without
+ * mocks; the only import is the shared bounded node-config walker, which is
+ * itself dependency-free.
  */
+
+import { walkNodeConfigStrings } from "@/lib/workflow/node-config-read";
 
 // Linear-time strip of wrapped templates. The `[^{}]*` form (vs `[^}]*`) avoids
 // the V8 quadratic-replace pathology when input contains long runs of unmatched
@@ -24,12 +28,9 @@ const TEMPLATE_PATTERN = /\{\{[^{}]*\}\}/g;
 // character.
 const BARE_AT_PATTERN = /(?:^|[^\w@])(@\w+(?:-\w+)*)/g;
 
-// Bound the walk to keep this gate predictable on adversarial input. The DB
-// row is the attack surface — a malicious workflow planted via an upstream
-// path could otherwise blow the V8 stack (~20k depth) or pin a worker on a
-// multi-MB string field.
-const MAX_DEPTH = 100;
-const MAX_STRING_LEN = 256_000;
+// Findings cap for this gate. Depth and string-length bounds come from
+// walkNodeConfigStrings' defaults (lib/workflow/node-config-read.ts), which
+// keep the walk predictable on adversarial DB-resident input.
 const MAX_FINDINGS = 10;
 
 // Action-type prefixes whose configs legitimately embed `@<word>` content
@@ -104,60 +105,23 @@ export function findBareAtLiterals(nodes: unknown): string[] {
     return [];
   }
 
+  const eligible = nodes.filter(
+    (node) => !shouldSkipForAtDetection(node as NodeLike)
+  );
   const findings: string[] = [];
 
-  for (const node of nodes as NodeLike[]) {
-    if (findings.length >= MAX_FINDINGS) {
-      break;
-    }
-    if (shouldSkipForAtDetection(node)) {
-      continue;
-    }
-
-    const config = node?.data?.config;
-    if (config === undefined || config === null) {
-      continue;
-    }
-    visit(config, findings, 0);
-  }
-
-  return findings;
-}
-
-function visit(value: unknown, findings: string[], depth: number): void {
-  if (depth > MAX_DEPTH || findings.length >= MAX_FINDINGS) {
-    return;
-  }
-  if (typeof value === "string") {
-    if (value.length > MAX_STRING_LEN) {
-      return;
-    }
+  walkNodeConfigStrings(eligible, (value) => {
     const stripped = value.replace(TEMPLATE_PATTERN, "");
     for (const m of stripped.matchAll(BARE_AT_PATTERN)) {
       findings.push(m[1]);
       if (findings.length >= MAX_FINDINGS) {
-        return;
+        return true;
       }
     }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      visit(item, findings, depth + 1);
-      if (findings.length >= MAX_FINDINGS) {
-        return;
-      }
-    }
-    return;
-  }
-  if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value as Record<string, unknown>)) {
-      visit(item, findings, depth + 1);
-      if (findings.length >= MAX_FINDINGS) {
-        return;
-      }
-    }
-  }
+    return false;
+  });
+
+  return findings;
 }
 
 /**

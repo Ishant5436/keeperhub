@@ -32,6 +32,7 @@
  * of dev:mint-cookie.
  */
 
+import { sleep } from "@/lib/sleep";
 import "dotenv/config";
 
 import { spawn, spawnSync } from "node:child_process";
@@ -106,12 +107,6 @@ function runStep(
   if (result.status !== 0) {
     throw new Error(`${label} exited with status ${result.status ?? "null"}`);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function probeServer(url: string): Promise<boolean> {

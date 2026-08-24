@@ -221,6 +221,12 @@ jobs:
       - name: Run type check
         run: pnpm type-check
 
+      # keeperhub-executor is excluded from the root program (it is the sole
+      # importer of @kubernetes/client-node, 816 .d.ts files) and checked as
+      # its own smaller program, like keeperhub-scheduler/keeperhub-events.
+      - name: Run executor type check
+        run: pnpm type-check:executor
+
   build:
     runs-on: ubuntu-latest
     environment: staging

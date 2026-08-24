@@ -1,10 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { explorerConfigs } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
-import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import type {
   TransferTokenCoreInput,
@@ -28,25 +24,12 @@ export async function transferTokenStep(
 ): Promise<TransferTokenResult> {
   "use step";
 
-  let enrichedInput: TransferTokenInput & { recipientAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const recipientAddressLink = getAddressUrl(
-        explorerConfig,
-        input.recipientAddress
-      );
-      if (recipientAddressLink) {
-        enrichedInput = { ...input, recipientAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const recipientAddressLink = await resolveExplorerLink(
+    input.network,
+    input.recipientAddress
+  );
+  const enrichedInput: TransferTokenInput & { recipientAddressLink?: string } =
+    recipientAddressLink ? { ...input, recipientAddressLink } : input;
 
   return withStepLogging(enrichedInput, () => transferTokenCore(input));
 }

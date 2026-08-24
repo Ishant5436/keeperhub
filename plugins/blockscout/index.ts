@@ -6,17 +6,28 @@ import { BlockscoutIcon } from "./icon";
 // Chain picker shared by every action. Maps to a hosted Blockscout instance so
 // a workflow can query any supported chain with no connection setup. Defaults
 // to Ethereum mainnet; for a chain not listed, attach a Blockscout connection
-// with its instance URL.
-const NETWORK_FIELD: ActionConfigField = {
+// with its instance URL. Factories return fresh objects so no field instance
+// is aliased across actions.
+const networkField = (): ActionConfigField => ({
   key: "network",
   label: "Chain",
   type: "chain-select",
   chainTypeFilter: "evm",
-  allowedChainIds: SUPPORTED_BLOCKSCOUT_CHAIN_IDS,
+  allowedChainIds: [...SUPPORTED_BLOCKSCOUT_CHAIN_IDS],
   defaultValue: "1",
   helpTip:
     "Which chain's Blockscout explorer to query. Defaults to Ethereum mainnet. For a chain not listed here, add a Blockscout connection with its instance URL.",
-};
+});
+
+// Address input shared verbatim by the address-scoped actions.
+const addressField = (): ActionConfigField => ({
+  key: "address",
+  label: "Address",
+  type: "template-input",
+  placeholder: "0x... or {{NodeName.address}}",
+  example: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  required: true,
+});
 
 const blockscoutPlugin: IntegrationPlugin = {
   type: "blockscout",
@@ -80,15 +91,8 @@ const blockscoutPlugin: IntegrationPlugin = {
         { field: "error", description: "Error message if failed" },
       ],
       configFields: [
-        NETWORK_FIELD,
-        {
-          key: "address",
-          label: "Address",
-          type: "template-input",
-          placeholder: "0x... or {{NodeName.address}}",
-          example: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          required: true,
-        },
+        networkField(),
+        addressField(),
       ],
     },
     {
@@ -118,15 +122,8 @@ const blockscoutPlugin: IntegrationPlugin = {
         { field: "error", description: "Error message if failed" },
       ],
       configFields: [
-        NETWORK_FIELD,
-        {
-          key: "address",
-          label: "Address",
-          type: "template-input",
-          placeholder: "0x... or {{NodeName.address}}",
-          example: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          required: true,
-        },
+        networkField(),
+        addressField(),
       ],
     },
     {
@@ -146,15 +143,8 @@ const blockscoutPlugin: IntegrationPlugin = {
         { field: "error", description: "Error message if failed" },
       ],
       configFields: [
-        NETWORK_FIELD,
-        {
-          key: "address",
-          label: "Address",
-          type: "template-input",
-          placeholder: "0x... or {{NodeName.address}}",
-          example: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          required: true,
-        },
+        networkField(),
+        addressField(),
       ],
     },
     {
@@ -177,7 +167,7 @@ const blockscoutPlugin: IntegrationPlugin = {
         { field: "error", description: "Error message if failed" },
       ],
       configFields: [
-        NETWORK_FIELD,
+        networkField(),
         {
           key: "txHash",
           label: "Transaction Hash",
@@ -208,7 +198,7 @@ const blockscoutPlugin: IntegrationPlugin = {
         { field: "error", description: "Error message if failed" },
       ],
       configFields: [
-        NETWORK_FIELD,
+        networkField(),
         {
           key: "tokenAddress",
           label: "Token Address",

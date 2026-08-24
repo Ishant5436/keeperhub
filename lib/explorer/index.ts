@@ -9,6 +9,7 @@
 
 import { joinExplorerUrl } from "@/lib/build-explorer-url";
 import type { ExplorerConfig } from "@/lib/db/schema";
+import { sleep } from "@/lib/sleep";
 import {
   type BlockscoutTransaction,
   fetchBlockscoutAbi,
@@ -282,9 +283,7 @@ export async function fetchContractTransactions(
 
   for (let round = 0; round < RETRY_ROUNDS; round++) {
     if (round > 0) {
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, RETRY_BACKOFF_MS)
-      );
+      await sleep(RETRY_BACKOFF_MS);
     }
 
     const primaryResult = await fetchTransactionsFromProvider(

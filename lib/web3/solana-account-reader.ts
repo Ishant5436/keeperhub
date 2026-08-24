@@ -16,6 +16,14 @@ export function parsePublicKey(value: string): PublicKey | null {
 }
 
 /**
+ * Type guard shared by the Solana step cores and IDL helpers for validating
+ * user-supplied JSON payloads before property access.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
  * Resolves a network + base58 address into a Solana chain adapter and pubkey.
  * Shared by the read-solana-account and read-solana-program-anchor steps.
  */

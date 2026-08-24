@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Agent, request as httpRequest } from "node:http";
+import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import {
   decodeSandboxResult,
   SANDBOX_RESULT_MAX_BYTES,
@@ -121,12 +122,12 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-type LogEntry = {
+export type LogEntry = {
   level: "log" | "warn" | "error";
   args: unknown[];
 };
 
-type ChildOutcome =
+export type ChildOutcome =
   | { ok: true; result: unknown; logs: LogEntry[] }
   | {
       ok: false;
@@ -137,11 +138,19 @@ type ChildOutcome =
 
 export type RunCodeResult =
   | { success: true; result: unknown; logs: LogEntry[] }
-  | { success: false; error: string; logs: LogEntry[]; line?: number };
+  | {
+      success: false;
+      error: string;
+      logs: LogEntry[];
+      line?: number;
+      errorClass?: ExecutionErrorType;
+    };
 
 const VM_LINE_REGEX = /user-code\.js:(\d+)/;
 
-function extractLineNumber(stack: string | undefined): number | undefined {
+export function extractLineNumber(
+  stack: string | undefined
+): number | undefined {
   // Defensive: the decoded outcome crosses an untrusted boundary, so `stack`
   // may not actually be a string at runtime; `.match` on a non-string throws.
   if (typeof stack !== "string") {
@@ -287,7 +296,7 @@ function postOnce(
  * Shape guard for the decoded response. The sandbox is untrusted, so the
  * tagged-JSON payload is validated to be a ChildOutcome envelope before use.
  */
-function isLogEntry(value: unknown): value is LogEntry {
+export function isLogEntry(value: unknown): value is LogEntry {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -295,7 +304,7 @@ function isLogEntry(value: unknown): value is LogEntry {
   return typeof e.level === "string" && Array.isArray(e.args);
 }
 
-function isChildOutcome(value: unknown): value is ChildOutcome {
+export function isChildOutcome(value: unknown): value is ChildOutcome {
   if (typeof value !== "object" || value === null) {
     return false;
   }

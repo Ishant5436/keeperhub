@@ -7,6 +7,7 @@ import type {
   DirectRuleInput,
   PolicyConfig,
 } from "@/components/safe/policy-wizard";
+import { weiToHuman } from "@/components/safe/wei-to-human";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,34 +27,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getProtocolLabel } from "@/lib/safe/protocol-registry";
-
-const TRAILING_ZEROS_REGEX = /0+$/;
-const TRAILING_DOT_REGEX = /\.$/;
-
-function weiToHuman(amountWei: string, decimals: number): string {
-  try {
-    const big = BigInt(amountWei);
-    if (decimals === 0) {
-      return big.toString();
-    }
-    const divisor = BigInt(10) ** BigInt(decimals);
-    const whole = big / divisor;
-    const fraction = big % divisor;
-    if (fraction === BigInt(0)) {
-      return whole.toString();
-    }
-    const fractionStr = fraction
-      .toString()
-      .padStart(decimals, "0")
-      .replace(TRAILING_ZEROS_REGEX, "");
-    if (fractionStr.length === 0) {
-      return whole.toString();
-    }
-    return `${whole.toString()}.${fractionStr}`.replace(TRAILING_DOT_REGEX, "");
-  } catch {
-    return amountWei;
-  }
-}
 
 type Allowance = {
   id: string;

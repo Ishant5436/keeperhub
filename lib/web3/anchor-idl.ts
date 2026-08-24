@@ -3,10 +3,11 @@ import "server-only";
 import { BN, BorshInstructionCoder, type Idl } from "@coral-xyz/anchor";
 import {
   type AccountMeta,
-  PublicKey,
+  type PublicKey,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { getErrorMessage } from "@/lib/utils";
+import { isRecord, parsePublicKey } from "@/lib/web3/solana-account-reader";
 
 // Structural types derived from anchor's Idl so we do not depend on the
 // sub-types being re-exported from the package root (only Idl is).
@@ -43,18 +44,6 @@ const NUMBER_TYPES = new Set([
  * instead of threading a result type through every level.
  */
 class IdlCoercionError extends Error {}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function parsePublicKey(value: string): PublicKey | null {
-  try {
-    return new PublicKey(value);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Validates the input parses as an Anchor IDL object with an instructions

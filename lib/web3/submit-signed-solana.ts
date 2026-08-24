@@ -6,6 +6,7 @@ import {
 } from "@solana/web3.js";
 import bs58 from "bs58";
 import type { SolanaProviderManager } from "@/lib/rpc/providers/solana";
+import { sleep } from "@/lib/sleep";
 
 function extractFirstSignature(signedBytes: Uint8Array): Uint8Array | null {
   try {
@@ -50,10 +51,6 @@ export type ReconcileOptions = {
   attempts?: number;
   delayMs?: number;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Polls a signature's on-chain status, tolerating the indexing lag that follows

@@ -1,6 +1,7 @@
 import { type Commitment, Connection } from "@solana/web3.js";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import { safeFetch } from "@/lib/safe-fetch";
+import { sleep } from "@/lib/sleep";
 import { redactAllUrls, scrubRpcUrls } from "../scrub-rpc-urls";
 import {
   RPC_CONNECTION_ERROR_PATTERNS,
@@ -484,7 +485,7 @@ export class SolanaProviderManager {
           break;
         }
 
-        await this.delay(Math.min(1000 * 2 ** attempt, 5000));
+        await sleep(Math.min(1000 * 2 ** attempt, 5000));
       }
     }
 
@@ -506,10 +507,6 @@ export class SolanaProviderManager {
         )
       ),
     ]);
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   getMetrics(): Readonly<SolanaProviderMetrics> {

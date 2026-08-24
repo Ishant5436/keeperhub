@@ -25,6 +25,7 @@ import {
 } from "@/lib/mcp/validate-workflow";
 import { VALIDATION_WARNING_CODES } from "@/lib/mcp/validate-workflow-codes";
 import { isTemplateReference } from "@/lib/mcp/validate-workflow-web3";
+import { sleep } from "@/lib/sleep";
 
 export type ValidateWorkflowDeepOptions = {
   /** Chain IDs to consider valid (passed through to the fast tier when 48-02 lands). */
@@ -238,10 +239,7 @@ async function runWithLimit<T, R>(
   // simply never pushed because they resolve after we return).
   await Promise.race([
     Promise.all(workers),
-    new Promise<void>((resolve) => {
-      const remaining = Math.max(0, deadline - Date.now());
-      setTimeout(resolve, remaining);
-    }),
+    sleep(Math.max(0, deadline - Date.now())),
   ]);
 
   return results;

@@ -87,13 +87,13 @@ vi.mock("@/lib/explorer", () => ({
     `https://solscan.io/account/${address}`,
 }));
 
-vi.mock("@/lib/metrics/instrumentation/plugin", () => ({
-  withPluginMetrics: (_opts: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/metrics/instrumentation/plugin", async () =>
+  (await import("../mocks/step-mocks")).pluginMetricsPassthrough()
+);
 
-vi.mock("@/lib/workflow/executor/step-handler", () => ({
-  withStepLogging: (_input: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/workflow/executor/step-handler", async () =>
+  (await import("../mocks/step-mocks")).stepHandlerPassthrough()
+);
 
 vi.mock("@/lib/utils", () => ({
   getErrorMessage: (error: { message?: string }) =>

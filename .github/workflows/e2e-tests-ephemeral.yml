@@ -3,6 +3,14 @@ name: E2E Tests Ephemeral
 
 on:
   workflow_call:
+    outputs:
+      passed:
+        description: >-
+          "true" only when every e2e job reached an acceptable terminal state.
+          Callers MUST gate deployment on this equalling the string "true" and
+          must treat any other value, including an empty one, as a failure.
+          See the e2e-gate job for why `!failure()` is not enough.
+        value: ${{ jobs.e2e-gate.outputs.passed }}
     inputs:
       caller_event:
         description: "Event name from the calling workflow (push, pull_request)"
@@ -121,12 +129,25 @@ jobs:
             fi
           fi
 
-  # Production build for the bare-metal path (PRs, workflow_dispatch,
-  # schedule, prod pushes), done once and shared: the e2e vitest and
-  # protocol-coverage jobs download the artifact and start the app from
-  # it instead of each running its own pnpm build. Docker-path runs
-  # (staging pushes provide image_tag) skip this job; those jobs pull
-  # the prebuilt ECR image instead.
+  # Production build for the bare-metal path, done once and shared: the e2e
+  # vitest and protocol-coverage jobs download the artifact and start the app
+  # from it instead of each running its own pnpm build. Docker-path runs skip
+  # this job and pull the prebuilt ECR image instead.
+  #
+  # WARNING (KEEP-1206). This bare build does NOT fit a standard runner. It needs
+  # more than 16 GiB and at most 20 GiB (measured 2026-08-24: OOM-killed under a
+  # 16 GiB hard limit, clean at 20 GiB, peak 20.1 GiB, 4 CPUs, swap off), while
+  # ubuntu-latest offers 16 GiB of RAM plus roughly 4 GiB of swap. It died on
+  # every prod release from 2026-08-18 onward.
+  #
+  # Staging and prod pushes no longer reach this job: both now supply an
+  # image_tag, staging from build-images and prod from ci-pipeline's
+  # resolve-e2e-image (the staging image for the commit the release merges).
+  # The only caller left is a pull request carrying the run-e2e-tests-ephemeral
+  # label, and there is no prebuilt image to hand a PR. So that label is
+  # currently unusable: adding it makes this job OOM. Nothing has hit it because
+  # no recent PR used the label. Before relying on PR e2e again, either give this
+  # job a runner with real memory or build a PR image for it to reuse.
   build-app:
     needs: should-run
     if: ${{ needs.should-run.outputs.run-e2e == 'true' && inputs.image_tag == '' }}
@@ -141,14 +162,17 @@ jobs:
       - name: Setup Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
 
-      - name: Cache Next.js build
-        uses: actions/cache@v6
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
-            ${{ runner.os }}-nextjs-
+      # KEEP-1206: the `actions/cache` step that used to sit here is gone.
+      # It was added on the premise that a warm `.next/cache` makes a
+      # GitHub-hosted build cheap. Turbopack (the build default since Next 16)
+      # writes no persistent compile cache, so that premise never held. Measured
+      # on 2026-08-24: after a full production build `.next/cache` holds only
+      # `.tsbuildinfo` plus the workflow DevKit manifests - nothing Turbopack
+      # can reuse. In practice nothing was restored either: zero
+      # `Linux-nextjs-*` caches existed at all, because this job's key embeds
+      # `hashFiles('**/*.ts','**/*.tsx')` and busts on every commit. Restore
+      # this only alongside a Next version that actually persists a build cache,
+      # and verify a cache larger than a megabyte really appears before trusting it.
 
       # Same env the start-app action's bare-metal build step used when it
       # lived inside the e2e vitest job, except DATABASE_URL, which must be
@@ -1491,3 +1515,65 @@ jobs:
           name: playwright-screenshots-ephemeral
           path: test-results/**/*.png
           retention-days: 7
+
+  # KEEP-1206. The deploy gate used to be `!failure() && !cancelled()` over this
+  # workflow in ci-pipeline.yml. That did not hold: on 2026-08-18 (run
+  # 32126673288), 2026-08-20 (32329142935) and 2026-08-21 (32507444096) the
+  # build-app job ended `failure` and deploy + release still ran to success, so
+  # three prod releases shipped without a passing e2e suite. On attempt 3 of run
+  # 32670866140 the same failure did skip deploy, so the bypass rides on the
+  # re-run path. The exact GitHub semantics behind it are not pinned down, and
+  # the gate should not depend on knowing them.
+  #
+  # This job replaces that implicit gate with an explicit one. It reads every
+  # sibling job's `result` directly and emits a single string. `always()` makes
+  # it run even when a sibling failed, so a caller that sees no output at all is
+  # looking at an infrastructure failure and must also treat that as not-passed.
+  #
+  # `skipped` is accepted because several jobs skip legitimately: build-app skips
+  # on the Docker path, and every job skips when should-run says run-e2e=false
+  # (the ENABLE_E2E_EPHEMERAL_TESTS kill switch or a [skip e2e] commit). Only
+  # `failure` and `cancelled` are rejected.
+  e2e-gate:
+    needs:
+      - should-run
+      - build-app
+      - tier1-simulations
+      - tier1-simulations-l2
+      - e2e-vitest-ephemeral
+      - protocol-coverage-ephemeral
+      - protocol-coverage-floor
+      - e2e-playwright-ephemeral
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      passed: ${{ steps.gate.outputs.passed }}
+    steps:
+      - name: Evaluate every e2e job result
+        id: gate
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # Write `passed` exactly once. Emitting it twice would leave two
+          # values in $GITHUB_OUTPUT and make the gate depend on which one the
+          # runner keeps. Any exit before the write leaves the output unset,
+          # which the caller already treats as not-passed.
+          BAD=""
+          while IFS=$'\t' read -r job result; do
+            case "${result}" in
+              success|skipped)
+                echo "ok       ${job}: ${result}" ;;
+              *)
+                echo "NOT OK   ${job}: ${result}"
+                BAD="${BAD} ${job}(${result})" ;;
+            esac
+          done < <(echo "${RESULTS}" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"')
+
+          if [[ -n "${BAD}" ]]; then
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "::error::E2E gate is closed. Not acceptable:${BAD}. Deployment must not proceed."
+            exit 1
+          fi
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "E2E gate is open: every job succeeded or skipped legitimately."

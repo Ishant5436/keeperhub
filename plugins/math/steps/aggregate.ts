@@ -1,8 +1,7 @@
 import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -617,13 +616,10 @@ export async function aggregateStep(
 ): Promise<AggregateResult> {
   "use step";
 
-  return await withPluginMetrics(
-    {
-      pluginName: PLUGIN_NAME,
-      actionName: ACTION_NAME,
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => Promise.resolve(stepHandler(input)))
+  return runPluginStep(
+    { pluginName: PLUGIN_NAME, actionName: ACTION_NAME },
+    input,
+    () => Promise.resolve(stepHandler(input))
   );
 }
 

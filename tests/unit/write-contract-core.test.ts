@@ -4,13 +4,13 @@ const DIRECT_ID_PREFIX_REGEX = /^direct-/;
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/workflow/executor/step-handler", () => ({
-  withStepLogging: (_input: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/workflow/executor/step-handler", async () =>
+  (await import("../mocks/step-mocks")).stepHandlerPassthrough()
+);
 
-vi.mock("@/lib/metrics/instrumentation/plugin", () => ({
-  withPluginMetrics: (_opts: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/metrics/instrumentation/plugin", async () =>
+  (await import("../mocks/step-mocks")).pluginMetricsPassthrough()
+);
 
 vi.mock("@/lib/logging", () => ({
   ErrorCategory: {
@@ -54,9 +54,9 @@ vi.mock("@/lib/utils/id", () => ({
   generateId: () => mockGenerateId(),
 }));
 
-vi.mock("@/lib/utils", () => ({
-  getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-}));
+vi.mock("@/lib/utils", async () =>
+  (await import("../mocks/step-mocks")).utilsGetErrorMessage()
+);
 
 vi.mock("@/lib/rpc/network-utils", () => ({
   getChainIdFromNetwork: vi.fn().mockReturnValue(1),

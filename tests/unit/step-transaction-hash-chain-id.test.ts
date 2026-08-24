@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { outputFragmentFactories } from "@/plugins/field-fragments";
 
 const PLUGINS_DIR = join(process.cwd(), "plugins");
 const STEP_FILENAME = /\.ts$/;
@@ -180,6 +181,26 @@ type PublishedAction = {
   outputFields: string[];
 };
 
+// Field lists may mix inline literals with shared fragment factory calls
+// (plugins/field-fragments.ts), so the source scan resolves both: literal
+// `field: "x"` entries plus `somethingOutput()` calls, the latter by invoking
+// the factory (the fragments module is a leaf with no runtime imports).
+// Fail closed: an unresolvable factory call would otherwise silently drop
+// the field and could hide a transactionHash from the guard below.
+function resolveFragmentFields(block: string): string[] {
+  const fields: string[] = [];
+  for (const call of block.matchAll(/\b([a-z][A-Za-z]*Output)\(\)/g)) {
+    const factory = outputFragmentFactories[call[1] as string];
+    if (!factory) {
+      throw new Error(
+        `outputFields uses fragment factory "${call[1]}" that is missing from outputFragmentFactories in plugins/field-fragments.ts; add it so the published-schema guard can see its field`
+      );
+    }
+    fields.push(factory().field);
+  }
+  return fields;
+}
+
 function collectPublishedActions(): PublishedAction[] {
   const actions: PublishedAction[] = [];
   for (const plugin of readdirSync(PLUGINS_DIR, { withFileTypes: true })) {
@@ -198,9 +219,12 @@ function collectPublishedActions(): PublishedAction[] {
       if (slug && fields) {
         actions.push({
           slug,
-          outputFields: [...fields.matchAll(/field: "([^"]+)"/g)].map(
-            (m) => m[1] as string
-          ),
+          outputFields: [
+            ...[...fields.matchAll(/field: "([^"]+)"/g)].map(
+              (m) => m[1] as string
+            ),
+            ...resolveFragmentFields(fields),
+          ],
         });
       }
     }

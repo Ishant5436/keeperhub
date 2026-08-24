@@ -5,6 +5,8 @@
  * for Ethereum, Base, Arbitrum, and other Etherscan-supported chains.
  */
 
+import { sleep } from "@/lib/sleep";
+
 type EtherscanResponse = {
   status: string;
   message: string;
@@ -347,9 +349,7 @@ export async function fetchEtherscanTransactions(
     window++
   ) {
     if (window > 0) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, ETHERSCAN_PAGE_DELAY_MS)
-      );
+      await sleep(ETHERSCAN_PAGE_DELAY_MS);
     }
 
     const url = buildTxListParams(

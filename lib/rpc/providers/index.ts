@@ -1,5 +1,6 @@
 import { ethers, isError } from "ethers";
 import { ErrorCategory, logUserError } from "@/lib/logging";
+import { sleep } from "@/lib/sleep";
 import { safeEthersGetUrl } from "../safe-ethers-fetch";
 import { redactAllUrls, scrubRpcUrls } from "../scrub-rpc-urls";
 import {
@@ -645,7 +646,7 @@ export class RpcProviderManager {
           break;
         }
 
-        await this.delay(delayMs);
+        await sleep(delayMs);
       }
     }
 
@@ -668,10 +669,6 @@ export class RpcProviderManager {
         )
       ),
     ]);
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   getMetrics(): Readonly<RpcProviderMetrics> {

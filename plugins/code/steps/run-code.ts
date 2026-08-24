@@ -3,7 +3,6 @@ import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { spawn } from "node:child_process";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import {
   SANDBOX_CHILD_SOURCE as CHILD_SOURCE,
   SANDBOX_RESULT_FD,
@@ -11,23 +10,14 @@ import {
   createSandboxResultReader,
   decodeSandboxResult,
 } from "@/lib/sandbox/child-source";
-import { runRemote } from "@/lib/sandbox/client";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
-
-type LogEntry = {
-  level: "log" | "warn" | "error";
-  args: unknown[];
-};
-
-type RunCodeResult =
-  | { success: true; result: unknown; logs: LogEntry[] }
-  | {
-      success: false;
-      error: string;
-      logs: LogEntry[];
-      line?: number;
-      errorClass?: ExecutionErrorType;
-    };
+import {
+  type ChildOutcome,
+  extractLineNumber,
+  isChildOutcome,
+  type RunCodeResult,
+  runRemote,
+} from "@/lib/sandbox/client";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 
 export type RunCodeCoreInput = {
   code: string;
@@ -39,7 +29,6 @@ export type RunCodeInput = StepInput & RunCodeCoreInput;
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const MAX_TIMEOUT_SECONDS = 120;
 const UNRESOLVED_TEMPLATE_REGEX = /\{\{@?[^}]+\}\}/g;
-const VM_LINE_REGEX = /user-code\.js:(\d+)/;
 
 const SANDBOX_BACKEND = process.env.SANDBOX_BACKEND;
 
@@ -101,20 +90,6 @@ function stripStringsAndComments(code: string): string {
   return out.join("");
 }
 
-function extractLineNumber(stack: string | undefined): number | undefined {
-  // Defensive: the decoded outcome crosses an untrusted boundary, so `stack`
-  // may not actually be a string at runtime; `.match` on a non-string throws.
-  if (typeof stack !== "string") {
-    return undefined;
-  }
-  const match = stack.match(VM_LINE_REGEX);
-  if (match?.[1]) {
-    const rawLine = Number.parseInt(match[1], 10);
-    return Math.max(1, rawLine - 1);
-  }
-  return undefined;
-}
-
 const CHILD_ENV_ALLOWLIST = [
   "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
@@ -133,52 +108,6 @@ function buildChildEnv(): NodeJS.ProcessEnv {
     }
   }
   return out as NodeJS.ProcessEnv;
-}
-
-type ChildOutcome =
-  | { ok: true; result: unknown; logs: LogEntry[] }
-  | {
-      ok: false;
-      errorMessage: string;
-      errorStack?: string;
-      logs: LogEntry[];
-    };
-
-function isLogEntry(value: unknown): value is LogEntry {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const e = value as { level?: unknown; args?: unknown };
-  return typeof e.level === "string" && Array.isArray(e.args);
-}
-
-// The decoded frame crosses an untrusted boundary (a vm-escaped child can forge
-// it), so validate the whole envelope, not just `ok` -- mirroring the main-app
-// client guard so a forged frame fails closed instead of surfacing undefined
-// error/log fields downstream.
-function isChildOutcome(value: unknown): value is ChildOutcome {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const v = value as {
-    ok?: unknown;
-    logs?: unknown;
-    errorMessage?: unknown;
-    errorStack?: unknown;
-  };
-  if (typeof v.ok !== "boolean" || !Array.isArray(v.logs)) {
-    return false;
-  }
-  if (!v.logs.every(isLogEntry)) {
-    return false;
-  }
-  if (v.ok === true) {
-    return true;
-  }
-  return (
-    typeof v.errorMessage === "string" &&
-    (v.errorStack === undefined || typeof v.errorStack === "string")
-  );
 }
 
 function outcomeFromReader(reader: SandboxResultReader): ChildOutcome {
@@ -449,13 +378,10 @@ async function stepHandler(input: RunCodeCoreInput): Promise<RunCodeResult> {
 export async function runCodeStep(input: RunCodeInput): Promise<RunCodeResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "code",
-      actionName: "run-code",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input)),
+  return runPluginStep(
+    { pluginName: "code", actionName: "run-code" },
+    input,
+    stepHandler,
   );
 }
 runCodeStep.maxRetries = 0;

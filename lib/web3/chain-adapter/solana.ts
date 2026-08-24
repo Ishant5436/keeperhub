@@ -9,6 +9,7 @@ import { logWarn } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import type { RpcOperationType } from "@/lib/rpc/providers/index";
 import type { SolanaProviderManager } from "@/lib/rpc/providers/solana";
+import { sleep } from "@/lib/sleep";
 import { getErrorMessage } from "@/lib/utils";
 import type { NonceSession } from "../nonce-manager";
 import { assertMaxSolLamportsOutflow } from "../solana-max-sol-guard";
@@ -61,10 +62,6 @@ function isSolanaBlockhashExpiryError(error: unknown): boolean {
  */
 const EXPIRY_PROOF_TIMEOUT_MS = 90_000;
 const EXPIRY_PROOF_POLL_MS = 2000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Overrides for the waits on the broadcast-failure path: proving an expired

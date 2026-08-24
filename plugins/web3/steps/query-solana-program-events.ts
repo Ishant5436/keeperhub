@@ -1,9 +1,8 @@
 import "server-only";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import type {
   QuerySolanaProgramEventsCoreInput,
@@ -30,13 +29,10 @@ export async function querySolanaProgramEventsStep(
 ): Promise<QuerySolanaProgramEventsResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "query-solana-program-events",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => queryProgramEventsCore(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "query-solana-program-events" },
+    input,
+    queryProgramEventsCore
   );
 }
 

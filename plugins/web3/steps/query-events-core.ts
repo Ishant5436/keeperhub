@@ -1,3 +1,4 @@
+import { sleep } from "@/lib/sleep";
 import { ethers } from "ethers";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { getErrorMessage } from "@/lib/utils";
@@ -42,12 +43,6 @@ export function isNearHeadBatch(
   toBlockIsLatest: boolean
 ): boolean {
   return toBlockIsLatest && toBlock - batchEnd < TIP_SAFETY_MARGIN_BLOCKS;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function resolveEventFilter(
@@ -153,7 +148,7 @@ export async function queryBatchWithRetry(
         `[Query Events] Batch ${start}-${end} failed (attempt ${attempt}/${MAX_BATCH_RETRIES}): ${getErrorMessage(error)}`
       );
       if (attempt < MAX_BATCH_RETRIES) {
-        await delay(RETRY_BASE_DELAY_MS * attempt);
+        await sleep(RETRY_BASE_DELAY_MS * attempt);
       }
     }
   }

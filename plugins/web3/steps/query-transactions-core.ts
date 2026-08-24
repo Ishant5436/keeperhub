@@ -1,9 +1,10 @@
 import "server-only";
+import { getRpcPreferenceUserId } from "@/lib/workflow/executor/helpers";
 
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "@/lib/db";
-import { explorerConfigs, workflowExecutions } from "@/lib/db/schema";
+import { explorerConfigs } from "@/lib/db/schema";
 import {
   fetchContractTransactions,
   getAddressUrl,
@@ -17,8 +18,8 @@ import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { serializeArg } from "@/lib/web3/serialize-arg";
 import { evmOnlyGuard } from "@/lib/web3/validate-chain-address";
 import { getErrorMessage } from "@/lib/utils";
+import { resolveBlockRange } from "./block-range-helpers";
 
-const DEFAULT_BLOCK_LOOKBACK = 6500;
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
 
 type AbiEntry = { type: string; name: string };
@@ -60,22 +61,6 @@ export type QueryTransactionsCoreInput = {
   _context?: { executionId?: string; organizationId?: string };
 };
 
-async function getUserIdFromExecution(
-  executionId: string | undefined
-): Promise<string | undefined> {
-  if (!executionId) {
-    return;
-  }
-
-  const execution = await db
-    .select({ userId: workflowExecutions.userId })
-    .from(workflowExecutions)
-    .where(eq(workflowExecutions.id, executionId))
-    .limit(1);
-
-  return execution[0]?.userId;
-}
-
 function parseAbi(
   abi: string
 ): { success: true; parsed: AbiEntry[] } | { success: false; error: string } {
@@ -107,103 +92,6 @@ function parseAbi(
   }
 
   return { success: true, parsed: parsedAbi as AbiEntry[] };
-}
-
-function parseBlockCount(
-  blockCountInput: number | string | undefined
-): { success: true; value: number } | { success: false; error: string } | null {
-  if (blockCountInput === undefined || blockCountInput === null) {
-    return null;
-  }
-
-  const strVal =
-    typeof blockCountInput === "string" ? blockCountInput.trim() : "";
-  if (typeof blockCountInput === "string" && strVal === "") {
-    return null;
-  }
-
-  const parsed =
-    typeof blockCountInput === "number"
-      ? blockCountInput
-      : Number.parseInt(strVal, 10);
-
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    return {
-      success: false,
-      error: `Invalid blockCount value: ${blockCountInput}`,
-    };
-  }
-
-  return { success: true, value: parsed };
-}
-
-function resolveFromBlock(
-  fromBlockInput: string | undefined,
-  blockCountInput: number | string | undefined,
-  resolvedToBlock: number
-): { success: true; value: number } | { success: false; error: string } {
-  const fromBlockStr = fromBlockInput?.toString().trim() ?? "";
-
-  if (fromBlockStr !== "") {
-    const parsed = Number.parseInt(fromBlockStr, 10);
-    if (Number.isNaN(parsed)) {
-      return {
-        success: false,
-        error: `Invalid fromBlock value: ${fromBlockInput}`,
-      };
-    }
-    return { success: true, value: parsed };
-  }
-
-  const blockCountResult = parseBlockCount(blockCountInput);
-  if (blockCountResult !== null && !blockCountResult.success) {
-    return { success: false, error: blockCountResult.error };
-  }
-
-  const lookback =
-    blockCountResult !== null ? blockCountResult.value : DEFAULT_BLOCK_LOOKBACK;
-
-  return { success: true, value: Math.max(0, resolvedToBlock - lookback) };
-}
-
-type BlockRange = { fromBlock: number; toBlock: number };
-
-async function resolveBlockRange(
-  provider: ethers.JsonRpcProvider,
-  fromBlockInput: string | undefined,
-  toBlockInput: string | undefined,
-  blockCountInput: number | string | undefined
-): Promise<
-  { success: true; range: BlockRange } | { success: false; error: string }
-> {
-  const toBlockStr = toBlockInput?.toString().trim() ?? "";
-  let resolvedToBlock: number;
-
-  if (toBlockStr === "" || toBlockStr.toLowerCase() === "latest") {
-    resolvedToBlock = await provider.getBlockNumber();
-  } else {
-    resolvedToBlock = Number.parseInt(toBlockStr, 10);
-    if (Number.isNaN(resolvedToBlock)) {
-      return {
-        success: false,
-        error: `Invalid toBlock value: ${toBlockInput}`,
-      };
-    }
-  }
-
-  const fromBlockResult = resolveFromBlock(
-    fromBlockInput,
-    blockCountInput,
-    resolvedToBlock
-  );
-  if (!fromBlockResult.success) {
-    return { success: false, error: fromBlockResult.error };
-  }
-
-  return {
-    success: true,
-    range: { fromBlock: fromBlockResult.value, toBlock: resolvedToBlock },
-  };
 }
 
 const serializeValue = serializeArg;
@@ -410,7 +298,7 @@ export async function queryTransactionsCore(
 
   const { iface, functionFragment, chainId } = validation.data;
 
-  const userId = await getUserIdFromExecution(input._context?.executionId);
+  const userId = await getRpcPreferenceUserId(input._context?.executionId);
 
   let rpcManager: RpcProviderManager;
   try {

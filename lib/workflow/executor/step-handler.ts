@@ -7,6 +7,7 @@ import "server-only";
 
 import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { recordStepMetrics } from "@/lib/metrics/instrumentation/workflow";
 import { redactAllUrls, redactSecretUrls } from "@/lib/rpc/scrub-rpc-urls";
 import { redactSensitiveData } from "@/lib/utils/redact";
@@ -264,6 +265,37 @@ export function withStepLogging<TInput extends StepInput, TOutput>(
     );
   }
   return withStepLoggingInner(loggedInput, context, stepLogic);
+}
+
+/**
+ * Standard plugin-step epilogue: withPluginMetrics wrapping withStepLogging
+ * wrapping the handler, with executionId read from the logged input's
+ * _context. Steps whose handler takes arguments other than the logged input
+ * pass a closure.
+ *
+ * @example
+ * export async function myActionStep(input: MyActionInput) {
+ *   "use step";
+ *   return runPluginStep(
+ *     { pluginName: "my-plugin", actionName: "my-action" },
+ *     input,
+ *     stepHandler
+ *   );
+ * }
+ */
+export function runPluginStep<TInput extends StepInput, TOutput>(
+  options: { pluginName: string; actionName: string },
+  input: TInput,
+  stepLogic: (input: TInput) => Promise<TOutput>
+): Promise<TOutput> {
+  return withPluginMetrics(
+    {
+      pluginName: options.pluginName,
+      actionName: options.actionName,
+      executionId: input._context?.executionId,
+    },
+    () => withStepLogging(input, () => stepLogic(input))
+  );
 }
 
 async function withStepLoggingInner<TInput extends StepInput, TOutput>(

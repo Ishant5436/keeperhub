@@ -2,13 +2,12 @@ import "server-only";
 
 import { ethers } from "ethers";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getErrorMessage } from "@/lib/utils";
 import { resolveOrganizationContext } from "@/lib/web3/resolve-org-context";
 import { assertTempoChain } from "./tempo-step-helpers";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import {
   type BroadcastMode,
@@ -117,13 +116,10 @@ export async function holdPaymentStep(
 ): Promise<HoldPaymentResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "tempo",
-      actionName: "hold-payment",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "tempo", actionName: "hold-payment" },
+    input,
+    stepHandler
   );
 }
 

@@ -1,10 +1,9 @@
 import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import { type InfoResult, isEvmAddress, postInfo } from "./info-request-core";
 
@@ -32,13 +31,10 @@ export async function referralStep(
 ): Promise<InfoResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "hyperliquid",
-      actionName: "referral",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "hyperliquid", actionName: "referral" },
+    input,
+    stepHandler
   );
 }
 

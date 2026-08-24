@@ -18,9 +18,9 @@ vi.mock("@/lib/abi/cache", () => ({
   resolveAbi: vi.fn().mockResolvedValue({ abi: "[]" }),
 }));
 
-vi.mock("@/lib/utils", () => ({
-  getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-}));
+vi.mock("@/lib/utils", async () =>
+  (await import("../mocks/step-mocks")).utilsGetErrorMessage()
+);
 
 // Use @/ aliases so Vitest resolves the same module the route does
 const mockValidateApiKey = vi.fn();

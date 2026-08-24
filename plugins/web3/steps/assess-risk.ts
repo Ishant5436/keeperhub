@@ -1,8 +1,7 @@
 import "server-only";
 
 import { safeFetch } from "@/lib/safe-fetch";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import {
   type DecodeCalldataCoreInput,
   type DecodedParameter,
@@ -556,13 +555,10 @@ export async function assessRiskStep(
 ): Promise<AssessRiskResult> {
   "use step";
 
-  return await withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "assess-risk",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "assess-risk" },
+    input,
+    stepHandler
   );
 }
 assessRiskStep.maxRetries = 0;

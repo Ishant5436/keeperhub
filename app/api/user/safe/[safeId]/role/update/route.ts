@@ -10,26 +10,9 @@ import {
 } from "@/lib/safe/roles-orchestrator";
 import type { DroppedInput } from "@/lib/safe/route-input";
 import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
+import type { DirectRuleBody, TokenLimitBody } from "../../../_lib/role-body";
 
 type RouteParams = { params: Promise<{ safeId: string }> };
-
-type TokenLimitBody = {
-  tokenAddress?: string;
-  tokenSymbol?: string;
-  tokenDecimals?: number;
-  amountHuman?: string;
-  periodSeconds?: number;
-};
-
-type DirectRuleBody = {
-  kind?: "erc20-transfer" | "erc20-approve" | "native-transfer";
-  tokenAddress?: string | null;
-  tokenSymbol?: string;
-  tokenDecimals?: number;
-  counterparty?: string;
-  amountHuman?: string;
-  periodSeconds?: number;
-};
 
 type UpdateBody = {
   protocols?: Array<{

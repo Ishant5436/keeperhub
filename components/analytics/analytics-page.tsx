@@ -1,12 +1,11 @@
 "use client";
 
 import { useAtomValue } from "jotai";
-import { BarChart3, LogIn } from "lucide-react";
-import Link from "next/link";
+import { BarChart3 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { FullPageAuthGate } from "@/components/full-page-auth-gate";
 import {
   analyticsProjectIdAtom,
   analyticsSummaryAtom,
@@ -21,39 +20,14 @@ import { TimeSeriesChart } from "./time-series-chart";
 import { useAnalytics } from "./use-analytics";
 
 function AuthGate({ error }: { error: string }): ReactNode {
-  const isAuthRequired = error === "AUTH_REQUIRED";
-
   return (
-    <div className="pointer-events-auto fixed inset-0 overflow-y-auto bg-sidebar">
-      <div className="transition-[margin-left] duration-200 ease-out md:ml-[var(--nav-content-offset,var(--nav-sidebar-width,60px))]">
-        <div className="flex min-h-[80vh] flex-col items-center justify-center gap-6 p-6 text-center">
-          <div className="flex size-20 items-center justify-center rounded-2xl bg-muted">
-            {isAuthRequired ? (
-              <LogIn className="size-10 text-muted-foreground" />
-            ) : (
-              <BarChart3 className="size-10 text-muted-foreground" />
-            )}
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold tracking-tight">
-              {isAuthRequired
-                ? "Sign in to view analytics"
-                : "Organization required"}
-            </h2>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              {isAuthRequired
-                ? "Sign in to your account to access execution analytics and gas tracking."
-                : "Create or join an organization to start tracking workflow executions."}
-            </p>
-          </div>
-          {!isAuthRequired && (
-            <Button asChild>
-              <Link href="/">Get Started</Link>
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
+    <FullPageAuthGate
+      error={error}
+      icon={BarChart3}
+      orgDescription="Create or join an organization to start tracking workflow executions."
+      signInDescription="Sign in to your account to access execution analytics and gas tracking."
+      signInTitle="Sign in to view analytics"
+    />
   );
 }
 

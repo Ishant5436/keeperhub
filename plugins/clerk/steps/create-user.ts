@@ -2,11 +2,11 @@ import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { fetchCredentials } from "@/lib/credential-fetcher";
-import { safeFetch } from "@/lib/safe-fetch";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import type { ClerkCredentials } from "../credentials";
 import { type ClerkUserResult, toClerkUserData } from "../types";
+import { clerkFetch, requireClerkSecretKey } from "./clerk-core";
 
 export type ClerkCreateUserCoreInput = {
   emailAddress: string;
@@ -29,17 +29,9 @@ async function stepHandler(
   input: ClerkCreateUserCoreInput,
   credentials: ClerkCredentials
 ): Promise<ClerkUserResult> {
-  const secretKey = credentials.CLERK_SECRET_KEY;
-
-  if (!secretKey) {
-    return {
-      success: false,
-      error: {
-        message:
-          "CLERK_SECRET_KEY is not configured. Please add it in Project Integrations.",
-      },
-      errorClass: ExecutionErrorType.USER,
-    };
+  const keyResult = requireClerkSecretKey(credentials);
+  if ("error" in keyResult) {
+    return keyResult;
   }
 
   if (!input.emailAddress) {
@@ -88,31 +80,18 @@ async function stepHandler(
       }
     }
 
-    const response = await safeFetch("https://api.clerk.com/v1/users", {
-      plugin: "clerk",
+    const result = await clerkFetch("https://api.clerk.com/v1/users", {
+      secretKey: keyResult.secretKey,
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${secretKey}`,
-        "Content-Type": "application/json",
-        "User-Agent": "workflow-builder.dev",
-      },
       body: JSON.stringify(body),
+      failureMessagePrefix: "Failed to create user",
     });
 
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: {
-          message:
-            errorBody.errors?.[0]?.message ||
-            `Failed to create user: ${response.status}`,
-        },
-        errorClass: response.status >= 500 ? ExecutionErrorType.EXTERNAL : ExecutionErrorType.USER,
-      };
+    if ("error" in result) {
+      return result;
     }
 
-    const apiUser = await response.json();
+    const apiUser = await result.response.json();
     return { success: true, data: toClerkUserData(apiUser) };
   } catch (err) {
     return {

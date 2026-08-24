@@ -1,4 +1,14 @@
 import type { IntegrationPlugin } from "@/plugins/registry";
+import {
+  amountField,
+  fromWalletOutput,
+  tempoChainIdOutput,
+  tokenConfigField,
+  transactionLinkOutput,
+  transferAmountOutput,
+  transferErrorOutput,
+  transferSuccessOutput,
+} from "@/plugins/field-fragments";
 import { registerIntegration } from "@/plugins/registry-core";
 import { TempoIcon } from "./icon";
 
@@ -32,21 +42,15 @@ const tempoPlugin: IntegrationPlugin = {
       stepFunction: "transferWithMemoStep",
       stepImportPath: "transfer-with-memo",
       outputFields: [
-        { field: "success", description: "Whether the transfer succeeded" },
+        transferSuccessOutput(),
         {
           field: "transactionHash",
           description: "The transaction hash of the transfer",
         },
-        {
-          field: "transactionLink",
-          description: "Explorer link to view the transaction",
-        },
-        { field: "from", description: "The sending wallet address" },
+        transactionLinkOutput(),
+        fromWalletOutput(),
         { field: "to", description: "The recipient address" },
-        {
-          field: "amount",
-          description: "The amount transferred (human-readable)",
-        },
+        transferAmountOutput(),
         {
           field: "memo",
           description: "The bytes32 memo attached to the transfer",
@@ -56,11 +60,8 @@ const tempoPlugin: IntegrationPlugin = {
           description:
             "On-chain expiry enforced (unix seconds), or null if none set",
         },
-        { field: "chainId", description: "The Tempo chain id used" },
-        {
-          field: "error",
-          description: "Error message if the transfer failed",
-        },
+        tempoChainIdOutput(),
+        transferErrorOutput(),
       ],
       configFields: [
         {
@@ -72,21 +73,8 @@ const tempoPlugin: IntegrationPlugin = {
           placeholder: "Select a Tempo network",
           required: true,
         },
-        {
-          key: "tokenConfig",
-          label: "Token",
-          type: "token-select",
-          networkField: "network",
-          required: true,
-        },
-        {
-          key: "amount",
-          label: "Amount",
-          type: "template-input",
-          placeholder: "100.50 or {{NodeName.amount}}",
-          example: "100.50",
-          required: true,
-        },
+        tokenConfigField(),
+        amountField(),
         {
           key: "recipientAddress",
           label: "Recipient Address",
@@ -133,11 +121,8 @@ const tempoPlugin: IntegrationPlugin = {
           field: "transactionHash",
           description: "The transaction hash of the atomic batch",
         },
-        {
-          field: "transactionLink",
-          description: "Explorer link to view the transaction",
-        },
-        { field: "from", description: "The sending wallet address" },
+        transactionLinkOutput(),
+        fromWalletOutput(),
         {
           field: "payoutCount",
           description: "Number of payments included in the batch",
@@ -146,7 +131,7 @@ const tempoPlugin: IntegrationPlugin = {
           field: "totalAmount",
           description: "Total amount paid across the batch (human-readable)",
         },
-        { field: "chainId", description: "The Tempo chain id used" },
+        tempoChainIdOutput(),
         {
           field: "error",
           description: "Error message if the batch payout failed",
@@ -162,13 +147,7 @@ const tempoPlugin: IntegrationPlugin = {
           placeholder: "Select a Tempo network",
           required: true,
         },
-        {
-          key: "tokenConfig",
-          label: "Token",
-          type: "token-select",
-          networkField: "network",
-          required: true,
-        },
+        tokenConfigField(),
         {
           key: "payouts",
           label: "Payouts",
@@ -204,10 +183,7 @@ const tempoPlugin: IntegrationPlugin = {
           field: "transactionHash",
           description: "The transaction hash of the swap",
         },
-        {
-          field: "transactionLink",
-          description: "Explorer link to view the transaction",
-        },
+        transactionLinkOutput(),
         { field: "from", description: "The swapping wallet address" },
         { field: "tokenIn", description: "Symbol of the token sold" },
         { field: "tokenOut", description: "Symbol of the token bought" },
@@ -221,7 +197,7 @@ const tempoPlugin: IntegrationPlugin = {
           description:
             "Minimum output enforced after slippage (human-readable)",
         },
-        { field: "chainId", description: "The Tempo chain id used" },
+        tempoChainIdOutput(),
         { field: "error", description: "Error message if the swap failed" },
       ],
       configFields: [
@@ -295,7 +271,7 @@ const tempoPlugin: IntegrationPlugin = {
           field: "precomputedHash",
           description: "The transaction hash the signed payment will settle as",
         },
-        { field: "from", description: "The sending wallet address" },
+        fromWalletOutput(),
         { field: "to", description: "The recipient address" },
         { field: "amount", description: "The amount held (human-readable)" },
         {
@@ -316,7 +292,7 @@ const tempoPlugin: IntegrationPlugin = {
             "On-chain deadline after which the payment can no longer settle (unix seconds)",
         },
         { field: "status", description: "The held payment status (pending)" },
-        { field: "chainId", description: "The Tempo chain id used" },
+        tempoChainIdOutput(),
         { field: "error", description: "Error message if the hold failed" },
       ],
       configFields: [
@@ -329,21 +305,8 @@ const tempoPlugin: IntegrationPlugin = {
           placeholder: "Select a Tempo network",
           required: true,
         },
-        {
-          key: "tokenConfig",
-          label: "Token",
-          type: "token-select",
-          networkField: "network",
-          required: true,
-        },
-        {
-          key: "amount",
-          label: "Amount",
-          type: "template-input",
-          placeholder: "100.50 or {{NodeName.amount}}",
-          example: "100.50",
-          required: true,
-        },
+        tokenConfigField(),
+        amountField(),
         {
           key: "recipientAddress",
           label: "Recipient Address",

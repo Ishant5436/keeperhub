@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { logWarn } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
+import { sleep } from "@/lib/sleep";
 import { getErrorMessage } from "@/lib/utils";
 import { OnChainRevertError } from "@/lib/web3/onchain-revert";
 import { submitSignedTransactionWithFailover } from "@/lib/web3/submit-signed";
@@ -25,12 +26,6 @@ import type {
 const TEMPO_CHAIN_IDS = new Set<number>([4217, 42_431]);
 const TEMPO_RECEIPT_TIMEOUT_MS = 60_000;
 const TEMPO_RECEIPT_POLL_INTERVAL_MS = 1500;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 export class EvmChainAdapter implements ChainAdapter {
   readonly chainFamily = "evm";
@@ -342,7 +337,7 @@ export class EvmChainAdapter implements ChainAdapter {
       if (receipt) {
         return receipt;
       }
-      await delay(TEMPO_RECEIPT_POLL_INTERVAL_MS);
+      await sleep(TEMPO_RECEIPT_POLL_INTERVAL_MS);
     }
     throw new Error(
       `Timed out waiting for Tempo transaction receipt (${tx.hash})`

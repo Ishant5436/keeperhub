@@ -1,7 +1,6 @@
 import "server-only";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import {
   type QueryTransactionsCoreInput,
   type QueryTransactionsResult,
@@ -15,13 +14,10 @@ export async function queryTransactionsStep(
 ): Promise<QueryTransactionsResult> {
   "use step";
 
-  return await withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "query-transactions",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => queryTransactionsCore(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "query-transactions" },
+    input,
+    queryTransactionsCore
   );
 }
 

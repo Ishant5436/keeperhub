@@ -12,21 +12,7 @@
  * leaf positions -- they are resolved later in the execution pipeline.
  */
 
-type AbiComponent = {
-  name: string;
-  type: string;
-  components?: AbiComponent[];
-};
-
-type AbiInput = {
-  name: string;
-  type: string;
-  components?: AbiComponent[];
-};
-
-type FunctionAbiEntry = {
-  inputs?: AbiInput[];
-};
+import type { AbiParam, FunctionAbiEntry } from "@/lib/abi/types";
 
 export type ValidationResult = { ok: true } | { ok: false; error: string };
 
@@ -85,7 +71,7 @@ function validateLeaf(
 function validateArray(
   value: unknown,
   type: string,
-  components: AbiComponent[] | undefined,
+  components: AbiParam[] | undefined,
   path: string
 ): ValidationResult {
   if (!Array.isArray(value)) {
@@ -108,7 +94,7 @@ function validateArray(
 
 function validateTuple(
   value: unknown,
-  components: AbiComponent[] | undefined,
+  components: AbiParam[] | undefined,
   path: string
 ): ValidationResult {
   if (!components || components.length === 0) {
@@ -141,7 +127,7 @@ function validateTuple(
 function validateValue(
   value: unknown,
   type: string,
-  components: AbiComponent[] | undefined,
+  components: AbiParam[] | undefined,
   path: string
 ): ValidationResult {
   if (isTemplateVariable(value)) {

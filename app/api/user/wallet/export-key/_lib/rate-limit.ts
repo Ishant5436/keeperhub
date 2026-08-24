@@ -2,6 +2,10 @@
 // the effective limit is LIMIT * num_replicas; acceptable at current replica
 // count. Redis-backed is a project-wide decision (see the same caveat on
 // app/api/execute/_lib/rate-limit.ts).
+//
+// Not built on lib/rate-limit/sliding-window.ts: this module returns a
+// minimal result (no limit/remaining/reset headers) and runs an amortised
+// every-N-calls eviction sweep, both of which diverge from the shared shape.
 
 type Bucket = { limit: number; windowMs: number };
 

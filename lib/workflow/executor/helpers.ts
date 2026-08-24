@@ -74,3 +74,29 @@ export async function getUserIdFromExecution(
 
   return execution[0].userId;
 }
+
+/**
+ * Lenient variant of getUserIdFromExecution for per-user RPC preference
+ * lookups in read steps. RPC preferences are a per-user convenience, not an
+ * authority signal, so a missing context, an unknown execution, or a
+ * transient DB failure all resolve to undefined and the step falls back to
+ * the chain's default RPC config rather than failing. Same retirement note
+ * as above: once RPC preferences move to the org this helper goes with them.
+ */
+export async function getRpcPreferenceUserId(
+  executionId: string | undefined
+): Promise<string | undefined> {
+  if (!executionId) {
+    return;
+  }
+  try {
+    const execution = await db
+      .select({ userId: workflowExecutions.userId })
+      .from(workflowExecutions)
+      .where(eq(workflowExecutions.id, executionId))
+      .limit(1);
+    return execution[0]?.userId;
+  } catch {
+    return;
+  }
+}

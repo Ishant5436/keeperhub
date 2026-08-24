@@ -86,6 +86,22 @@ jobs:
             echo "INCLUDE_TEST_ENDPOINTS=true" >> "$GITHUB_ENV"
           fi
 
+      # docker-bake.hcl reads the repo names under different variable names than
+      # the job env above uses. Export them once, derived from the *_ECR_NAME
+      # values so there is a single source of truth for each repo, and every
+      # later step (both bake attempts) inherits them. KEEP-1206: doing this here
+      # rather than on the bake step means the build and its retry cannot drift
+      # apart, and no repo name is written down twice.
+      - name: Export bake repository variables
+        run: |
+          {
+            echo "ECR_REPO=${AWS_ECR_NAME}"
+            echo "EXECUTOR_ECR_REPO=${EXECUTOR_ECR_NAME}"
+            echo "SCHEDULER_ECR_REPO=${SCHEDULER_ECR_NAME}"
+            echo "METRICS_COLLECTOR_ECR_REPO=${COLLECTOR_ECR_NAME}"
+            echo "SANDBOX_ECR_REPO=${SANDBOX_ECR_NAME}"
+          } >> "$GITHUB_ENV"
+
       - name: Check commit message for skip flags
         id: skip
         run: |
@@ -105,9 +121,14 @@ jobs:
       - name: Extract commit hash and ECR coordinates
         id: vars
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          if [[ -z "$SHA" || ${#SHA} -lt 7 ]]; then
-            echo "::error::Failed to resolve commit SHA (got '${SHA}')"
+          # --short=7 is pinned, NOT left to `git rev-parse --short`. That
+          # abbreviates to whatever length the local object count needs (7 in
+          # this shallow checkout, 9 in a full clone), which would silently move
+          # every image tag. ci-pipeline.yml's resolve-e2e-image job pins the
+          # same 7 so it can find the image this job pushed. KEEP-1206.
+          SHA=$(git rev-parse --short=7 HEAD)
+          if [[ ${#SHA} -ne 7 ]]; then
+            echo "::error::Expected a 7-character commit SHA, got '${SHA}'. Image tags would move; fix this before building."
             exit 1
           fi
           {
@@ -167,60 +188,46 @@ jobs:
         if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v4
 
-      # Persist the Next.js incremental-compile cache (.next/cache) across runs.
-      # BuildKit type=cache mounts are not carried by the registry layer cache,
-      # so on ephemeral runners the mount starts empty and next build runs cold
-      # every time. actions/cache stores the mount contents; buildkit-cache-dance
-      # injects them into the BuildKit builder before the build (and extracts
-      # them again in its post step, before actions/cache saves). Keyed per
-      # environment so staging and prod never share a lineage.
-      - name: Restore Next.js build cache
-        id: next-cache
-        if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true'
-        uses: actions/cache@v6
-        with:
-          path: .next-cache
-          key: next-build-cache-${{ env.ENVIRONMENT_TAG }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
-          restore-keys: |
-            next-build-cache-${{ env.ENVIRONMENT_TAG }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            next-build-cache-${{ env.ENVIRONMENT_TAG }}-
+      # KEEP-1206: the `actions/cache` + `buildkit-cache-dance` pair that used to
+      # sit here is gone. Both existed to carry `.next/cache` across ephemeral
+      # runners so `next build` would run warm. Turbopack (the build default
+      # since Next 16) writes no persistent compile cache, so there was never
+      # anything to carry. Measured on 2026-08-24: after a full production build
+      # `.next/cache` holds only `.tsbuildinfo` plus the workflow DevKit
+      # manifests. The saved cache bore that out - 495 KB, every run. The
+      # Dockerfile keeps its `nextjs-build-cache` mount, which still serialises
+      # targets that share the builder stage within one bake; only the
+      # cross-run persistence is dropped. Restore this only alongside a Next
+      # version that actually persists a build cache, and confirm a cache
+      # larger than a megabyte really appears before trusting it.
 
-      - name: Inject Next.js build cache into BuildKit
-        if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true'
-        uses: reproducible-containers/buildkit-cache-dance@v3
-        with:
-          cache-map: |
-            {
-              ".next-cache": {
-                "target": "/app/.next/cache",
-                "id": "nextjs-build-cache"
-              }
-            }
-          skip-extraction: ${{ steps.next-cache.outputs.cache-hit }}
-
+      # KEEP-1206. `pnpm build` inside this bake needs more than 16 GiB and at
+      # most 20 GiB (measured 2026-08-24: OOM-killed under a 16 GiB hard limit,
+      # clean at 20 GiB, peak 20.1 GiB, 4 CPUs, swap off). A standard runner has
+      # 16 GiB of RAM plus roughly 4 GiB of swap, so this build only just fits
+      # and it fits by swapping - which is why it takes 17-19 minutes rather than
+      # the ~6 it takes with real headroom, and why it dies outright when
+      # anything else on the runner wants memory. Measured rate: 4 failures in
+      # the last 40 push runs, staging and prod alike, all
+      # `ResourceExhausted: ... cannot allocate memory`.
+      #
+      # The retry below is a STOPGAP, not a fix. It works because BuildKit keeps
+      # the layers the first attempt completed, so the retry resumes rather than
+      # starting cold. It does not reduce the 20 GiB. Upgrading Next is NOT the
+      # way out: 16.3.2 was measured at ~30 GiB on this codebase, half again
+      # worse, and would break this build outright. The real fixes are more
+      # memory for this job or a smaller module graph.
+      #
+      # The verdict step below deliberately shouts when the retry was needed, so
+      # the failure rate stays visible instead of being hidden by the retry.
       - name: Build and push all images to ECR
+        id: bake
         if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true'
+        continue-on-error: true
         uses: docker/bake-action@v7
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPO: ${{ env.AWS_ECR_NAME }}
-          EXECUTOR_ECR_REPO: ${{ env.EXECUTOR_ECR_NAME }}
-          SCHEDULER_ECR_REPO: ${{ env.SCHEDULER_ECR_NAME }}
-          METRICS_COLLECTOR_ECR_REPO: ${{ env.COLLECTOR_ECR_NAME }}
-          SANDBOX_ECR_REPO: ${{ env.SANDBOX_ECR_NAME }}
           IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
-          NEXT_PUBLIC_AUTH_PROVIDERS: ${{ env.NEXT_PUBLIC_AUTH_PROVIDERS }}
-          NEXT_PUBLIC_GITHUB_CLIENT_ID: ${{ env.NEXT_PUBLIC_GITHUB_CLIENT_ID }}
-          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ env.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
-          NEXT_PUBLIC_BILLING_ENABLED: ${{ env.NEXT_PUBLIC_BILLING_ENABLED }}
-          NEXT_PUBLIC_GAS_SPONSORSHIP_ENABLED: ${{ env.NEXT_PUBLIC_GAS_SPONSORSHIP_ENABLED }}
-          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ env.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
-          ENVIRONMENT_TAG: ${{ env.ENVIRONMENT_TAG }}
-          INCLUDE_TEST_ENDPOINTS: ${{ env.INCLUDE_TEST_ENDPOINTS }}
-          NEXT_PUBLIC_SENTRY_DSN: ${{ env.NEXT_PUBLIC_SENTRY_DSN }}
-          SENTRY_ORG: ${{ env.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ env.SENTRY_PROJECT }}
-          SENTRY_AUTH_TOKEN: ${{ env.SENTRY_AUTH_TOKEN }}
           SENTRY_RELEASE: ${{ steps.vars.outputs.sha_short }}
         with:
           files: docker-bake.hcl
@@ -232,6 +239,40 @@ jobs:
             pipeline
             sandbox
           push: true
+
+      - name: Retry the image build once
+        id: bake-retry
+        if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true' && steps.bake.outcome == 'failure'
+        continue-on-error: true
+        uses: docker/bake-action@v7
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+          SENTRY_RELEASE: ${{ steps.vars.outputs.sha_short }}
+        with:
+          files: docker-bake.hcl
+          targets: |
+            pipeline
+            sandbox
+          push: true
+
+      - name: Image build verdict
+        if: steps.skip.outputs.skip_build != 'true' && steps.check-image.outputs.exists != 'true'
+        env:
+          FIRST: ${{ steps.bake.outcome }}
+          RETRY: ${{ steps.bake-retry.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${FIRST}" == "success" ]]; then
+            echo "Image build succeeded on the first attempt."
+            exit 0
+          fi
+          if [[ "${RETRY}" == "success" ]]; then
+            echo "::warning title=KEEP-1206 image build retried::The image build failed on its first attempt and succeeded on the retry. This is the known memory ceiling, not a random flake - the build needs up to 20 GiB and a standard runner has about 20 GiB including swap. Track how often this warning appears; if it becomes common the job needs more memory or the module graph needs to shrink."
+            exit 0
+          fi
+          echo "::error title=KEEP-1206 image build failed twice::The image build failed on both attempts. If the logs show 'cannot allocate memory' or 'ResourceExhausted', the runner ran out of memory and re-running will not reliably help - this job needs more memory than a standard runner has."
+          exit 1
 
       # Sentry source-map upload moved out to its own sentry-upload.yml job,
       # fanned out from build-images in ci-pipeline.yml so it runs parallel to

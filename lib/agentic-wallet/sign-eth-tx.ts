@@ -24,20 +24,20 @@
 import { createPublicClient, type Hex, http, parseTransaction } from "viem";
 import { mainnet } from "viem/chains";
 import { getRpcUrlByChainId } from "@/lib/rpc/rpc-config";
+import {
+  runTurnkeyActivity,
+  type TurnkeyActivityErrorSpec,
+  type TurnkeySignTransactionActivityResult,
+} from "@/lib/turnkey/activity";
 import { getTurnkeyClientForOrg } from "@/lib/turnkey/agentic-wallet";
 import { PolicyBlockedError, TurnkeyUpstreamError } from "./sign";
 
-type TurnkeySignTransactionResult = {
-  signedTransaction?: string;
-};
-
-type TurnkeyActivityResponse = {
-  activity?: {
-    status?: string;
-    result?: {
-      signTransactionResult?: TurnkeySignTransactionResult;
-    };
-  };
+const SIGN_ACTIVITY_ERRORS: TurnkeyActivityErrorSpec = {
+  policyBlockedError: PolicyBlockedError,
+  upstreamError: TurnkeyUpstreamError,
+  policyBlockedMessage:
+    "Turnkey policy blocked the activity (CONSENSUS_NEEDED)",
+  missingResultMessage: "signedTransaction missing from Turnkey response",
 };
 
 /**
@@ -62,34 +62,20 @@ export async function signEthereumTransaction(args: {
 }): Promise<{ signedTransaction: `0x${string}` }> {
   const { subOrgId, walletAddress, unsignedTransactionHex } = args;
   const client = getTurnkeyClientForOrg(subOrgId).apiClient();
-  const activity = (await (
-    client as unknown as {
-      signTransaction: (args: unknown) => Promise<TurnkeyActivityResponse>;
-    }
-  ).signTransaction({
-    signWith: walletAddress,
-    type: "TRANSACTION_TYPE_ETHEREUM",
-    unsignedTransaction: unsignedTransactionHex,
-  })) as TurnkeyActivityResponse;
-
-  const status = activity.activity?.status;
-  if (status === "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
-    throw new PolicyBlockedError(
-      "Turnkey policy blocked the activity (CONSENSUS_NEEDED)"
-    );
-  }
-  if (status !== "ACTIVITY_STATUS_COMPLETED") {
-    throw new TurnkeyUpstreamError(
-      `Turnkey returned status ${status ?? "unknown"}`
-    );
-  }
-  const signed =
-    activity.activity?.result?.signTransactionResult?.signedTransaction;
-  if (!signed) {
-    throw new TurnkeyUpstreamError(
-      "signedTransaction missing from Turnkey response"
-    );
-  }
+  const signed = await runTurnkeyActivity<
+    TurnkeySignTransactionActivityResult,
+    string
+  >(
+    client,
+    "signTransaction",
+    {
+      signWith: walletAddress,
+      type: "TRANSACTION_TYPE_ETHEREUM",
+      unsignedTransaction: unsignedTransactionHex,
+    },
+    (result) => result?.signTransactionResult?.signedTransaction,
+    SIGN_ACTIVITY_ERRORS
+  );
   const prefixed = signed.startsWith("0x") ? signed : `0x${signed}`;
   return { signedTransaction: prefixed as `0x${string}` };
 }

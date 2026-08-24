@@ -18,6 +18,12 @@
  * sign arbitrary buyer-side payloads.
  */
 import { serializeSignature } from "@turnkey/ethers";
+import {
+  runTurnkeyActivity,
+  type TurnkeyActivityErrorSpec,
+  type TurnkeySignature,
+  type TurnkeySignRawPayloadActivityResult,
+} from "@/lib/turnkey/activity";
 import { getTurnkeyClientForOrg } from "@/lib/turnkey/agentic-wallet";
 import { toJsonSafe } from "@/lib/utils/json-safe";
 
@@ -29,15 +35,12 @@ export class TurnkeyUpstreamError extends Error {
   override readonly name = "TurnkeyUpstreamError";
 }
 
-type TurnkeySignature = { r: string; s: string; v: string };
-
-type TurnkeyActivityResponse = {
-  activity?: {
-    status?: string;
-    result?: {
-      signRawPayloadResult?: TurnkeySignature;
-    };
-  };
+const SIGN_ACTIVITY_ERRORS: TurnkeyActivityErrorSpec = {
+  policyBlockedError: PolicyBlockedError,
+  upstreamError: TurnkeyUpstreamError,
+  policyBlockedMessage:
+    "Turnkey policy blocked the activity (CONSENSUS_NEEDED)",
+  missingResultMessage: "Signature missing from Turnkey response",
 };
 
 export type EIP712TypedData = {
@@ -70,32 +73,20 @@ export async function signTypedDataWithTurnkey(
   // nested under `parameters`). With PAYLOAD_ENCODING_EIP712 Turnkey hashes
   // the typed-data server-side, but `hashFunction` is still required and
   // MUST be NO_OP — anything else double-hashes.
-  const response = (await (
-    client as unknown as {
-      signRawPayload: (args: unknown) => Promise<TurnkeyActivityResponse>;
-    }
-  ).signRawPayload({
-    signWith: walletAddress,
-    payload,
-    encoding: "PAYLOAD_ENCODING_EIP712",
-    hashFunction: "HASH_FUNCTION_NO_OP",
-  })) as TurnkeyActivityResponse;
-
-  const activity = response?.activity;
-  const status = activity?.status;
-  if (status === "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
-    throw new PolicyBlockedError(
-      "Turnkey policy blocked the activity (CONSENSUS_NEEDED)"
-    );
-  }
-  if (status !== "ACTIVITY_STATUS_COMPLETED") {
-    throw new TurnkeyUpstreamError(
-      `Turnkey returned status ${status ?? "unknown"}`
-    );
-  }
-  const result = activity?.result?.signRawPayloadResult;
-  if (!result) {
-    throw new TurnkeyUpstreamError("Signature missing from Turnkey response");
-  }
+  const result = await runTurnkeyActivity<
+    TurnkeySignRawPayloadActivityResult,
+    TurnkeySignature
+  >(
+    client,
+    "signRawPayload",
+    {
+      signWith: walletAddress,
+      payload,
+      encoding: "PAYLOAD_ENCODING_EIP712",
+      hashFunction: "HASH_FUNCTION_NO_OP",
+    },
+    (activityResult) => activityResult?.signRawPayloadResult,
+    SIGN_ACTIVITY_ERRORS
+  );
   return serializeSignature(result);
 }

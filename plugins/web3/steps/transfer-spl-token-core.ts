@@ -30,12 +30,13 @@ import type { SolanaChainAdapter } from "@/lib/web3/chain-adapter/solana";
 import type { SolanaTransactionSigner } from "@/lib/web3/chain-adapter/types";
 import type { NonceSession } from "@/lib/web3/nonce-manager";
 import { resolveOrganizationContext } from "@/lib/web3/resolve-org-context";
+import { resolveWallet } from "@/lib/web3/resolve-solana-wallet";
+import { parsePublicKey } from "@/lib/web3/solana-account-reader";
 import {
   computeSolanaLamportFee,
   SOLANA_BASE_FEE_LAMPORTS,
   SOLANA_SPL_MAX_FEE_LAMPORTS,
 } from "@/lib/web3/solana-fees";
-import { initializeSolanaWallet } from "@/lib/web3/wallet-helpers";
 
 /**
  * Serializing a legacy Transaction requires a recentBlockhash and a feePayer or
@@ -110,14 +111,6 @@ type TransferContext = {
  */
 export function isSplTransferPath(chainId: number): boolean {
   return isSolanaChain(chainId);
-}
-
-function parsePublicKey(value: string): PublicKey | null {
-  try {
-    return new PublicKey(value);
-  } catch {
-    return null;
-  }
 }
 
 function isTokenProgram(programId: PublicKey): boolean {
@@ -222,20 +215,6 @@ function buildSerializedTransfer(args: {
   return transaction
     .serialize({ requireAllSignatures: false, verifySignatures: false })
     .toString("base64");
-}
-
-async function resolveWallet(
-  organizationId: string
-): Promise<
-  { signer: SolanaTransactionSigner; address: string } | { error: string }
-> {
-  try {
-    return await initializeSolanaWallet(organizationId);
-  } catch (error) {
-    return {
-      error: `Failed to initialize Solana wallet: ${getErrorMessage(error)}`,
-    };
-  }
 }
 
 /**

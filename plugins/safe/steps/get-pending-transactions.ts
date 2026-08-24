@@ -4,9 +4,8 @@ import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { ethers } from "ethers";
 import { fetchCredentials } from "@/lib/credential-fetcher";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { safeFetch } from "@/lib/safe-fetch";
 import { getErrorMessage } from "@/lib/utils";
 import type { SafeCredentials } from "../credentials";
@@ -302,13 +301,10 @@ export async function getPendingTransactionsStep(
 
   const credentials = await fetchCredentials(input.integrationId, { organizationId: input._context?.organizationId ?? null });
 
-  return withPluginMetrics(
-    {
-      pluginName: PLUGIN_NAME,
-      actionName: ACTION_NAME,
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input, credentials))
+  return runPluginStep(
+    { pluginName: PLUGIN_NAME, actionName: ACTION_NAME },
+    input,
+    () => stepHandler(input, credentials)
   );
 }
 getPendingTransactionsStep.maxRetries = 0;

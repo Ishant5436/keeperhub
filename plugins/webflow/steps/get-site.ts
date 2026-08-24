@@ -2,12 +2,15 @@ import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { fetchCredentials } from "@/lib/credential-fetcher";
-import { safeFetch } from "@/lib/safe-fetch";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import type { WebflowCredentials } from "../credentials";
-
-const WEBFLOW_API_URL = "https://api.webflow.com/v2";
+import {
+  requireWebflowApiKey,
+  WEBFLOW_API_URL,
+  type WebflowFailure,
+  webflowFetch,
+} from "./webflow-core";
 
 type WebflowSiteResponse = {
   id: string;
@@ -41,13 +44,7 @@ type GetSiteData = {
   }>;
 };
 
-type GetSiteResult =
-  | { success: true; data: GetSiteData }
-  | {
-      success: false;
-      error: { message: string };
-      errorClass?: ExecutionErrorType;
-    };
+type GetSiteResult = { success: true; data: GetSiteData } | WebflowFailure;
 
 export type GetSiteCoreInput = {
   siteId: string;
@@ -62,17 +59,9 @@ async function stepHandler(
   input: GetSiteCoreInput,
   credentials: WebflowCredentials
 ): Promise<GetSiteResult> {
-  const apiKey = credentials.WEBFLOW_API_KEY;
-
-  if (!apiKey) {
-    return {
-      success: false,
-      error: {
-        message:
-          "WEBFLOW_API_KEY is not configured. Please add it in Project Integrations.",
-      },
-      errorClass: ExecutionErrorType.USER,
-    };
+  const keyResult = requireWebflowApiKey(credentials);
+  if ("error" in keyResult) {
+    return keyResult;
   }
 
   if (!input.siteId) {
@@ -84,28 +73,19 @@ async function stepHandler(
   }
 
   try {
-    const response = await safeFetch(
+    const result = await webflowFetch(
       `${WEBFLOW_API_URL}/sites/${encodeURIComponent(input.siteId)}`,
       {
-        plugin: "webflow",
+        apiKey: keyResult.apiKey,
         method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
       }
     );
 
-    if (!response.ok) {
-      const errorData = (await response.json()) as { message?: string };
-      return {
-        success: false,
-        error: { message: errorData.message || `HTTP ${response.status}` },
-        errorClass: response.status >= 500 ? ExecutionErrorType.EXTERNAL : ExecutionErrorType.USER,
-      };
+    if ("error" in result) {
+      return result;
     }
 
-    const site = (await response.json()) as WebflowSiteResponse;
+    const site = (await result.response.json()) as WebflowSiteResponse;
 
     return {
       success: true,

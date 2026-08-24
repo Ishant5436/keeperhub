@@ -9,12 +9,12 @@ import { type Connection, PublicKey } from "@solana/web3.js";
 import { and, eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db } from "@/lib/db";
-import { supportedTokens, workflowExecutions } from "@/lib/db/schema";
+import { supportedTokens } from "@/lib/db/schema";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getSolanaProvider, isSolanaChain } from "@/lib/rpc/provider-factory";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { getRpcPreferenceUserId } from "@/lib/workflow/executor/helpers";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import type { TokenFieldValue } from "@/lib/wallet/types";
 import { SolanaChainAdapter } from "@/lib/web3/chain-adapter/solana";
@@ -60,33 +60,6 @@ type GetSplTokenBalanceResult =
       addressLink: string;
     }
   | { success: false; error: string };
-
-/**
- * Get userId from executionId by querying the workflowExecutions table.
- *
- * Non-throwing by design: RPC preferences are a per-user convenience, not an
- * authority signal, so a lookup failure falls back to the chain's default RPC
- * config rather than failing the balance check.
- */
-async function getUserIdFromExecution(
-  executionId: string | undefined
-): Promise<string | undefined> {
-  if (!executionId) {
-    return;
-  }
-
-  try {
-    const execution = await db
-      .select({ userId: workflowExecutions.userId })
-      .from(workflowExecutions)
-      .where(eq(workflowExecutions.id, executionId))
-      .limit(1);
-
-    return execution[0]?.userId;
-  } catch {
-    return;
-  }
-}
 
 /**
  * Read a borsh string (u32 LE length prefix + utf8 bytes) at offset,
@@ -265,7 +238,7 @@ async function stepHandler(
   const tokenConfig = parseTokenConfig(input);
 
   // Get userId from execution context (for user RPC preferences)
-  const userId = await getUserIdFromExecution(_context?.executionId);
+  const userId = await getRpcPreferenceUserId(_context?.executionId);
 
   let chainId: number;
   try {
@@ -400,13 +373,10 @@ export async function getSplTokenBalanceStep(
 ): Promise<GetSplTokenBalanceResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "get-spl-token-balance",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "get-spl-token-balance" },
+    input,
+    stepHandler
   );
 }
 

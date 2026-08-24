@@ -27,7 +27,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { SqlTemplateEditor } from "@/components/ui/sql-template-editor";
 import { TemplateCodeEditor } from "@/components/ui/template-code-editor";
 import { actionRequiresCredentials } from "@/lib/integration-helpers";
 import { parseSchemaFields } from "@/lib/schema-fields";
@@ -97,9 +96,19 @@ function DatabaseQueryFields({
     <>
       <div className="space-y-2">
         <Label htmlFor="dbQuery">SQL Query</Label>
-        <SqlTemplateEditor
+        <TemplateCodeEditor
           disabled={disabled}
+          editorOptions={{
+            minimap: { enabled: false },
+            lineNumbers: "on",
+            scrollBeyondLastLine: false,
+            fontSize: 12,
+            wordBasedSuggestions: "off",
+            quickSuggestions: false,
+            wordWrap: "off",
+          }}
           height="150px"
+          language="sql"
           onChange={(v) => onUpdateConfig("dbQuery", v)}
           value={(config?.dbQuery as string) || ""}
         />

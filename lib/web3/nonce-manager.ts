@@ -26,6 +26,7 @@ import {
   logUserError,
   logWarn,
 } from "@/lib/logging";
+import { sleep } from "@/lib/sleep";
 
 export type NonceSession = {
   walletAddress: string;
@@ -479,7 +480,7 @@ export class NonceManager {
         return;
       }
 
-      await this.sleep(this.lockRetryDelayMs);
+      await sleep(this.lockRetryDelayMs);
     }
 
     // Exhausting the budget means the wallet is oversubscribed, not that the
@@ -535,12 +536,6 @@ export class NonceManager {
       `[NonceManager] Lock released for ${walletAddress}:${chainId}, ` +
         `execution=${executionId}`
     );
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
   }
 }
 

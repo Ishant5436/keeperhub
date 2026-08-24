@@ -1,16 +1,13 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { MULTICALL3_ABI, MULTICALL3_ADDRESS } from "@/lib/contracts/multicall3";
-import { db } from "@/lib/db";
-import { workflowExecutions } from "@/lib/db/schema";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { getRpcPreferenceUserId } from "@/lib/workflow/executor/helpers";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import {
   type AbiOutputParam,
@@ -21,25 +18,6 @@ const LOG_PREFIX = "[Batch Read Contract]";
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 500;
 const MAX_TOTAL_CALLS = 5000;
-
-/**
- * Get userId from executionId by querying the workflowExecutions table
- */
-async function getUserIdFromExecution(
-  executionId: string | undefined
-): Promise<string | undefined> {
-  if (!executionId) {
-    return;
-  }
-
-  const execution = await db
-    .select({ userId: workflowExecutions.userId })
-    .from(workflowExecutions)
-    .where(eq(workflowExecutions.id, executionId))
-    .limit(1);
-
-  return execution[0]?.userId;
-}
 
 type CallResult = {
   success: boolean;
@@ -775,7 +753,7 @@ async function executeMixedMode(
 async function stepHandler(
   input: BatchReadContractInput
 ): Promise<BatchReadContractResult> {
-  const userId = await getUserIdFromExecution(input._context?.executionId);
+  const userId = await getRpcPreferenceUserId(input._context?.executionId);
   const isUniform = input.inputMode !== "mixed";
 
   if (isUniform) {
@@ -794,13 +772,10 @@ export async function batchReadContractStep(
 ): Promise<BatchReadContractResult> {
   "use step";
 
-  return await withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "batch-read-contract",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "batch-read-contract" },
+    input,
+    stepHandler
   );
 }
 

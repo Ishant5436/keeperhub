@@ -129,6 +129,55 @@ jobs:
         run: |
           kubectl apply -f deploy/keeperhub-stack/${{ vars.TO_HELM_VALUES_DIR }}/runner-sa.yaml
 
+      # KEEP-1206. A helm upgrade that is killed mid-flight leaves its release
+      # record in `pending-upgrade` forever, and every later upgrade then dies on
+      # "another operation (install/upgrade/rollback) is in progress". That
+      # happened on 2026-08-23: run 32670866140 attempt 4 started the upgrade,
+      # attempt 5 was launched three minutes later, GitHub cancelled attempt 4
+      # mid-helm, and prod deploys stayed blocked until the record was deleted by
+      # hand. The concurrency group above cannot prevent it, because the killer
+      # is a re-run of the same run rather than a second run.
+      #
+      # Deleting an abandoned record is safe: the pods it rolled are already
+      # live, and dropping it just makes the previous revision the current one
+      # again, which the next upgrade then diffs against. Deleting a record whose
+      # helm is still running is NOT safe, so anything younger than the helm
+      # timeout stops the deploy instead of being cleaned up.
+      - name: Reconcile an abandoned helm release lock
+        if: steps.skip.outputs.skip_deploy != 'true'
+        env:
+          # Helm's own --timeout below is 15m; allow it to elapse in full plus a
+          # margin before calling a record abandoned.
+          STALE_AFTER_SECONDS: "1200"
+        run: |
+          set -euo pipefail
+          PENDING=$(kubectl get secret -n "${NAMESPACE}" \
+            -l "owner=helm,name=${SERVICE_NAME},status in (pending-install,pending-upgrade,pending-rollback)" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.status}{"\t"}{.metadata.creationTimestamp}{"\n"}{end}')
+
+          if [[ -z "${PENDING}" ]]; then
+            echo "No pending helm release record for ${SERVICE_NAME}; nothing to reconcile."
+            exit 0
+          fi
+
+          NOW=$(date -u +%s)
+          BLOCKED=false
+          while IFS=$'\t' read -r NAME STATUS CREATED; do
+            [[ -z "${NAME}" ]] && continue
+            AGE=$(( NOW - $(date -u -d "${CREATED}" +%s) ))
+            if (( AGE < STALE_AFTER_SECONDS )); then
+              echo "::error::${NAME} is ${STATUS} and only ${AGE}s old, which is inside helm's ${STALE_AFTER_SECONDS}s window. Another deploy may still be running it. Refusing to touch it - wait for that deploy to finish, then re-run."
+              BLOCKED=true
+              continue
+            fi
+            echo "::warning::${NAME} is ${STATUS} and ${AGE}s old, past the ${STALE_AFTER_SECONDS}s window, so its helm process is gone. Deleting the abandoned record so this upgrade can proceed. The workloads it rolled are untouched."
+            kubectl delete secret "${NAME}" -n "${NAMESPACE}"
+          done <<< "${PENDING}"
+
+          if [[ "${BLOCKED}" == "true" ]]; then
+            exit 1
+          fi
+
       - name: Deploying Service to Kubernetes with Helm
         id: deploy
         if: steps.skip.outputs.skip_deploy != 'true'

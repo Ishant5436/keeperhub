@@ -1,12 +1,7 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { explorerConfigs } from "@/lib/db/schema";
-import { getAddressUrl } from "@/lib/explorer";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { resolveExplorerLink } from "@/lib/web3/explorer-link";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { MULTICALL3_ADDRESS } from "@/lib/contracts/multicall3";
 import {
   applyBatchFailOnError,
@@ -37,34 +32,20 @@ export async function batchWriteContractStep(
   // There is no single per-node contractAddress in this action (each call
   // targets a different contract), so the resolved chain's Multicall3
   // address is the only address worth linking here.
-  let enrichedInput: BatchWriteContractInput & { multicallAddressLink?: string } =
-    input;
-  try {
-    const chainId = getChainIdFromNetwork(input.network);
-    const explorerConfig = await db.query.explorerConfigs.findFirst({
-      where: eq(explorerConfigs.chainId, chainId),
-    });
-    if (explorerConfig) {
-      const multicallAddressLink = getAddressUrl(explorerConfig, MULTICALL3_ADDRESS);
-      if (multicallAddressLink) {
-        enrichedInput = { ...input, multicallAddressLink };
-      }
-    }
-  } catch {
-    // Non-critical: if lookup fails, input logs without the link
-  }
+  const multicallAddressLink = await resolveExplorerLink(
+    input.network,
+    MULTICALL3_ADDRESS
+  );
+  const enrichedInput: BatchWriteContractInput & { multicallAddressLink?: string } =
+    multicallAddressLink ? { ...input, multicallAddressLink } : input;
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "batch-write-contract",
-      executionId: input._context?.executionId,
-    },
-    () =>
-      withStepLogging(enrichedInput, async () => {
-        const result = await batchWriteContractCore(input);
-        return applyBatchFailOnError(result, input.failOnError);
-      })
+  return runPluginStep(
+    { pluginName: "web3", actionName: "batch-write-contract" },
+    enrichedInput,
+    async () => {
+      const result = await batchWriteContractCore(input);
+      return applyBatchFailOnError(result, input.failOnError);
+    }
   );
 }
 

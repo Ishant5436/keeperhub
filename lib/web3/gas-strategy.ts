@@ -26,6 +26,7 @@ import {
   logWarn,
 } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
+import { sleep } from "@/lib/sleep";
 
 /**
  * Route an RPC call through the failover-aware RpcProviderManager when one
@@ -656,13 +657,6 @@ export class TransactionStuckError extends Error {
     this.txHash = txHash;
     this.attempts = attempts;
   }
-}
-
-/**
- * Sleep helper
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

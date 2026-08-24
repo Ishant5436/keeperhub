@@ -5,9 +5,8 @@ import { eq } from "drizzle-orm";
 import { fetchCredentials } from "@/lib/credential-fetcher";
 import { db } from "@/lib/db";
 import { workflowExecutions, workflows } from "@/lib/db/schema";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { safeFetch } from "@/lib/safe-fetch";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import type { SendGridCredentials } from "../credentials";
 
 const SENDGRID_API_URL = "https://api.sendgrid.com";
@@ -184,16 +183,10 @@ export async function sendEmailStep(
     ...input,
   };
 
-  return withPluginMetrics(
-    {
-      pluginName: "sendgrid",
-      actionName: "send-email",
-      executionId: input._context?.executionId,
-    },
-    () =>
-      withStepLogging(input, () =>
-        stepHandler(coreInput, credentials, useKeeperHubApiKey)
-      )
+  return runPluginStep(
+    { pluginName: "sendgrid", actionName: "send-email" },
+    input,
+    () => stepHandler(coreInput, credentials, useKeeperHubApiKey)
   );
 }
 sendEmailStep.maxRetries = 0;

@@ -115,6 +115,7 @@ vi.mock("@/lib/web3/wallet-helpers", () => ({
 
 // Mock step handler
 vi.mock("@/lib/workflow/executor/step-handler", () => ({
+  runPluginStep: vi.fn((_options, input, handler) => handler(input)),
   withStepLogging: vi.fn((_input, handler) => handler()),
 }));
 

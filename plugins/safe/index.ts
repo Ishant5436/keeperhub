@@ -1,4 +1,5 @@
 import type { IntegrationType } from "@/lib/types/integration";
+import { evmNetworkField } from "@/plugins/field-fragments";
 import { getIntegration } from "@/plugins/registry";
 
 const getPendingTransactionsAction = {
@@ -36,14 +37,7 @@ const getPendingTransactionsAction = {
       example: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
       required: true,
     },
-    {
-      key: "network",
-      label: "Network",
-      type: "chain-select" as const,
-      chainTypeFilter: "evm",
-      placeholder: "Select network",
-      required: true,
-    },
+    evmNetworkField(),
     {
       key: "signerAddress",
       label: "Signer Address",

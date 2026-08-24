@@ -1,11 +1,12 @@
 "use client";
 
 import { useAtomValue } from "jotai";
-import { BarChart3, DollarSign, LogIn } from "lucide-react";
+import { BarChart3, DollarSign } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { FullPageAuthGate } from "@/components/full-page-auth-gate";
 import { Button } from "@/components/ui/button";
 import { earningsDataAtom } from "@/lib/atoms/earnings";
 import { useSession } from "@/lib/auth-client";
@@ -15,39 +16,14 @@ import { useEarnings } from "./use-earnings";
 import { WorkflowEarningsTable } from "./workflow-earnings-table";
 
 function AuthGate({ error }: { error: string }): ReactNode {
-  const isAuthRequired = error === "AUTH_REQUIRED";
-
   return (
-    <div className="pointer-events-auto fixed inset-0 overflow-y-auto bg-sidebar">
-      <div className="transition-[margin-left] duration-200 ease-out md:ml-[var(--nav-content-offset,var(--nav-sidebar-width,60px))]">
-        <div className="flex min-h-[80vh] flex-col items-center justify-center gap-6 p-6 text-center">
-          <div className="flex size-20 items-center justify-center rounded-2xl bg-muted">
-            {isAuthRequired ? (
-              <LogIn className="size-10 text-muted-foreground" />
-            ) : (
-              <DollarSign className="size-10 text-muted-foreground" />
-            )}
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold tracking-tight">
-              {isAuthRequired
-                ? "Sign in to view earnings"
-                : "Organization required"}
-            </h2>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              {isAuthRequired
-                ? "Sign in to your account to access your earnings dashboard."
-                : "Create or join an organization to start tracking workflow earnings."}
-            </p>
-          </div>
-          {!isAuthRequired && (
-            <Button asChild>
-              <Link href="/">Get Started</Link>
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
+    <FullPageAuthGate
+      error={error}
+      icon={DollarSign}
+      orgDescription="Create or join an organization to start tracking workflow earnings."
+      signInDescription="Sign in to your account to access your earnings dashboard."
+      signInTitle="Sign in to view earnings"
+    />
   );
 }
 

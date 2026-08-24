@@ -6,14 +6,12 @@
  * exporting functions from "use step" files (which breaks the workflow bundler).
  */
 import "server-only";
+import { getRpcPreferenceUserId } from "@/lib/workflow/executor/helpers";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
-import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { coerceArgsForAbi, reshapeArgsForAbi } from "@/lib/abi/struct-args";
 import { validateArgsForAbi } from "@/lib/abi/validate-args";
-import { db } from "@/lib/db";
-import { workflowExecutions } from "@/lib/db/schema";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
@@ -39,22 +37,6 @@ export type ReadContractCoreInput = {
 export type ReadContractResult =
   | { success: true; result: unknown; addressLink: string }
   | { success: false; error: string; errorClass?: ExecutionErrorType };
-
-async function getUserIdFromExecution(
-  executionId: string | undefined
-): Promise<string | undefined> {
-  if (!executionId) {
-    return;
-  }
-
-  const execution = await db
-    .select({ userId: workflowExecutions.userId })
-    .from(workflowExecutions)
-    .where(eq(workflowExecutions.id, executionId))
-    .limit(1);
-
-  return execution[0]?.userId;
-}
 
 /**
  * Core read contract logic
@@ -84,7 +66,7 @@ export async function readContractCore(
 
   const userId = _context?.organizationId
     ? undefined
-    : await getUserIdFromExecution(_context?.executionId);
+    : await getRpcPreferenceUserId(_context?.executionId);
 
   // Validate contract address
   if (!ethers.isAddress(contractAddress)) {

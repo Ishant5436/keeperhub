@@ -2,18 +2,12 @@ import "server-only";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { fetchCredentials } from "@/lib/credential-fetcher";
-import { safeFetch } from "@/lib/safe-fetch";
 import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
 import { getErrorMessage } from "@/lib/utils";
 import type { ClerkCredentials } from "../credentials";
+import { type ClerkFailure, clerkFetch, requireClerkSecretKey } from "./clerk-core";
 
-type DeleteUserResult =
-  | { success: true; data: { deleted: true } }
-  | {
-      success: false;
-      error: { message: string };
-      errorClass?: ExecutionErrorType;
-    };
+type DeleteUserResult = { success: true; data: { deleted: true } } | ClerkFailure;
 
 export type ClerkDeleteUserCoreInput = {
   userId: string;
@@ -31,17 +25,9 @@ async function stepHandler(
   input: ClerkDeleteUserCoreInput,
   credentials: ClerkCredentials
 ): Promise<DeleteUserResult> {
-  const secretKey = credentials.CLERK_SECRET_KEY;
-
-  if (!secretKey) {
-    return {
-      success: false,
-      error: {
-        message:
-          "CLERK_SECRET_KEY is not configured. Please add it in Project Integrations.",
-      },
-      errorClass: ExecutionErrorType.USER,
-    };
+  const keyResult = requireClerkSecretKey(credentials);
+  if ("error" in keyResult) {
+    return keyResult;
   }
 
   if (!input.userId) {
@@ -53,30 +39,17 @@ async function stepHandler(
   }
 
   try {
-    const response = await safeFetch(
+    const result = await clerkFetch(
       `https://api.clerk.com/v1/users/${encodeURIComponent(input.userId)}`,
       {
-        plugin: "clerk",
+        secretKey: keyResult.secretKey,
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${secretKey}`,
-          "Content-Type": "application/json",
-          "User-Agent": "workflow-builder.dev",
-        },
+        failureMessagePrefix: "Failed to delete user",
       }
     );
 
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: {
-          message:
-            errorBody.errors?.[0]?.message ||
-            `Failed to delete user: ${response.status}`,
-        },
-        errorClass: response.status >= 500 ? ExecutionErrorType.EXTERNAL : ExecutionErrorType.USER,
-      };
+    if ("error" in result) {
+      return result;
     }
 
     return { success: true, data: { deleted: true } };

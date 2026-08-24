@@ -5,18 +5,22 @@ import {
   PolicyBlockedError,
   TurnkeyUpstreamError,
 } from "@/lib/agentic-wallet/sign";
+import {
+  runTurnkeyActivity,
+  type TurnkeyActivityErrorSpec,
+  type TurnkeySignTransactionActivityResult,
+} from "@/lib/turnkey/activity";
 import { getTurnkeyClientForOrg } from "@/lib/turnkey/agentic-wallet";
 import type { SolanaTransactionSigner } from "@/lib/web3/chain-adapter/types";
 
-type TurnkeySignTransactionResult = {
-  signedTransaction?: string;
-};
-
-type TurnkeyActivityResponse = {
-  activity?: {
-    status?: string;
-    result?: { signTransactionResult?: TurnkeySignTransactionResult };
-  };
+const SIGN_ACTIVITY_ERRORS: TurnkeyActivityErrorSpec = {
+  policyBlockedError: PolicyBlockedError,
+  upstreamError: TurnkeyUpstreamError,
+  policyBlockedMessage:
+    "Turnkey policy blocked the Solana signing activity (CONSENSUS_NEEDED)",
+  statusMessageSuffix: " for Solana signTransaction",
+  missingResultMessage:
+    "signedTransaction missing from Turnkey Solana response",
 };
 
 export class TurnkeySolanaSigner implements SolanaTransactionSigner {
@@ -36,34 +40,20 @@ export class TurnkeySolanaSigner implements SolanaTransactionSigner {
     const unsignedTransaction = Buffer.from(unsignedBytes).toString("hex");
     const client = getTurnkeyClientForOrg(this.subOrgId).apiClient();
 
-    const activity = (await (
-      client as unknown as {
-        signTransaction: (args: unknown) => Promise<TurnkeyActivityResponse>;
-      }
-    ).signTransaction({
-      signWith: this.solanaAddress,
-      type: "TRANSACTION_TYPE_SOLANA",
-      unsignedTransaction,
-    })) as TurnkeyActivityResponse;
-
-    const status = activity.activity?.status;
-    if (status === "ACTIVITY_STATUS_CONSENSUS_NEEDED") {
-      throw new PolicyBlockedError(
-        "Turnkey policy blocked the Solana signing activity (CONSENSUS_NEEDED)"
-      );
-    }
-    if (status !== "ACTIVITY_STATUS_COMPLETED") {
-      throw new TurnkeyUpstreamError(
-        `Turnkey returned status ${status ?? "unknown"} for Solana signTransaction`
-      );
-    }
-    const signed =
-      activity.activity?.result?.signTransactionResult?.signedTransaction;
-    if (!signed) {
-      throw new TurnkeyUpstreamError(
-        "signedTransaction missing from Turnkey Solana response"
-      );
-    }
+    const signed = await runTurnkeyActivity<
+      TurnkeySignTransactionActivityResult,
+      string
+    >(
+      client,
+      "signTransaction",
+      {
+        signWith: this.solanaAddress,
+        type: "TRANSACTION_TYPE_SOLANA",
+        unsignedTransaction,
+      },
+      (result) => result?.signTransactionResult?.signedTransaction,
+      SIGN_ACTIVITY_ERRORS
+    );
     return Uint8Array.from(Buffer.from(signed, "hex"));
   }
 }

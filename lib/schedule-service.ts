@@ -1,14 +1,17 @@
 import { CronExpressionParser } from "cron-parser";
 import { eq } from "drizzle-orm";
-import { IntervalTooSmallError, parseIntervalSeconds } from "@/lib/cron-utils";
+import {
+  IntervalTooSmallError,
+  parseIntervalSeconds,
+  validateCronExpression,
+} from "@/lib/cron-utils";
 import { db } from "@/lib/db";
 import { workflowSchedules } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError, logUserError } from "@/lib/logging";
 import { generateId } from "@/lib/utils/id";
 import type { WorkflowNode } from "@/lib/workflow/store";
 
-// Top-level regex for splitting cron expression fields
-const CRON_FIELD_SPLITTER = /\s+/;
+export { validateCronExpression } from "@/lib/cron-utils";
 
 /**
  * Sentinel placeholder written to `cron_expression` when a schedule is in
@@ -94,37 +97,6 @@ export function computeNextIntervalRunTime(
   const elapsedMs = nowMs - anchorMs;
   const kNext = Math.floor(elapsedMs / intervalMs) + 1;
   return new Date(anchorMs + kNext * intervalMs);
-}
-
-/**
- * Validate a cron expression
- */
-export function validateCronExpression(cronExpression: string): {
-  valid: boolean;
-  error?: string;
-} {
-  if (!cronExpression || typeof cronExpression !== "string") {
-    return { valid: false, error: "Cron expression is required" };
-  }
-
-  // Basic format check (5 or 6 fields)
-  const parts = cronExpression.trim().split(CRON_FIELD_SPLITTER);
-  if (parts.length < 5 || parts.length > 6) {
-    return {
-      valid: false,
-      error: "Cron expression must have 5 or 6 fields",
-    };
-  }
-
-  try {
-    CronExpressionParser.parse(cronExpression);
-    return { valid: true };
-  } catch (error) {
-    return {
-      valid: false,
-      error: error instanceof Error ? error.message : "Invalid cron expression",
-    };
-  }
 }
 
 /**

@@ -1,6 +1,11 @@
 // In-memory per pod. In a multi-replica deployment, each pod tracks its own window.
 // Effective limit is LIMIT * num_replicas. Replace with Redis-backed solution
 // when replica count grows.
+//
+// Not built on lib/rate-limit/sliding-window.ts: the stale-entry sweep below
+// iterates this module's maps directly, and checkIpRateLimit takes a per-call
+// limit/window (feeding the tracked maxWindowMs), neither of which fits the
+// shared fixed-config factory.
 
 export const WINDOW_MS = 60_000; // 1 minute
 export const LIMIT = 120; // requests per window (higher than execute endpoint; MCP sessions are chatty)

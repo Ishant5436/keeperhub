@@ -6,6 +6,8 @@
  * an API key; hosted multichain instances (e.g., api.blockscout.com) do.
  */
 
+import { sleep } from "@/lib/sleep";
+
 type BlockscoutResponse = {
   status: string;
   message: string;
@@ -210,9 +212,7 @@ export async function fetchBlockscoutTransactions(
     let pageCount = 0;
     for (;;) {
       if (pageCount > 0) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, BLOCKSCOUT_PAGE_DELAY_MS)
-        );
+        await sleep(BLOCKSCOUT_PAGE_DELAY_MS);
       }
       pageCount++;
 

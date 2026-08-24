@@ -2,7 +2,7 @@ import "server-only";
 
 import {
   type AccountMeta,
-  PublicKey,
+  type PublicKey,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { ErrorCategory, logUserError } from "@/lib/logging";
@@ -11,14 +11,14 @@ import { isSolanaChain } from "@/lib/rpc/provider-factory";
 import { getErrorMessage } from "@/lib/utils";
 import { getChainAdapter } from "@/lib/web3/chain-adapter";
 import type { SolanaChainAdapter } from "@/lib/web3/chain-adapter/solana";
-import type { SolanaTransactionSigner } from "@/lib/web3/chain-adapter/types";
 import { resolveOrganizationContext } from "@/lib/web3/resolve-org-context";
+import { resolveWallet } from "@/lib/web3/resolve-solana-wallet";
+import { isRecord, parsePublicKey } from "@/lib/web3/solana-account-reader";
 import {
   buildSerializedSolanaInstructionTx,
   submitSolanaInstructionTx,
 } from "@/lib/web3/solana-instruction-tx";
 import { parseRequiredMaxSolLamports } from "@/lib/web3/solana-max-sol-guard";
-import { initializeSolanaWallet } from "@/lib/web3/wallet-helpers";
 
 // Guardrails. The 1232-byte cap is Solana's single-packet transaction size
 // limit (IPv6 MTU minus headers); a larger transaction cannot be submitted, so
@@ -72,18 +72,6 @@ export type SendRawSolanaInstructionResult =
       instructionCount: number;
     }
   | { success: false; error: string };
-
-function parsePublicKey(value: string): PublicKey | null {
-  try {
-    return new PublicKey(value);
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 /**
  * Decodes an instruction's data field. Mirrors normalizeSolanaTransaction: a
@@ -225,20 +213,6 @@ function buildInstruction(
   return {
     instruction: new TransactionInstruction({ programId, keys, data }),
   };
-}
-
-async function resolveWallet(
-  organizationId: string
-): Promise<
-  { signer: SolanaTransactionSigner; address: string } | { error: string }
-> {
-  try {
-    return await initializeSolanaWallet(organizationId);
-  } catch (error) {
-    return {
-      error: `Failed to initialize Solana wallet: ${getErrorMessage(error)}`,
-    };
-  }
 }
 
 function buildAllInstructions(

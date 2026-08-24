@@ -8,13 +8,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/metrics/instrumentation/plugin", () => ({
-  withPluginMetrics: (_opts: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/metrics/instrumentation/plugin", async () =>
+  (await import("../mocks/step-mocks")).pluginMetricsPassthrough()
+);
 
-vi.mock("@/lib/workflow/executor/step-handler", () => ({
-  withStepLogging: (_input: unknown, fn: () => unknown) => fn(),
-}));
+vi.mock("@/lib/workflow/executor/step-handler", async () =>
+  (await import("../mocks/step-mocks")).stepHandlerPassthrough()
+);
 
 vi.mock("drizzle-orm", () => ({ eq: () => ({}) }));
 
@@ -28,7 +28,10 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/schema", () => ({ explorerConfigs: { chainId: "chainId" } }));
 
-vi.mock("@/lib/explorer", () => ({ getAddressUrl: vi.fn() }));
+vi.mock("@/lib/explorer", () => ({
+  getAddressUrl: vi.fn(),
+  getTransactionUrl: vi.fn(),
+}));
 
 vi.mock("@/lib/rpc/network-utils", () => ({
   getChainIdFromNetwork: vi.fn().mockReturnValue(1),

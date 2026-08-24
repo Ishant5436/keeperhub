@@ -3,6 +3,7 @@ import "server-only";
 import { ethers } from "ethers";
 import LIDO_WSTETH_ABI from "@/lib/scan/abis/lido-wsteth.json";
 import { LIDO_TOKENS } from "@/lib/scan/adapters/protocol-registry";
+import { decodeUint256 } from "@/lib/scan/decode-uint256";
 import type {
   AdapterCallDescriptor,
   MulticallResult,
@@ -151,25 +152,6 @@ export function decodeLidoResults(
       borrowedAssets: [],
     },
   ];
-}
-
-/**
- * Decode a single uint256 from ABI-encoded return data.
- * Returns null on decode failure (malformed data, empty returnData "0x").
- */
-function decodeUint256(returnData: string): bigint | null {
-  if (!returnData || returnData === "0x") {
-    return null;
-  }
-  try {
-    const [value] = ethers.AbiCoder.defaultAbiCoder().decode(
-      ["uint256"],
-      returnData
-    );
-    return value as bigint;
-  } catch {
-    return null;
-  }
 }
 
 // Export the wstETH interface for potential Phase 52 use (getStETHByWstETH).

@@ -1,9 +1,8 @@
 import "server-only";
 
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import type {
   SignTypedDataCoreInput,
@@ -29,13 +28,10 @@ export async function signTypedDataStep(
 ): Promise<SignTypedDataResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "web3",
-      actionName: "sign-typed-data",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => signTypedDataCore(input))
+  return runPluginStep(
+    { pluginName: "web3", actionName: "sign-typed-data" },
+    input,
+    signTypedDataCore
   );
 }
 

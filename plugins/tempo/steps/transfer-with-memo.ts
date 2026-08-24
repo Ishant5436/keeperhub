@@ -3,14 +3,13 @@ import "server-only";
 import { ethers } from "ethers";
 import type { Hex } from "viem";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import { getErrorMessage } from "@/lib/utils";
 import { resolveOrganizationContext } from "@/lib/web3/resolve-org-context";
 import {
+  runPluginStep,
   type StepInput,
-  withStepLogging,
 } from "@/lib/workflow/executor/step-handler";
 import {
   buildTransferWithMemoCall,
@@ -163,13 +162,10 @@ export async function transferWithMemoStep(
 ): Promise<TransferWithMemoResult> {
   "use step";
 
-  return withPluginMetrics(
-    {
-      pluginName: "tempo",
-      actionName: "transfer-with-memo",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input))
+  return runPluginStep(
+    { pluginName: "tempo", actionName: "transfer-with-memo" },
+    input,
+    stepHandler
   );
 }
 

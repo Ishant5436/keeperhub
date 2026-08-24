@@ -6,9 +6,9 @@ vi.mock("@/lib/logging", () => ({
   logInfo: vi.fn(),
   logSystemWarn: vi.fn(),
 }));
-vi.mock("@/lib/utils", () => ({
-  getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-}));
+vi.mock("@/lib/utils", async () =>
+  (await import("../mocks/step-mocks")).utilsGetErrorMessage()
+);
 
 const broker = {
   expireDueHeldPayments: vi.fn(),

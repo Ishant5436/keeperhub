@@ -3,8 +3,7 @@ import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 
 import { fetchCredentials } from "@/lib/credential-fetcher";
 import { ErrorCategory, logUserError } from "@/lib/logging";
-import { withPluginMetrics } from "@/lib/metrics/instrumentation/plugin";
-import { type StepInput, withStepLogging } from "@/lib/workflow/executor/step-handler";
+import { runPluginStep, type StepInput } from "@/lib/workflow/executor/step-handler";
 import { safeFetch } from "@/lib/safe-fetch";
 import { getErrorMessage } from "@/lib/utils";
 import type { DiscordCredentials } from "../credentials";
@@ -186,13 +185,10 @@ export async function sendDiscordMessageStep(
 
   const credentials = await fetchCredentials(input.integrationId, { organizationId: input._context?.organizationId ?? null });
 
-  return withPluginMetrics(
-    {
-      pluginName: "discord",
-      actionName: "send-message",
-      executionId: input._context?.executionId,
-    },
-    () => withStepLogging(input, () => stepHandler(input, credentials))
+  return runPluginStep(
+    { pluginName: "discord", actionName: "send-message" },
+    input,
+    () => stepHandler(input, credentials)
   );
 }
 sendDiscordMessageStep.maxRetries = 0;
