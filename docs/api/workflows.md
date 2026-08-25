@@ -146,6 +146,32 @@ POST /api/workflows/create
 
 `name`, `nodes`, and `edges` are required. `description`, `projectId`, `tagId`, and `enabled` are optional. `projectId` assigns the workflow to a [project](/api/projects); `tagId` assigns it to an organization tag for categorization; `enabled` (boolean) controls whether the workflow is active on creation.
 
+#### Schedule triggers
+
+A `Schedule` trigger is registered by this call. One request is enough - no
+follow-up `PATCH` is needed to start the schedule.
+
+`enabled` decides whether that schedule dispatches. Create with `enabled: true`
+and the workflow runs on its next occurrence. Create with `enabled: false` and
+the schedule is stored but dormant until you enable the workflow.
+
+Set the cadence with either `scheduleCron` (a 5-field cron expression) or
+`scheduleIntervalSeconds` (run every N seconds). Supply one or the other;
+`scheduleIntervalSeconds` wins when both are present. `scheduleTimezone` is
+optional and defaults to `UTC`.
+
+The dispatcher polls once a minute, so a schedule cannot fire faster than that.
+A `scheduleIntervalSeconds` below 60 is rejected:
+
+```json
+{
+  "error": "SCHEDULE_INTERVAL_TOO_SMALL",
+  "message": "scheduleIntervalSeconds must be >= 60 (got 30)"
+}
+```
+
+The request returns `400` and no workflow is stored.
+
 ### Generic web3 write-contract example (Manual trigger)
 
 Named-protocol actions (`aave-v3/supply`, etc.) hide most of the plumbing behind protocol-aware config keys. When you want to call an arbitrary contract that isn't in the [plugin catalog](/plugins/web3), use the generic `web3/write-contract` action. The trap is that the UI labels ("Function", "Function Arguments") don't line up 1:1 with the API field names, and `functionArgs` is a **JSON-encoded array string**, not a raw array. The full config shape:

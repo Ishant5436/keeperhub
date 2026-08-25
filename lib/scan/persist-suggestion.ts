@@ -47,8 +47,11 @@ function applyDefaultEmail(
  * Steps:
  *   1. buildWorkflow(descriptor) — factory re-derivation
  *   2. POST /api/workflows/create  (enabled:true for schedule, false for run)
- *   3. PATCH /api/workflows/{id} with {nodes} — triggers syncWorkflowSchedule
- *      (schedule mode only)
+ *   3. PATCH /api/workflows/{id} with {nodes} — schedule mode only, and
+ *      redundant since KEEP-1216. The create route registers the schedule
+ *      itself now, so this PATCH re-saves nodes the server already holds.
+ *      It stays because it is harmless and this path is UAT-sensitive; a
+ *      later cleanup can drop it.
  *   4. api.workflow.execute(id, {}) — immediate one-off run, "run" mode only.
  *      Schedule mode does NOT auto-run (UAT feedback): "Use this workflow"
  *      saves the monitor and lets its schedule fire it; the first run happens
@@ -101,7 +104,8 @@ export async function persistSuggestion(
   const created = (await createRes.json()) as CreateWorkflowResponse;
   const { id } = created;
 
-  // PATCH triggers syncWorkflowSchedule server-side (schedule mode only)
+  // Redundant since KEEP-1216: POST /api/workflows/create registers the
+  // schedule itself. Kept as a no-op re-save; see the step list above.
   if (mode === "schedule") {
     const patchRes = await fetch(`/api/workflows/${id}`, {
       method: "PATCH",

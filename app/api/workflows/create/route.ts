@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { ErrorCategory, logSystemError, logSystemWarn } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
 import { recordWorkflowCreatedFromSource } from "@/lib/metrics/collectors/prometheus";
 import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
@@ -18,6 +18,12 @@ import {
   idempotencyEarlyResponse,
   recordIdempotentResponse,
 } from "@/lib/idempotency";
+import { IntervalTooSmallError } from "@/lib/cron-utils";
+import {
+  type ExtractedScheduleConfig,
+  extractScheduleConfig,
+  syncWorkflowSchedule,
+} from "@/lib/schedule-service";
 import { generateId } from "@/lib/utils/id";
 import { sanitizeWorkflowData } from "@/lib/workflow/editor/sanitize-nodes";
 import { workflowNotDeleted } from "@/lib/workflow/soft-delete";
@@ -190,6 +196,39 @@ export async function POST(request: Request) {
       return featureGuard.response;
     }
 
+    // KEEP-1216: read the schedule config before the insert, so a schedule the
+    // dispatcher cannot honour is rejected instead of stored. Two details
+    // matter here.
+    //
+    // First, this reads the SANITIZED nodes, not body.nodes.
+    // extractScheduleConfig keys on `data.type === "trigger"`, and only
+    // sanitizeNode writes that field. A request shaped the way the public API
+    // docs show it carries no data.type, so a check against the raw body
+    // would miss the trigger and fall through to "no schedule".
+    //
+    // Second, it runs before db.insert for the KEEP-581 reason: a sub-60s
+    // interval must never land as a stored workflow paired with a missing
+    // schedule row. extractScheduleConfig is the only thing that throws here.
+    // A bad timezone or a broken cron string still takes the warn-and-continue
+    // path below, matching the PATCH handler.
+    let scheduleConfig: ExtractedScheduleConfig | null;
+    try {
+      scheduleConfig = extractScheduleConfig(
+        nodes as Parameters<typeof extractScheduleConfig>[0]
+      );
+    } catch (error) {
+      if (error instanceof IntervalTooSmallError) {
+        return NextResponse.json(
+          {
+            error: "SCHEDULE_INTERVAL_TOO_SMALL",
+            message: error.message,
+          },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
     const workflowName = await generateWorkflowName(body.name, organizationId);
 
     // Validate projectId/tagId ownership when provided
@@ -273,6 +312,38 @@ export async function POST(request: Request) {
       actor: { userId, organizationId, authMethod: authContext.authMethod },
       source: "create",
     });
+
+    // KEEP-1216: write the workflow_schedules row the dispatcher reads. Before
+    // this, only PATCH synced, so a schedule workflow created through the API
+    // alone was stored, reported enabled, and never fired. The UI never saw it
+    // because the editor saves through PATCH; every direct API consumer did.
+    //
+    // Guarded on scheduleConfig on purpose. syncWorkflowSchedule reads a null
+    // config as "delete any existing schedule", and a freshly generated id has
+    // no row to delete, so an unguarded call would add a wasted DELETE to every
+    // workflow create. The pre-check above already computed the answer.
+    //
+    // The sync runs whatever `enabled` says. syncWorkflowSchedule writes
+    // workflow_schedules.enabled = true, and the scheduler select gates on
+    // workflows.enabled through workflowExecutableConditions(). So a workflow
+    // created with enabled:false gets a dormant row, and a later
+    // PATCH {enabled:true} starts it on the next tick.
+    //
+    // Soft failures warn and let the create stand, matching the PATCH handler.
+    if (scheduleConfig) {
+      const syncResult = await syncWorkflowSchedule(
+        newWorkflow.id,
+        nodes as Parameters<typeof syncWorkflowSchedule>[1]
+      );
+      if (!syncResult.synced) {
+        logSystemWarn(
+          ErrorCategory.WORKFLOW_ENGINE,
+          "[Workflow] Schedule sync failed",
+          syncResult.error,
+          { workflow_id: newWorkflow.id }
+        );
+      }
+    }
 
     // Scan-funnel conversion signal: the scan drawer / pending-scan runner
     // tag their create calls with x-keeperhub-source; everything else counts

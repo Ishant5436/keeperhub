@@ -89,8 +89,9 @@ vi.mock("@/lib/features/route-guard", () => ({
 }));
 
 vi.mock("@/lib/logging", () => ({
-  ErrorCategory: { DATABASE: "DATABASE" },
+  ErrorCategory: { DATABASE: "DATABASE", WORKFLOW_ENGINE: "WORKFLOW_ENGINE" },
   logSystemError: vi.fn(),
+  logSystemWarn: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
