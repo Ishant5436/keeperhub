@@ -59,9 +59,11 @@ warn()    { echo "    warning: $*" >&2; }
 preflight() {
     section "Preflight"
     require_tools kubectl helm
-    # Only the sandbox manifest is substituted, so envsubst is required only
-    # when it is going to be applied.
-    [ "$SANDBOX_ENABLED" = true ] && require_tools envsubst
+    # Two manifests are substituted, and neither is applied on every install, so
+    # envsubst is required only when one of them is going to be.
+    if [ "$SANDBOX_ENABLED" = true ] || [ "$EGRESS_POLICY" = true ]; then
+        require_tools envsubst
+    fi
     require_context
     validate_modes
 
@@ -500,35 +502,311 @@ apply_sandbox() {
     ok "keeperhub-sandbox on ${IMAGE_REPO}:sandbox-${IMAGE_TAG}"
 }
 
+# Turn one address into a CIDR, leaving one that already carries a prefix alone.
+to_cidr() {
+    case "$1" in
+        */*) printf '%s' "$1" ;;
+        *:*) printf '%s/128' "$1" ;;
+        *)   printf '%s/32' "$1" ;;
+    esac
+}
+
+# Read the API server addresses and ports from the cluster, and render them as
+# the two pre-indented YAML lists networkpolicy.yaml substitutes.
+#
+# Nothing here is a default, because no constant is right on more than one kind
+# of cluster. The Service address is 10.96.0.1 on kubeadm and minikube and
+# 10.43.0.1 on k3s; the port is 443 in front of the Service and 6443 or 8443
+# behind it. A profile that shipped the kubeadm pair applied a policy on k3s
+# that allowed nothing at all.
+#
+# Both the Service and the endpoints behind it are collected. A pod dials the
+# ClusterIP, kube-proxy rewrites the destination to an endpoint, and the CNI
+# matches on whichever of the two it sees. Measured on minikube with calico:
+# allowing only the ClusterIP left every connection to the API server timing
+# out, because calico matches the rewritten address.
+#
+# EndpointSlice rather than Endpoints: the v1 Endpoints API is deprecated from
+# 1.33, and reading it makes kubectl print a deprecation warning per call.
+detect_apiserver_target() {
+    local cidrs=() ports=() addr port
+    local svc_ip svc_port ep_addrs ep_ports
+
+    if [ -n "$APISERVER_CIDR" ]; then
+        for addr in ${APISERVER_CIDR//,/ }; do cidrs+=("$(to_cidr "$addr")"); done
+    else
+        svc_ip=$(kube get svc kubernetes -n default \
+            -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+        ep_addrs=$(kube get endpointslice -n default \
+            -l kubernetes.io/service-name=kubernetes \
+            -o jsonpath='{range .items[*]}{range .endpoints[*]}{range .addresses[*]}{@}{"\n"}{end}{end}{end}' 2>/dev/null || true)
+        for addr in $svc_ip $ep_addrs; do cidrs+=("$(to_cidr "$addr")"); done
+    fi
+
+    if [ -n "$APISERVER_PORT" ]; then
+        for port in ${APISERVER_PORT//,/ }; do ports+=("$port"); done
+    else
+        svc_port=$(kube get svc kubernetes -n default \
+            -o jsonpath='{.spec.ports[*].port}' 2>/dev/null || true)
+        ep_ports=$(kube get endpointslice -n default \
+            -l kubernetes.io/service-name=kubernetes \
+            -o jsonpath='{range .items[*]}{range .ports[*]}{.port}{"\n"}{end}{end}' 2>/dev/null || true)
+        for port in $svc_port $ep_ports; do ports+=("$port"); done
+    fi
+
+    # Fail rather than render an empty list. An egress rule with no `to` allows
+    # everything and an empty `ports` allows every port, so a failed discovery
+    # would quietly turn the tightest rule in the file into the loosest one.
+    if [ "${#cidrs[@]}" -eq 0 ] || [ "${#ports[@]}" -eq 0 ]; then
+        cat >&2 <<EOF
+Cannot read the API server address from the cluster.
+
+The egress policy needs it, and rendering the rule without it would allow far
+more than intended rather than less. Read the two values and set them:
+
+    kubectl --context $KUBE_CONTEXT get svc kubernetes -n default
+    kubectl --context $KUBE_CONTEXT get endpointslice -n default \\
+      -l kubernetes.io/service-name=kubernetes
+
+    APISERVER_CIDR="10.43.0.1 <endpoint-address>" APISERVER_PORT="443 6443" $0
+EOF
+        exit 1
+    fi
+
+    APISERVER_CIDRS=""
+    for addr in "${cidrs[@]}"; do
+        case " $APISERVER_CIDRS " in *"cidr: $addr"$'\n'*) continue ;; esac
+        APISERVER_CIDRS+="        - ipBlock:"$'\n'"            cidr: ${addr}"$'\n'
+    done
+    APISERVER_CIDRS="${APISERVER_CIDRS%$'\n'}"
+
+    # Deduplicated because the Service port and the endpoint port are the same
+    # number on a cluster that does not remap them, and a duplicate entry is
+    # noise in a file an operator is meant to read.
+    APISERVER_PORTS=""
+    for port in "${ports[@]}"; do
+        case "$APISERVER_PORTS" in *"port: $port"$'\n'*) continue ;; esac
+        APISERVER_PORTS+="        - protocol: TCP"$'\n'"          port: ${port}"$'\n'
+    done
+    APISERVER_PORTS="${APISERVER_PORTS%$'\n'}"
+}
+
+# Which of three cases the install is in, rather than which of two.
+#
+# Every cluster accepts a NetworkPolicy object; only a CNI that implements one
+# acts on it, and the two are identical from kubectl. The previous version of
+# this check scanned kube-system for a DaemonSet and had no third answer, so on
+# k3s - which runs the policy controller inside the agent instead of as a
+# DaemonSet - it found nothing and told the operator that nothing was being
+# restricted, on a cluster that was restricting.
+#
+# Prints what it found and returns 0, or returns 1 for "could not tell". It
+# never returns "not enforced": an inventory cannot prove an absence, and
+# EGRESS_POLICY_VERIFY measures the thing instead of guessing at it.
+detect_policy_enforcer() {
+    local names kubelet
+
+    # Every namespace, not just kube-system. Calico installed by the Tigera
+    # operator runs in calico-system, and cilium usually gets its own namespace.
+    names=$(kube get daemonset -A \
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    case "$names" in
+        *calico*)      printf 'calico'         ; return 0 ;;
+        *cilium*)      printf 'cilium'         ; return 0 ;;
+        *antrea*)      printf 'antrea'         ; return 0 ;;
+        *kube-router*) printf 'kube-router'    ; return 0 ;;
+        *weave*)       printf 'weave'          ; return 0 ;;
+        *azure-npm*)   printf 'the Azure network policy manager' ; return 0 ;;
+        *anetd*)       printf 'GKE Dataplane V2'; return 0 ;;
+    esac
+
+    # k3s and rke2 have no DaemonSet to find. k3s embeds kube-router's policy
+    # controller in the agent process; rke2 ships canal or cilium. The kubelet
+    # version string is what distinguishes them.
+    kubelet=$(kube get nodes \
+        -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true)
+    case "$kubelet" in
+        *+k3s*)  printf 'k3s (the controller runs inside the agent)' ; return 0 ;;
+        *+rke2*) printf 'rke2' ; return 0 ;;
+    esac
+
+    return 1
+}
+
+# Set by detect_apiserver_target and by verify_baseline. Declared here so that
+# set -u holds whichever of them a future caller forgets to run first.
+APISERVER_CIDRS=""
+APISERVER_PORTS=""
+VERIFY_POD=""
+VERIFY_ADDR=""
+VERIFY_PORT=""
+VERIFY_BASELINE=""
+
+# The control port for the verification below: the kubelet, which listens on
+# every node that runs a pod and which the egress policy denies. It is a
+# constant rather than a setting because a cluster that moved it has moved the
+# one address this check can rely on, and the check then says so.
+VERIFY_KUBELET_PORT=10250
+
+# One TCP connect from inside the namespace, printed as one word.
+#
+#   open      it connected
+#   refused   something answered with a reset, so the packet arrived
+#   dropped   nothing came back
+#
+# The last two are not the same thing and neither one means "denied" on its own.
+# Calico drops a denied packet and kube-router rejects it, so a refusal is a
+# denial on k3s and an empty port on minikube. What separates them is the
+# before-and-after, which is why the caller takes a baseline first.
+probe_egress() {
+    local pod="$1" host="$2" port="$3"
+    kube_ns exec "$pod" -- node -e '
+      const net = require("net");
+      const s = net.connect({ host: process.argv[1], port: Number(process.argv[2]) });
+      const say = (word) => { console.log(word); process.exit(0); };
+      s.setTimeout(5000);
+      s.on("connect", () => { s.destroy(); say("open"); });
+      s.on("timeout", () => { s.destroy(); say("dropped"); });
+      s.on("error", (e) => say(e.code === "ECONNREFUSED" ? "refused" : "dropped"));
+    ' "$host" "$port" 2>/dev/null | tr -d '\r' | tail -1 || true
+}
+
+# Choose what to probe with and what to probe at, and record how the control
+# target behaves BEFORE the policy exists. Called before the policy is applied.
+#
+# The control target is the kubelet port on the API server's own node. One
+# machine serves both probes - its API server port is allowed and its kubelet
+# port is denied - so a difference between the two results is the policy and
+# not routing, a firewall or a dead host.
+#
+# Sets VERIFY_POD, VERIFY_ADDR, VERIFY_PORT and VERIFY_BASELINE. Leaves
+# VERIFY_POD empty when it cannot run, which the report turns into
+# "inconclusive" rather than into a verdict.
+verify_baseline() {
+    VERIFY_POD=""
+    VERIFY_ADDR=""
+    VERIFY_PORT=""
+    VERIFY_BASELINE=""
+
+    # The executor by preference: it is the workload that actually calls the API
+    # server, and it is a node image, which probe_egress needs. Any running pod
+    # is the fallback, and a pod without node reports inconclusive.
+    VERIFY_POD=$(kube_ns get pods -l app.kubernetes.io/name=executor \
+        --field-selector=status.phase=Running \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$VERIFY_POD" ]; then
+        VERIFY_POD=$(kube_ns get pods --field-selector=status.phase=Running \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    fi
+    [ -n "$VERIFY_POD" ] || return 0
+
+    VERIFY_ADDR=$(kube get endpointslice -n default \
+        -l kubernetes.io/service-name=kubernetes \
+        -o jsonpath='{.items[0].endpoints[0].addresses[0]}' 2>/dev/null || true)
+    VERIFY_PORT=$(kube get endpointslice -n default \
+        -l kubernetes.io/service-name=kubernetes \
+        -o jsonpath='{.items[0].ports[0].port}' 2>/dev/null || true)
+    if [ -z "$VERIFY_ADDR" ] || [ -z "$VERIFY_PORT" ]; then
+        VERIFY_POD=""
+        return 0
+    fi
+
+    VERIFY_BASELINE=$(probe_egress "$VERIFY_POD" "$VERIFY_ADDR" "$VERIFY_KUBELET_PORT")
+}
+
+# Say what the policy actually does, measured rather than inferred.
+#
+# Two properties, and both matter. The policy has to be enforced at all, and it
+# must not have locked out the executor, which cannot create a Job without the
+# API server. A policy that fails the second is worse than no policy: every
+# execution stalls and every pod stays green.
+verify_policy_enforcement() {
+    local allow deny
+
+    if [ -z "$VERIFY_POD" ]; then
+        warn "verification inconclusive: nothing in $NAMESPACE to probe from, or"
+        warn "the API server endpoint could not be read."
+        return 0
+    fi
+
+    allow=$(probe_egress "$VERIFY_POD" "$VERIFY_ADDR" "$VERIFY_PORT")
+    deny=$(probe_egress "$VERIFY_POD" "$VERIFY_ADDR" "$VERIFY_KUBELET_PORT")
+
+    if [ "$allow" != open ]; then
+        warn "verified BROKEN: the API server is not reachable from $NAMESPACE."
+        warn "The executor cannot create a Job, so every execution will stall"
+        warn "while every pod stays green. Read the address this cluster uses"
+        warn "and set it, or turn EGRESS_POLICY off until you have:"
+        warn "  kubectl --context $KUBE_CONTEXT get endpointslice -n default \\"
+        warn "    -l kubernetes.io/service-name=kubernetes"
+        warn "  APISERVER_CIDR=... APISERVER_PORT=... EGRESS_POLICY=true $0"
+        return 0
+    fi
+
+    # The control target has to have answered before the policy for its silence
+    # after the policy to mean anything. On a cluster where it never answered,
+    # the reachability half above still stands and the enforcement half does not.
+    if [ "$VERIFY_BASELINE" != open ]; then
+        ok "verified: the API server is reachable from $NAMESPACE"
+        warn "whether the policy is enforced was not measured: the control"
+        warn "address ${VERIFY_ADDR}:${VERIFY_KUBELET_PORT} did not answer before the policy"
+        warn "either, so its silence now proves nothing."
+        return 0
+    fi
+
+    if [ "$deny" = open ]; then
+        warn "verified NOT enforced: the objects exist and nothing is restricted."
+        warn "${VERIFY_ADDR}:${VERIFY_KUBELET_PORT} is denied by the policy and answered anyway."
+        warn "Install a CNI that implements NetworkPolicy, or treat the policy"
+        warn "as documentation only."
+        return 0
+    fi
+
+    ok "verified: the policy is enforced and the API server is still reachable"
+    ok "(${VERIFY_ADDR}:${VERIFY_KUBELET_PORT} answered before the policy and is ${deny} now)"
+}
+
 # The egress policy, applied after the chart so a failed install does not leave
 # a namespace that denies its own traffic.
 #
-# Warns rather than fails when the CNI does not enforce policy, because the
-# objects apply cleanly either way and the difference is invisible afterwards.
+# Warns rather than fails throughout, because the objects apply cleanly whether
+# or not anything enforces them and the difference is invisible afterwards.
 apply_egress_policy() {
     [ "$EGRESS_POLICY" = true ] || return 0
     section "Applying the egress policy"
 
+    detect_apiserver_target
+
     if [ "$DRY_RUN" = true ]; then
-        NAMESPACE="$NAMESPACE" APISERVER_CIDR="$APISERVER_CIDR" \
-            envsubst '${NAMESPACE} ${APISERVER_CIDR}' <"$SCRIPT_DIR/networkpolicy.yaml"
+        NAMESPACE="$NAMESPACE" APISERVER_CIDRS="$APISERVER_CIDRS" APISERVER_PORTS="$APISERVER_PORTS" \
+            envsubst '${NAMESPACE} ${APISERVER_CIDRS} ${APISERVER_PORTS}' <"$SCRIPT_DIR/networkpolicy.yaml"
         return 0
     fi
 
-    NAMESPACE="$NAMESPACE" APISERVER_CIDR="$APISERVER_CIDR" \
-        envsubst '${NAMESPACE} ${APISERVER_CIDR}' \
+    # Before the apply, because the verification compares a control address
+    # against how it behaved without the policy.
+    [ "$EGRESS_POLICY_VERIFY" = true ] && verify_baseline
+
+    NAMESPACE="$NAMESPACE" APISERVER_CIDRS="$APISERVER_CIDRS" APISERVER_PORTS="$APISERVER_PORTS" \
+        envsubst '${NAMESPACE} ${APISERVER_CIDRS} ${APISERVER_PORTS}' \
         <"$SCRIPT_DIR/networkpolicy.yaml" | kube apply -f -
 
-    # A NetworkPolicy object is accepted by every cluster. Only a CNI that
-    # implements it does anything with it, and the two look identical from
-    # kubectl, so say which one this is.
-    if kube get daemonset -n kube-system 2>/dev/null | grep -qE 'calico|cilium|weave|antrea|kube-router'; then
-        ok "egress policy applied and the CNI enforces it"
+    ok "API server allowed:$(printf '%s' "$APISERVER_CIDRS" | sed -n 's/.*cidr: */ /p' | tr -d '\n') on TCP$(printf '%s' "$APISERVER_PORTS" | sed -n 's/.*port: */ /p' | tr -d '\n')"
+
+    local enforcer
+    if enforcer=$(detect_policy_enforcer); then
+        ok "egress policy applied; $enforcer implements NetworkPolicy here"
+        [ "$EGRESS_POLICY_VERIFY" = true ] || \
+            ok "that is read from the cluster and not measured; EGRESS_POLICY_VERIFY=true measures it"
     else
-        warn "egress policy applied, but no enforcing CNI was found in kube-system."
-        warn "The objects exist and nothing is being restricted. Install a CNI"
-        warn "that implements NetworkPolicy, or treat this as documentation only."
+        warn "egress policy applied, but whether it is enforced could not be determined."
+        warn "No CNI this profile recognises was found, which is not the same as"
+        warn "none being present. Check what your cluster runs before relying on"
+        warn "the policy, or re-run with EGRESS_POLICY_VERIFY=true to measure it."
     fi
+
+    [ "$EGRESS_POLICY_VERIFY" = true ] && verify_policy_enforcement
+    return 0
 }
 
 chart_ref() {
@@ -577,9 +855,14 @@ main() {
     compose_set
     install_chart
 
+    # Before the dry-run exit, so that --dry-run shows the policy it would
+    # apply. It renders and returns without touching the cluster in that mode,
+    # and an operator inspecting an egress rule before applying it is exactly
+    # the case --dry-run exists for.
+    apply_egress_policy
+
     [ "$DRY_RUN" = true ] && exit 0
 
-    apply_egress_policy
     check_runner_secrets
 
     echo ""

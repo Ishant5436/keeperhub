@@ -137,8 +137,25 @@ const nextConfig = {
     "yargs-parser",
     "zod",
   ],
+  // Keyed to a single route rather than "/*". These globs are applied per
+  // route, so "/*" wrote one Node File Trace manifest listing all of them for
+  // every route in the app - 273 manifests of ~110k paths each. .next/standalone
+  // is the union of all route traces, so keying them to one always-built route
+  // delivers the same files.
+  //
+  // The key MUST name a route that exists in every build configuration, and
+  // whose removal fails loudly. If it ever stops matching a route the includes
+  // are silently dropped and the standalone server crashes at runtime with
+  // "Cannot find module" - no build error, no warning.
+  //
+  // /api/health qualifies on both counts: it is a plain route.ts (not gated by
+  // the *.staging.ts pageExtensions switch, unlike everything under
+  // app/api/admin/test/), and the deploy workflow blocks on it - it polls the
+  // in-cluster URL and waits for a 200 before shipping. Renaming the route
+  // fails the deploy before anything reaches an environment. docker-compose's
+  // healthcheck, proxy.ts and three e2e suites reference it too.
   outputFileTracingIncludes: {
-    "/*": [
+    "/api/health": [
       // Force-include the next package itself. The standalone server.js
       // emitted by `output: "standalone"` does a bare `require('next')`,
       // which needs next/package.json to resolve. Next's tracer only
