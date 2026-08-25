@@ -316,7 +316,8 @@ async function validateWorkflowAccess(
 
 async function handlePostUpdateSideEffects(
   workflowId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  sanitizedNodes: unknown
 ): Promise<void> {
   // Tags are Hub-discovery only; clear them on any demote off of "public",
   // including demote-to-unlisted (link-only) and demote-to-private.
@@ -337,10 +338,18 @@ async function handlePostUpdateSideEffects(
     revalidateTag("marketplace", "max");
   }
 
+  // KEEP-1216: `body.nodes` decides WHETHER the caller sent nodes; the
+  // sanitized set decides WHAT gets synced. The row written above is the
+  // sanitized one, and extractScheduleConfig keys on `data.type`, which only
+  // the sanitizer writes. Syncing from the raw body made a request shaped the
+  // way the public API docs show it resolve to "no schedule trigger", which
+  // takes the delete branch in syncWorkflowSchedule and silently removed the
+  // schedule row - returning {synced:true}, so not even a warning. Harmless
+  // while create never registered a schedule; destructive now that it does.
   if (body.nodes !== undefined) {
     const syncResult = await syncWorkflowSchedule(
       workflowId,
-      body.nodes as Parameters<typeof syncWorkflowSchedule>[1]
+      sanitizedNodes as Parameters<typeof syncWorkflowSchedule>[1]
     );
     if (!syncResult.synced) {
       logSystemWarn(
@@ -414,28 +423,6 @@ export async function PATCH(
           },
           { status: 400 }
         );
-      }
-
-      // KEEP-581: schedule interval pre-check. Runs before the DB update so
-      // a rejected sub-60s value never lands as persisted nodes paired with
-      // an unsynced schedule. extractScheduleConfig is the only thing that
-      // throws here; bad timezones/cron strings still take the warn-and-
-      // continue path in handlePostUpdateSideEffects.
-      try {
-        extractScheduleConfig(
-          body.nodes as Parameters<typeof extractScheduleConfig>[0]
-        );
-      } catch (error) {
-        if (error instanceof IntervalTooSmallError) {
-          return NextResponse.json(
-            {
-              error: "SCHEDULE_INTERVAL_TOO_SMALL",
-              message: error.message,
-            },
-            { status: 400 }
-          );
-        }
-        throw error;
       }
     }
 
@@ -519,6 +506,36 @@ export async function PATCH(
     }
 
     const updateData = buildUpdateData(body);
+
+    // KEEP-581: schedule interval pre-check. Runs before the DB update so a
+    // rejected sub-60s value never lands as persisted nodes paired with an
+    // unsynced schedule. extractScheduleConfig is the only thing that throws
+    // here; bad timezones and invalid cron strings still take the warn-and-
+    // continue path in handlePostUpdateSideEffects.
+    //
+    // KEEP-1216: reads the SANITIZED nodes, so it sits after buildUpdateData
+    // rather than beside the other body checks. extractScheduleConfig keys on
+    // `data.type`, which only the sanitizer writes, so checking the raw body
+    // let a sub-60s interval from a docs-shaped client skip this 400 entirely.
+    // This still runs ahead of the write below, so the guarantee above holds.
+    if (Array.isArray(updateData.nodes)) {
+      try {
+        extractScheduleConfig(
+          updateData.nodes as Parameters<typeof extractScheduleConfig>[0]
+        );
+      } catch (error) {
+        if (error instanceof IntervalTooSmallError) {
+          return NextResponse.json(
+            {
+              error: "SCHEDULE_INTERVAL_TOO_SMALL",
+              message: error.message,
+            },
+            { status: 400 }
+          );
+        }
+        throw error;
+      }
+    }
 
     if (Array.isArray(updateData.nodes)) {
       // What these two gates do NOT do: prove the workflow will run.
@@ -809,7 +826,7 @@ export async function PATCH(
       throw dbError;
     }
 
-    await handlePostUpdateSideEffects(workflowId, body);
+    await handlePostUpdateSideEffects(workflowId, body, updateData.nodes);
 
     // Resolve project/tag names so a move/tagging shows "Project: A -> B" in
     // the activity feed rather than opaque ids.

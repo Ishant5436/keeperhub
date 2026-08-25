@@ -149,6 +149,24 @@ function scheduleTriggerNode(
   };
 }
 
+// KEEP-1216: the shape the public API docs show - outer `type: "trigger"`,
+// no `data.type`. Only the sanitizer writes `data.type`, and
+// extractScheduleConfig keys on it, so this is the shape that exposes any
+// place the route still reads the raw request body.
+function docsShapedScheduleNode(
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    id: "trigger-1",
+    type: "trigger",
+    position: { x: 0, y: 0 },
+    data: {
+      label: "Schedule",
+      config: { triggerType: "Schedule", scheduleTimezone: "UTC", ...config },
+    },
+  };
+}
+
 function existingWorkflow(): Record<string, unknown> {
   return {
     id: "wf-1",
@@ -245,5 +263,88 @@ describe("KEEP-581: PATCH /api/workflows/[workflowId] schedule interval guard", 
     });
 
     expect(response.status).toBe(200);
+  });
+});
+
+// KEEP-1216: PATCH persists the sanitized nodes but used to sync the schedule
+// from the raw body. A docs-shaped trigger therefore resolved to "no schedule
+// trigger", which takes the delete branch in syncWorkflowSchedule and silently
+// removed the row - returning {synced:true}, so not even a warning. Harmless
+// while create never registered a schedule; destructive once it does.
+describe("KEEP-1216: PATCH syncs from the sanitized nodes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDualAuthContext.mockResolvedValue({
+      userId: "user-1",
+      organizationId: "org-1",
+      authMethod: "session",
+    });
+    mockValidateWorkflowIntegrations.mockResolvedValue({ valid: true });
+    mockWorkflowsFindFirst.mockResolvedValue(existingWorkflow());
+    mockSelectFrom.mockResolvedValue([]);
+    mockMemberLimit.mockResolvedValue([{ id: "m-1" }]);
+    mockSyncWorkflowSchedule.mockResolvedValue({ synced: true });
+    mockUpdateReturning.mockResolvedValue([existingWorkflow()]);
+  });
+
+  it("syncs a docs-shaped Schedule trigger instead of erasing it", async () => {
+    const response = await PATCH(
+      makeRequest({
+        nodes: [docsShapedScheduleNode({ scheduleCron: "0 9 * * *" })],
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSyncWorkflowSchedule).toHaveBeenCalledTimes(1);
+
+    // The nodes handed to the sync must carry data.type, which is what makes
+    // extractScheduleConfig resolve the trigger rather than return null.
+    const [, syncedNodes] = mockSyncWorkflowSchedule.mock.calls[0];
+    expect(syncedNodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: "trigger",
+            config: expect.objectContaining({
+              triggerType: "Schedule",
+              scheduleCron: "0 9 * * *",
+            }),
+          }),
+        }),
+      ])
+    );
+  });
+
+  it("rejects a docs-shaped sub-minute interval with 400", async () => {
+    const response = await PATCH(
+      makeRequest({
+        nodes: [docsShapedScheduleNode({ scheduleIntervalSeconds: 30 })],
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("SCHEDULE_INTERVAL_TOO_SMALL");
+    expect(mockSyncWorkflowSchedule).not.toHaveBeenCalled();
+    expect(mockUpdateReturning).not.toHaveBeenCalled();
+  });
+
+  it("still passes sanitized nodes when the trigger already carries data.type", async () => {
+    const response = await PATCH(
+      makeRequest({ nodes: [scheduleTriggerNode(null)] }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const [, syncedNodes] = mockSyncWorkflowSchedule.mock.calls[0];
+    expect(syncedNodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ type: "trigger" }),
+        }),
+      ])
+    );
   });
 });
