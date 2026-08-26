@@ -118,6 +118,10 @@ vi.mock("next/cache", () => ({
 }));
 
 import { PATCH } from "@/app/api/workflows/[workflowId]/route";
+// Real, not mocked: the vi.mock above spreads importActual and replaces
+// only syncWorkflowSchedule. Using it here asserts what the sync would
+// have decided, which is what selects the delete branch.
+import { extractScheduleConfig } from "@/lib/schedule-service";
 
 function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost:3000/api/workflows/wf-1", {
@@ -164,6 +168,15 @@ function docsShapedScheduleNode(
       label: "Schedule",
       config: { triggerType: "Schedule", scheduleTimezone: "UTC", ...config },
     },
+  };
+}
+
+function docsShapedWebhookNode(): Record<string, unknown> {
+  return {
+    id: "trigger-1",
+    type: "trigger",
+    position: { x: 0, y: 0 },
+    data: { label: "Webhook", config: { triggerType: "Webhook" } },
   };
 }
 
@@ -346,5 +359,67 @@ describe("KEEP-1216: PATCH syncs from the sanitized nodes", () => {
         }),
       ])
     );
+  });
+});
+
+// KEEP-1216 review follow-up: pin the delete branch. The risk in switching the
+// sync to sanitized nodes is over-correcting, so that a trigger which really
+// did stop being a Schedule no longer clears its row. These two cases fix the
+// boundary in both directions.
+describe("KEEP-1216: the schedule delete branch still fires when it should", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDualAuthContext.mockResolvedValue({
+      userId: "user-1",
+      organizationId: "org-1",
+      authMethod: "session",
+    });
+    mockValidateWorkflowIntegrations.mockResolvedValue({ valid: true });
+    mockWorkflowsFindFirst.mockResolvedValue(existingWorkflow());
+    mockSelectFrom.mockResolvedValue([]);
+    mockMemberLimit.mockResolvedValue([{ id: "m-1" }]);
+    mockSyncWorkflowSchedule.mockResolvedValue({ synced: true });
+    mockUpdateReturning.mockResolvedValue([existingWorkflow()]);
+  });
+
+  it("Schedule to Webhook still resolves to no schedule, so the row is erased", async () => {
+    const response = await PATCH(
+      makeRequest({ nodes: [docsShapedWebhookNode()] }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSyncWorkflowSchedule).toHaveBeenCalledTimes(1);
+
+    const [, syncedNodes] = mockSyncWorkflowSchedule.mock.calls[0];
+    // A null config is exactly what sends syncWorkflowSchedule down its
+    // "delete any existing schedule" path.
+    expect(
+      extractScheduleConfig(
+        syncedNodes as Parameters<typeof extractScheduleConfig>[0]
+      )
+    ).toBeNull();
+  });
+
+  it("Schedule to Schedule with a new cron upserts rather than erasing", async () => {
+    const response = await PATCH(
+      makeRequest({
+        nodes: [docsShapedScheduleNode({ scheduleCron: "30 2 * * *" })],
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+
+    const [, syncedNodes] = mockSyncWorkflowSchedule.mock.calls[0];
+    expect(
+      extractScheduleConfig(
+        syncedNodes as Parameters<typeof extractScheduleConfig>[0]
+      )
+    ).toEqual({
+      mode: "cron",
+      cronExpression: "30 2 * * *",
+      timezone: "UTC",
+    });
   });
 });

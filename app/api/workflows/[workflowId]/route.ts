@@ -517,7 +517,13 @@ export async function PATCH(
     // rather than beside the other body checks. extractScheduleConfig keys on
     // `data.type`, which only the sanitizer writes, so checking the raw body
     // let a sub-60s interval from a docs-shaped client skip this 400 entirely.
-    // This still runs ahead of the write below, so the guarantee above holds.
+    //
+    // Moving it past the visibility and project/tag gates changes nothing that
+    // persists: those only run db.select lookups and return 400/404, so no
+    // write can land ahead of this check and the guarantee above holds. It does
+    // reorder which error a doubly-invalid request sees - an invalid visibility
+    // or an unknown project now wins over SCHEDULE_INTERVAL_TOO_SMALL. Both are
+    // client errors the caller has to fix either way.
     if (Array.isArray(updateData.nodes)) {
       try {
         extractScheduleConfig(
