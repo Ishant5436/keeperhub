@@ -37,8 +37,13 @@ vi.mock("@/lib/workflow/access", () => ({
   getWorkflowAccess: mockGetWorkflowAccess,
 }));
 vi.mock("@/lib/logging", () => ({
-  ErrorCategory: { DATABASE: "database" },
+  ErrorCategory: { DATABASE: "database", AUTH: "auth" },
   logSystemError: vi.fn(),
+  // requireScope emits this on every denial, which is what this suite asserts.
+  logSecurityEvent: vi.fn(),
+  // Emitted alongside it for the Prometheus counter. Without it here the call
+  // throws and the route answers 500 rather than the 403 under test.
+  logUserError: vi.fn(),
 }));
 
 const ROUTE = "@/app/api/executions/[executionId]/cancel/route";

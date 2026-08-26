@@ -1,6 +1,6 @@
 import "server-only";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { isMutatingActionType } from "@/lib/mcp/action-type";
+import { hasIrreversibleEffect } from "@/lib/mcp/action-type";
 import {
   buildTriggerInputSchema,
   detectListingTriggerType,
@@ -28,16 +28,15 @@ function getNodeActionType(node: unknown): unknown {
   return configActionType ?? legacyActionType;
 }
 
-// Broader than workflowType === "write": also catches genuinely-mutating
-// actions (batch-write-contract, approve-token, transfer-funds,
-// transfer-token) that deriveWorkflowType deliberately never promotes to
-// "write" because they cannot be served by the calldata-handoff MCP route.
-// Those workflows correctly stay workflowType="read" for routing purposes,
-// but they still broadcast a real transaction, so the readOnlyHint
-// annotation needs this separate, wider check rather than reusing
-// workflowType.
+// Broader than workflowType === "write": also catches actions that
+// deriveWorkflowType never promotes to "write" because they cannot be served
+// by the calldata-handoff MCP route, plus the outbound-message actions that
+// have no chain effect at all. Those workflows correctly stay
+// workflowType="read" for routing purposes, but they still broadcast a
+// transaction or send a message the caller cannot recall, so the annotations
+// need this separate, wider check rather than reusing workflowType.
 function hasMutatingNode(nodes: unknown[]): boolean {
-  return nodes.some((node) => isMutatingActionType(getNodeActionType(node)));
+  return nodes.some((node) => hasIrreversibleEffect(getNodeActionType(node)));
 }
 
 type ApiResponse = Record<string, unknown>;
@@ -162,6 +161,8 @@ export function createWorkflowMcpServer(
   const toolDescription = buildToolDescription(listing);
   const triggerKind = detectListingTriggerType(listing.nodes);
   const inputSchema = buildTriggerInputSchema(triggerKind);
+  const isReadOnlyListing =
+    listing.workflowType === "read" && !hasMutatingNode(listing.nodes);
 
   server.registerTool(
     slug,
@@ -169,10 +170,23 @@ export function createWorkflowMcpServer(
       title: listing.name,
       description: toolDescription,
       inputSchema,
+      // listing.workflowType alone does not describe side effects: the call
+      // route runs a "read" listing server-side with the owner's wallet and
+      // credentials (handleReadWorkflow -> startExecutionInBackground) while
+      // a "write" listing only returns unsigned calldata for the caller to
+      // sign, so "read" is the branch that actually executes. hasMutatingNode
+      // is the wider check that catches the mutating nodes deriveWorkflowType
+      // leaves typed "read".
+      //
+      // destructiveHint tracks readOnlyHint rather than being pinned false.
+      // Under the MCP spec destructiveHint defaults to true and is only
+      // meaningful when readOnlyHint is false, so an explicit false on a
+      // non-read listing is a positive assertion that a call is safe to run
+      // unattended -- which nothing here establishes. A listing that is not
+      // provably read-only is therefore advertised as destructive.
       annotations: {
-        readOnlyHint:
-          listing.workflowType === "read" && !hasMutatingNode(listing.nodes),
-        destructiveHint: false,
+        readOnlyHint: isReadOnlyListing,
+        destructiveHint: !isReadOnlyListing,
       },
     },
     async (args: unknown) => {

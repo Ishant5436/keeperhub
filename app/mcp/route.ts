@@ -6,6 +6,7 @@ import { type ApiKeyAuthResult, authenticateApiKey } from "@/lib/api-key-auth";
 import { McpEventStore } from "@/lib/mcp/event-store";
 import { getInternalApiBaseUrl } from "@/lib/mcp/internal-url";
 import { logMcpEvent } from "@/lib/mcp/logging";
+import { normalizeToolCallArguments } from "@/lib/mcp/normalize-tool-call-arguments";
 import { authenticateOAuthToken } from "@/lib/mcp/oauth-auth";
 import { checkMcpRateLimit, type RateLimitResult } from "@/lib/mcp/rate-limit";
 import { createMcpServer } from "@/lib/mcp/server";
@@ -369,7 +370,7 @@ export async function POST(request: Request): Promise<Response> {
   let body: unknown;
   let bodyParsed = false;
   try {
-    body = await request.json();
+    body = normalizeToolCallArguments(await request.json());
     bodyParsed = true;
   } catch {
     // Leave bodyParsed = false; handled below after auth check.
@@ -430,7 +431,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const organizationId = auth.organizationId ?? "";
 
-  const rateLimit = checkMcpRateLimit(organizationId);
+  const rateLimit = await checkMcpRateLimit(organizationId);
   if (!rateLimit.allowed) {
     logMcpEvent("mcp.rate.limited", { orgId: organizationId });
     return rateLimitResponse(rateLimit);

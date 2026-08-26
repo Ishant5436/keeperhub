@@ -34,15 +34,36 @@ const NON_CALLDATA_MUTATING_ACTION_TYPES = new Set([
   "web3/approve-token",
   "web3/transfer-funds",
   "web3/transfer-token",
+  // Tempo is a stablecoin chain with no native gas token, so none of its
+  // writes carry native value and the daily value cap never sees them. Every
+  // one broadcasts a signed TIP-20 transaction from the org wallet, and none
+  // matches write-contract/protocol-write, so without these entries a
+  // Tempo-only workflow reads as non-mutating.
+  "tempo/transfer-with-memo",
+  "tempo/batch-payout",
+  "tempo/dex-swap",
+  "tempo/hold-payment",
+]);
+
+// Actions with no on-chain effect that are still not read-only: each one
+// leaves a message a caller cannot recall. lib/mcp/tools.ts already applies
+// exactly this rule to test_notification, annotating it destructive because it
+// "sends to a caller-named target and cannot recall the message"; a listing
+// whose nodes do the same send has to be treated the same way or the two
+// surfaces disagree about identical behaviour.
+const OUTBOUND_MESSAGE_ACTION_TYPES = new Set([
+  "discord/send-message",
+  "slack/send-message",
+  "telegram/send-message",
+  "sendgrid/send-email",
+  "resend/send-email",
 ]);
 
 /**
  * Broader than isWriteActionType: true for any action type that mutates
  * chain state, whether or not it can be served by the calldata-handoff
- * route. Use this for signals that describe real-world effect (e.g. an MCP
- * tool's readOnlyHint annotation), never for anything that gates the
- * calldata-generation/workflowType="write" path, which must stay scoped to
- * isWriteActionType.
+ * route. Never use this to gate the calldata-generation/workflowType="write"
+ * path, which must stay scoped to isWriteActionType.
  */
 export function isMutatingActionType(actionType: unknown): boolean {
   if (typeof actionType !== "string") {
@@ -51,5 +72,32 @@ export function isMutatingActionType(actionType: unknown): boolean {
   return (
     NON_CALLDATA_MUTATING_ACTION_TYPES.has(actionType) ||
     isWriteActionType(actionType)
+  );
+}
+
+/**
+ * True for any action type with an effect the caller cannot take back: a
+ * broadcast transaction or an outbound message.
+ *
+ * This is the predicate for MCP annotations, not isMutatingActionType. Under
+ * the MCP spec readOnlyHint means the tool does not modify its environment,
+ * which is wider than "does not modify chain state" -- sending an email
+ * modifies the world just as permanently as a transfer does, and an agent
+ * auto-approving one on a read-only hint is the same failure.
+ *
+ * Both sets are allowlists of known effects, so an action type absent from
+ * them still reads as side-effect-free. Deriving this from a declared
+ * side-effect field on PluginAction would close that gap for good; until then
+ * a new broadcasting plugin has to be added here, and the test suite pins the
+ * current membership so the omission surfaces as a failing case rather than a
+ * silent auto-approval.
+ */
+export function hasIrreversibleEffect(actionType: unknown): boolean {
+  if (typeof actionType !== "string") {
+    return false;
+  }
+  return (
+    isMutatingActionType(actionType) ||
+    OUTBOUND_MESSAGE_ACTION_TYPES.has(actionType)
   );
 }

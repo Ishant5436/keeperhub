@@ -17,13 +17,26 @@ Authorization: Bearer kh_your_api_key
 
 See [Authentication](/api/authentication) for the full auth model and [API Keys](/api/api-keys) for details on creating and managing API keys.
 
+Scope is enforced on these endpoints. A key created with `mcp:read` only can read execution status and run dry-run simulations, but is refused with `403 insufficient_scope` when it tries to broadcast. Broadcasting needs `mcp:write` or `mcp:admin`. A key created without any scope has no scope restriction and passes every gate; the same rules apply to MCP OAuth tokens.
+
 ## Rate Limits
 
 Direct execution requests are limited to 60 requests per minute per API key. Every response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` so you can pace requests; a `429` adds `Retry-After` with the seconds to wait. See [API errors](errors.md#rate-limit-headers) for the full header reference.
 
 ## Spending Caps
 
-Organizations can configure daily spending caps in wei. If the cap is exceeded, execution requests return a `403` status with the error message `Daily spending cap exceeded`.
+Two independent daily caps bound the native token **value** an organization moves (gas is not counted against them):
+
+| Cap | Unit | Applies to |
+| --- | --- | --- |
+| `dailyValueCapWei` | wei | every EVM chain |
+| `dailySolanaValueCapLamports` | lamports | Solana |
+
+**Every organization is capped, including one that has never configured anything.** An organization that has set no cap of its own, or that clears one, gets the platform default for that chain family rather than unlimited spending. There is no uncapped state: raising the ceiling means setting a higher number, not leaving the field empty. The defaults are `0.02 ETH` per day for EVM chains and `0.5 SOL` per day for Solana; self-hosted deployments can change them with the `EXECUTE_DEFAULT_DAILY_VALUE_CAP_WEI` and `EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS` environment variables.
+
+Both caps count value moved by workflow runs as well as by this API, so the two cannot be used to double-spend the same daily budget. Exceeding one returns `403` with `Daily spending cap exceeded` (or `Daily Solana spending cap exceeded`).
+
+Call `GET /api/analytics/spend-cap` before planning a large transfer. Read `effectiveDailyCapWei` and `effectiveDailySolanaCapLamports` — those are the figures enforcement uses. A null `dailyCapWei` means the organization configured nothing, not that spending is unbounded.
 
 ## Safe First-Write Sequence
 
@@ -504,7 +517,7 @@ Add `"simulate": true` to any of the standard request bodies:
 
 `simulate` must be a strict boolean — `true` or `false`. Strings (`"true"`), numbers (`1`), and other non-boolean values are rejected with HTTP 400 to prevent silent fall-through to a real broadcast. There is no query-string form; the body field is the only way to request a dry run.
 
-Because a dry run never signs or broadcasts, an OAuth token scoped `mcp:read` may run one. Removing `simulate` to broadcast requires `mcp:write`.
+Because a dry run never signs or broadcasts, a credential scoped `mcp:read` may run one. Removing `simulate` to broadcast requires `mcp:write`.
 
 ### Response — successful simulate
 
@@ -776,7 +789,7 @@ Direct execution endpoints return detailed error information:
 **Common Error Codes:**
 
 - `401`: Invalid or missing API key
-- `403`: The daily spending cap is exceeded, or an OAuth token lacks the scope the request needs (`insufficient_scope`). API keys are unaffected by scope.
+- `403`: The daily spending cap is exceeded, or the credential lacks the scope the request needs (`insufficient_scope`). Scope is enforced for both OAuth tokens and organization API keys. A key created without a scope has no scope restriction and passes every gate. See [Spending Caps](#spending-caps) — an organization that never configured a cap is still subject to the platform default.
 - `422`: Wallet not configured, code `WALLET_NOT_CONFIGURED` (see [Wallet Management](/wallet-management/turnkey))
 - `429`: Rate limit exceeded
 - `400`: Invalid request parameters
