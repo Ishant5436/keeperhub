@@ -1,4 +1,5 @@
 import { BN, BorshCoder, type Idl } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -172,5 +173,105 @@ describe("AnchorEventDecoder.decodeLogs", () => {
     expect(typeof amount).toBe("string");
     expect(amount).toBe("123456");
     expect(JSON.parse(JSON.stringify(events?.[0].data)).amount).toBe("123456");
+  });
+});
+
+const TRADED_DISCRIMINATOR = [99, 98, 97, 96, 95, 94, 93, 92];
+const WHIRLPOOL = "HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ";
+
+// Covers a pubkey at every nesting Anchor produces: bare, inside a defined
+// struct, inside a vec, and inside an option - plus a bytes field, whose
+// Buffer leaks the same way a PublicKey does.
+const PUBKEY_IDL: Idl = {
+  address: "11111111111111111111111111111111",
+  metadata: { name: "test_program", version: "0.1.0", spec: "0.1.0" },
+  instructions: [],
+  accounts: [],
+  events: [{ name: "Traded", discriminator: TRADED_DISCRIMINATOR }],
+  types: [
+    {
+      name: "Inner",
+      type: {
+        kind: "struct",
+        fields: [{ name: "nested_key", type: "pubkey" }],
+      },
+    },
+    {
+      name: "Traded",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "whirlpool", type: "pubkey" },
+          { name: "amount", type: "u64" },
+          { name: "keys", type: { vec: "pubkey" } },
+          { name: "maybe_key", type: { option: "pubkey" } },
+          { name: "inner", type: { defined: { name: "Inner" } } },
+          { name: "payload", type: "bytes" },
+        ],
+      },
+    },
+  ],
+};
+
+function tradedLog(): string {
+  const coder = new BorshCoder(PUBKEY_IDL);
+  const encoded = coder.types.encode("Traded", {
+    whirlpool: new PublicKey(WHIRLPOOL),
+    amount: new BN(42),
+    keys: [new PublicKey(WHIRLPOOL)],
+    maybe_key: new PublicKey(WHIRLPOOL),
+    inner: { nested_key: new PublicKey(WHIRLPOOL) },
+    payload: Buffer.from([1, 2, 3]),
+  });
+  const blob = Buffer.concat([Buffer.from(TRADED_DISCRIMINATOR), encoded]);
+  return `Program data: ${blob.toString("base64")}`;
+}
+
+function decodeTraded(): Record<string, unknown> {
+  const decoder = createEventDecoder(JSON.stringify(PUBKEY_IDL), PROGRAM_ID);
+  const events = decoder?.decodeLogs([
+    `Program ${PROGRAM_ID} invoke [1]`,
+    tradedLog(),
+    `Program ${PROGRAM_ID} success`,
+  ]);
+  expect(events).toHaveLength(1);
+  return events?.[0].data as Record<string, unknown>;
+}
+
+describe("AnchorEventDecoder pubkey and bytes normalization", () => {
+  it("normalizes a pubkey field to a base58 string, not a PublicKey instance", () => {
+    const data = decodeTraded();
+    expect(typeof data.whirlpool).toBe("string");
+    expect(data.whirlpool).toBe(WHIRLPOOL);
+  });
+
+  it("normalizes pubkeys nested in a struct, a vec and an option", () => {
+    const data = decodeTraded();
+    expect((data.inner as Record<string, unknown>).nested_key).toBe(WHIRLPOOL);
+    expect(data.keys).toEqual([WHIRLPOOL]);
+    expect(data.maybe_key).toBe(WHIRLPOOL);
+  });
+
+  it("normalizes a bytes field to base64, not a raw Buffer", () => {
+    const data = decodeTraded();
+    expect(data.payload).toBe(Buffer.from([1, 2, 3]).toString("base64"));
+  });
+
+  // The regression this guards: PublicKey.toJSON() returns base58, so a raw
+  // instance survives JSON.stringify looking correct. A structured-clone
+  // boundary - which the executor crosses when scoping for-each outputs -
+  // has no such escape hatch and deep-walks the instance into its internal
+  // {"_bn":{"words":[...]}} representation instead.
+  it("keeps every field JSON-safe across a structured clone", () => {
+    const cloned = structuredClone(decodeTraded());
+    expect(cloned).toEqual({
+      whirlpool: WHIRLPOOL,
+      amount: "42",
+      keys: [WHIRLPOOL],
+      maybe_key: WHIRLPOOL,
+      inner: { nested_key: WHIRLPOOL },
+      payload: Buffer.from([1, 2, 3]).toString("base64"),
+    });
+    expect(JSON.stringify(cloned)).not.toContain("_bn");
   });
 });

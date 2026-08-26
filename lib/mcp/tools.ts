@@ -6,6 +6,7 @@ import {
   parseIntervalSeconds,
   validateCronExpression,
 } from "@/lib/cron-utils";
+import type { AuthMethod } from "@/lib/middleware/auth-helpers";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { SUPPORTED_CHAIN_IDS } from "@/lib/rpc/types";
 import { withToolLogging } from "./logging";
@@ -36,26 +37,38 @@ type ScopeDeniedContent = {
  */
 function buildScopeDeniedResult(
   toolName: string,
-  grantedScope: string
+  grantedScope: string,
+  credentialType?: AuthMethod
 ): ScopeDeniedContent {
   const requiredScope = getRequiredScopeForTool(toolName);
-  // Encode the granted/required pair into the upgrade_url so the stub
-  // page at /settings/mcp/reauthorize can render contextual messaging
-  // ("you have mcp:read, this needs mcp:write") without the client
-  // having to thread the original denial state through itself.
-  const upgradeUrl = `/settings/mcp/reauthorize?required=${encodeURIComponent(requiredScope)}&granted=${encodeURIComponent(grantedScope)}`;
+  // An API key's scope is written into the key at creation and there is no
+  // consent screen behind it, so the reauthorize stub is dead ground for one:
+  // sending an agent there is the loop this message exists to avoid. Only an
+  // OAuth connection gets the upgrade_url and the reauthorize hint.
+  const isApiKey = credentialType === "api-key";
+  const upgradeUrl = isApiKey
+    ? undefined
+    : // Encode the granted/required pair into the upgrade_url so the stub
+      // page at /settings/mcp/reauthorize can render contextual messaging
+      // ("you have mcp:read, this needs mcp:write") without the client
+      // having to thread the original denial state through itself.
+      `/settings/mcp/reauthorize?required=${encodeURIComponent(requiredScope)}&granted=${encodeURIComponent(grantedScope)}`;
+  const credentialNoun = isApiKey ? "API key" : "token";
+  const hint = isApiKey
+    ? `An API key's scope is fixed when the key is created and cannot be raised. A new key has to be issued with \`${requiredScope}\`.`
+    : `Reauthorize the MCP integration and request \`${requiredScope}\` on the consent screen.`;
   return {
     content: [
       {
         type: "text" as const,
         text: JSON.stringify({
           error: "insufficient_scope",
-          message: `This tool requires the \`${requiredScope}\` OAuth scope. The current token only has \`${grantedScope || "(none)"}\`.`,
+          message: `This tool requires the \`${requiredScope}\` scope. The current ${credentialNoun} only has \`${grantedScope || "(none)"}\`.`,
           required_scope: requiredScope,
           granted_scope: grantedScope,
           tool: toolName,
-          upgrade_url: upgradeUrl,
-          hint: `Reauthorize the MCP integration and request \`${requiredScope}\` on the consent screen.`,
+          ...(upgradeUrl ? { upgrade_url: upgradeUrl } : {}),
+          hint,
         }),
       },
     ],
@@ -81,7 +94,8 @@ function withScopeCheck<H extends AnyToolHandler>(
   toolName: string,
   scope: string | undefined,
   handler: H,
-  readOnlyWhen?: ReadOnlyWhen
+  readOnlyWhen?: ReadOnlyWhen,
+  credentialType?: AuthMethod
 ): H {
   if (scope === undefined) {
     return handler;
@@ -96,7 +110,7 @@ function withScopeCheck<H extends AnyToolHandler>(
       return handler(...args) as ReturnType<H>;
     }
     if (!isToolAllowed(toolName, scope)) {
-      return buildScopeDeniedResult(toolName, scope);
+      return buildScopeDeniedResult(toolName, scope, credentialType);
     }
     return handler(...args) as ReturnType<H>;
   };
@@ -810,12 +824,50 @@ const GET_EXECUTION_SCHEMA = {
     ),
 };
 
+/**
+ * Tool annotation policy.
+ *
+ * Clients use these hints to decide what to auto-approve, so an inaccurate
+ * hint is a security control failure, not a cosmetic one. The MCP spec
+ * defaults are readOnlyHint=false, destructiveHint=true, idempotentHint=false
+ * and openWorldHint=true, and destructiveHint/idempotentHint are only
+ * meaningful when readOnlyHint is false. Writing `destructiveHint: false` is
+ * therefore an explicit downgrade away from the safe default and must be
+ * justified per tool.
+ *
+ * Rules applied here:
+ *  - readOnlyHint: true only when the tool reads and computes and changes no
+ *    state anywhere, including in other orgs and on chain. It must never
+ *    contradict the read/write split in oauth-scopes.ts.
+ *  - destructiveHint: false only for writes that are purely additive -- they
+ *    create a new record that starts inert, overwrite and destroy nothing,
+ *    and emit nothing outside the platform.
+ *  - destructiveHint: true for anything that overwrites existing state, moves
+ *    value, broadcasts a transaction, changes public exposure, sends an
+ *    unrecallable outbound message, or dispatches or arms an execution whose
+ *    effects we cannot bound from the arguments alone.
+ *  - idempotentHint and openWorldHint are left at their spec defaults: every
+ *    write here is unsafe to blind-retry (several take an explicit
+ *    idempotency_key for exactly that reason) and every tool can reach an
+ *    external system, so the defaults are already the conservative values.
+ */
 export function registerTools(
   server: McpServer,
   internalApiBaseUrl: string,
   authHeader: string,
-  scope?: string
+  scope?: string,
+  credentialType?: AuthMethod
 ): void {
+  // Binds the request's scope and credential family once, so every tool below
+  // reads as a gate on the tool name and nothing has to remember to thread the
+  // denial context through 40 call sites.
+  const scoped = <H extends AnyToolHandler>(
+    toolName: string,
+    handler: H,
+    readOnlyWhen?: ReadOnlyWhen
+  ): H =>
+    withScopeCheck(toolName, scope, handler, readOnlyWhen, credentialType);
+
   // =========================================================================
   // Workflow CRUD
   // =========================================================================
@@ -834,7 +886,7 @@ export function registerTools(
         .describe("Optional tag ID to filter workflows"),
     },
     { title: "List Workflows", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("list_workflows", scope, async (args) =>
+    scoped("list_workflows", async (args) =>
       withToolLogging("list_workflows", undefined, async () => {
         const params = new URLSearchParams();
         if (args.projectId) {
@@ -860,7 +912,7 @@ export function registerTools(
       workflowId: z.string().describe("The workflow ID"),
     },
     { title: "Get Workflow", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("get_workflow", scope, async (args) =>
+    scoped("get_workflow", async (args) =>
       withToolLogging("get_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -906,8 +958,12 @@ export function registerTools(
         .describe("Optional tag ID to label the workflow"),
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
-    { title: "Create Workflow", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("create_workflow", scope, async (args) =>
+    // nodes is an unconstrained record array, so it accepts write-contract
+    // and transfer actions, and enabled=true arms a schedule/event/block/
+    // webhook trigger on the same call. One call therefore starts a
+    // recurring unattended run of arbitrary node content.
+    { title: "Create Workflow", readOnlyHint: false, destructiveHint: true },
+    scoped("create_workflow", async (args) =>
       withToolLogging("create_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -965,8 +1021,10 @@ export function registerTools(
         .optional()
         .describe("Tag ID to assign (null to unassign)"),
     },
-    { title: "Update Workflow", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("update_workflow", scope, async (args) =>
+    // nodes/edges are a full replace, and enabled toggles live triggers, so
+    // this overwrites state a caller may not be able to reconstruct.
+    { title: "Update Workflow", readOnlyHint: false, destructiveHint: true },
+    scoped("update_workflow", async (args) =>
       withToolLogging("update_workflow", undefined, async () => {
         const { workflowId, ...body } = args;
         const data = await callApi(
@@ -990,7 +1048,7 @@ export function registerTools(
       workflowId: z.string().describe("The workflow ID to delete"),
     },
     { title: "Delete Workflow", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck("delete_workflow", scope, async (args) =>
+    scoped("delete_workflow", async (args) =>
       withToolLogging("delete_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1014,7 +1072,7 @@ export function registerTools(
     "List all projects for the authenticated organization, each with its workflow count. Use a project's id as projectId when creating, updating, or filtering workflows.",
     {},
     { title: "List Projects", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("list_projects", scope, (_args) =>
+    scoped("list_projects", (_args) =>
       withToolLogging("list_projects", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1046,7 +1104,7 @@ export function registerTools(
         ),
     },
     { title: "Create Project", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("create_project", scope, (args) =>
+    scoped("create_project", (args) =>
       withToolLogging("create_project", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1071,7 +1129,7 @@ export function registerTools(
     "List all tags for the authenticated organization, each with its workflow count. Use a tag's id as tagId when creating, updating, or filtering workflows.",
     {},
     { title: "List Tags", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("list_tags", scope, (_args) =>
+    scoped("list_tags", (_args) =>
       withToolLogging("list_tags", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1099,7 +1157,7 @@ export function registerTools(
         ),
     },
     { title: "Create Tag", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("create_tag", scope, (args) =>
+    scoped("create_tag", (args) =>
       withToolLogging("create_tag", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1133,8 +1191,10 @@ export function registerTools(
         .describe("Optional input data to pass to the workflow trigger"),
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
-    { title: "Execute Workflow", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("execute_workflow", scope, async (args) =>
+    // The workflow body is arbitrary: a run can transfer funds or call any
+    // contract. Nothing in the arguments bounds that, so assume the worst.
+    { title: "Execute Workflow", readOnlyHint: false, destructiveHint: true },
+    scoped("execute_workflow", async (args) =>
       withToolLogging("execute_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1165,7 +1225,7 @@ export function registerTools(
     "Get combined status and step-by-step logs for a workflow execution. Replaces the v1.11 get_execution_status + get_execution_logs pair. Returns { status, logs } in a single response. `status` and each log's `transactionHashes[].verified`/`receiptStatus` are independently reconciled against on-chain receipts before the execution is allowed to finalize as success -- this, not execute_workflow's trigger acknowledgement, is the authoritative signal for whether a workflow (and any money movement within it) actually completed. By default returns full node input/output data (backward compatible with v1.11 get_execution_logs no-param callers). Pass `includeData: false` to omit input/output/outputRaw blobs, `nodeIds: string[]` to restrict full data to specific nodes (status and error always returned for every node), or `truncateData: number` (bytes) to cap individual input/output/outputRaw payloads. The `error` field is never truncated. One exception to the shape: for an execution owned by another organization that you can see only through its workflow's public share setting, `logs` is null and `status` is redacted (node identifiers omitted) -- includeData, nodeIds and truncateData have no effect there.",
     GET_EXECUTION_SCHEMA,
     { title: "Get Execution", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("get_execution", scope, async (args) =>
+    scoped("get_execution", async (args) =>
       withToolLogging("get_execution", undefined, async () => {
         const accessRequest = new Request(`${internalApiBaseUrl}/mcp`, {
           headers: { Authorization: authHeader },
@@ -1253,7 +1313,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_execution_status", scope, async (args) =>
+    scoped("get_execution_status", async (args) =>
       withToolLogging("get_execution_status", undefined, async () => {
         const data = await fetchExecutionData(internalApiBaseUrl, authHeader, {
           executionId: args.executionId,
@@ -1283,7 +1343,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_execution_logs", scope, async (args) =>
+    scoped("get_execution_logs", async (args) =>
       withToolLogging("get_execution_logs", undefined, async () => {
         const data = await fetchExecutionData(
           internalApiBaseUrl,
@@ -1320,12 +1380,19 @@ export function registerTools(
         .optional()
         .describe("Additional context or constraints for the AI generator"),
     },
+    // Persists nothing and changes no state, so it stays read-only. The hint
+    // describes effect, not grant: withScopeCheck enforces mcp:write on this
+    // tool regardless of any annotation, so flipping readOnlyHint would buy no
+    // enforcement and cost an accurate signal -- clients that allowlist
+    // read-only tools would start prompting for a call that mutates nothing.
+    // The rate-limited model spend is a cost concern the annotation vocabulary
+    // has no way to express.
     {
       title: "AI Generate Workflow",
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("ai_generate_workflow", scope, async (args) =>
+    scoped("ai_generate_workflow", async (args) =>
       withToolLogging("ai_generate_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1369,7 +1436,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("list_action_schemas", scope, async (args) =>
+    scoped("list_action_schemas", async (args) =>
       withToolLogging("list_action_schemas", undefined, async () => {
         const params = new URLSearchParams();
         if (args.category) {
@@ -1402,7 +1469,7 @@ export function registerTools(
         ),
     },
     { title: "Search Plugins", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("search_plugins", scope, async (args) =>
+    scoped("search_plugins", async (args) =>
       withToolLogging("search_plugins", undefined, async () => {
         const params = new URLSearchParams({ category: args.category });
         const data = await callApi(
@@ -1429,7 +1496,7 @@ export function registerTools(
         ),
     },
     { title: "Get Plugin", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("get_plugin", scope, async (args) =>
+    scoped("get_plugin", async (args) =>
       withToolLogging("get_plugin", undefined, async () => {
         const params = new URLSearchParams({ category: args.pluginType });
         const data = await callApi(
@@ -1450,7 +1517,7 @@ export function registerTools(
     "List all configured integrations (credentials) for the organization, each with its id, name, and type. These are required for actions like Discord notifications, Sendgrid emails, or web3 writes. A web3 integration's entry already includes its checksummed wallet address; config is omitted -- call get_wallet_integration with an entry's id for its decrypted config.",
     {},
     { title: "List Integrations", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("list_integrations", scope, async (_args) =>
+    scoped("list_integrations", async (_args) =>
       withToolLogging("list_integrations", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1480,7 +1547,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_wallet_integration", scope, async (args) =>
+    scoped("get_wallet_integration", async (args) =>
       withToolLogging("get_wallet_integration", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1510,7 +1577,7 @@ export function registerTools(
       category: z.string().optional().describe("Filter templates by category"),
     },
     { title: "Search Templates", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("search_templates", scope, async (args) =>
+    scoped("search_templates", async (args) =>
       withToolLogging("search_templates", undefined, async () => {
         const params = new URLSearchParams();
         if (args.query) {
@@ -1539,7 +1606,7 @@ export function registerTools(
       templateId: z.string().describe("The template workflow ID"),
     },
     { title: "Get Template", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("get_template", scope, async (args) =>
+    scoped("get_template", async (args) =>
       withToolLogging("get_template", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1564,8 +1631,11 @@ export function registerTools(
         .optional()
         .describe("Optional name for the cloned workflow"),
     },
+    // Unlike create_workflow this takes no `enabled` argument, and the
+    // duplicate route inserts without one so the row falls to the schema
+    // default of disabled. The clone is inert until a separate call arms it.
     { title: "Deploy Template", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("deploy_template", scope, async (args) =>
+    scoped("deploy_template", async (args) =>
       withToolLogging("deploy_template", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1594,7 +1664,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("tools_documentation", scope, (_args) =>
+    scoped("tools_documentation", (_args) =>
       withToolLogging("tools_documentation", undefined, () => {
         const text = [
           "KeeperHub MCP Tools Documentation",
@@ -1685,9 +1755,8 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Transfer Funds", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck(
+    scoped(
       "execute_transfer",
-      scope,
       async (args) =>
         withToolLogging("execute_transfer", undefined, async () => {
           assertSimulationSupported(args.chain_id, args.simulate);
@@ -1742,9 +1811,8 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Contract Call", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck(
+    scoped(
       "execute_contract_call",
-      scope,
       async (args) =>
         withToolLogging("execute_contract_call", undefined, async () => {
           assertSimulationSupported(args.chain_id, args.simulate);
@@ -1777,7 +1845,7 @@ export function registerTools(
 
   server.tool(
     "execute_check_and_execute",
-    'Read a contract value, evaluate a condition, and execute an action if the condition is met. Useful for conditional on-chain operations (e.g., \'if balance > 1000, then transfer\'). Requires a wallet integration. Full example: {"contract_address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "chain_id": "11155111", "function_name": "balanceOf", "function_args": "[\\"0xHolder...\\"]", "condition": {"operator": "gt", "value": "1000"}, "action": {"contract_address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "function_name": "transfer", "function_args": "[\\"0xRecipient...\\", \\"1000\\"]"}} - note that function_args is a JSON array encoded as a string, on both the check and the action.',
+    'Read one supported scalar from a contract and execute an action if its condition is met. A single Solidity integer output supports every operator; a single address or bytes1 through bytes32 output supports eq and neq only. Empty, multiple, compound, and other scalar outputs are rejected before the RPC read. Useful for conditional on-chain operations (e.g., \'if balance > 1000, then transfer\'). Requires a wallet integration. Full example: {"contract_address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "chain_id": "11155111", "function_name": "balanceOf", "function_args": "[\\"0xHolder...\\"]", "condition": {"operator": "gt", "value": "1000"}, "action": {"contract_address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "function_name": "transfer", "function_args": "[\\"0xRecipient...\\", \\"1000\\"]"}} - note that function_args is a JSON array encoded as a string, on both the check and the action.',
     {
       contract_address: z
         .string()
@@ -1785,7 +1853,9 @@ export function registerTools(
       chain_id: looseString("Chain ID (e.g., '1' for Ethereum)"),
       function_name: z
         .string()
-        .describe("Function to call for the check (e.g., 'balanceOf')"),
+        .describe(
+          "Function to call for the check; it must return one Solidity integer, address, or bytes1 through bytes32 value (e.g., 'balanceOf' or 'owner')"
+        ),
       function_args: looseJsonString(
         "JSON array of function arguments for the check"
       ).optional(),
@@ -1796,7 +1866,9 @@ export function registerTools(
         operator: z
           .enum(["eq", "neq", "gt", "lt", "gte", "lte"])
           .describe("Comparison operator"),
-        value: looseString("Target value to compare against"),
+        value: looseString(
+          "BigInt-compatible decimal or hexadecimal target value to compare against"
+        ),
       }),
       action: z.object({
         contract_address: z
@@ -1817,9 +1889,8 @@ export function registerTools(
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
     { title: "Check and Execute", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck(
+    scoped(
       "execute_check_and_execute",
-      scope,
       async (args) =>
         withToolLogging("execute_check_and_execute", undefined, async () => {
           assertSimulationSupported(args.chain_id, args.simulate);
@@ -1870,7 +1941,7 @@ export function registerTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_direct_execution_status", scope, async (args) =>
+    scoped("get_direct_execution_status", async (args) =>
       withToolLogging("get_direct_execution_status", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -1906,7 +1977,7 @@ export function registerTools(
         ),
     },
     { title: "Validate Cron", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("validate_cron", scope, async (args) =>
+    scoped("validate_cron", async (args) =>
       withToolLogging("validate_cron", undefined, () => {
         const cronResult = validateCronExpression(args.cronExpression);
         const description = cronResult.valid
@@ -1978,7 +2049,7 @@ export function registerTools(
         .describe("Time range preset (e.g. 24h, 7d, 30d)"),
     },
     { title: "List Executions", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("list_executions", scope, async (args) =>
+    scoped("list_executions", async (args) =>
       withToolLogging("list_executions", undefined, async () => {
         const params = new URLSearchParams();
         if (args.cursor) {
@@ -2008,14 +2079,14 @@ export function registerTools(
 
   server.tool(
     "get_spending_limits",
-    "Get the organization's daily direct-execution spending caps and current usage (EVM wei and Solana lamports).",
+    "Get the organization's daily direct-execution spending caps and current usage (EVM wei and Solana lamports). Plan against effectiveDailyCapWei / effectiveDailySolanaCapLamports: those are what is enforced. A null dailyCapWei means the organization set no cap of its own, NOT that spending is unlimited -- the platform default applies and requests above it are refused.",
     {},
     {
       title: "Get Spending Limits",
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_spending_limits", scope, async () =>
+    scoped("get_spending_limits", async () =>
       withToolLogging("get_spending_limits", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2045,8 +2116,12 @@ export function registerTools(
           "Credential fields to test (same shape as integration config)"
         ),
     },
-    { title: "Test Notification", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("test_notification", scope, async (args) =>
+    // type and config are caller-supplied and reach the plugin unfiltered,
+    // so this sends a real message to an address the caller chooses, or
+    // opens a database connection to a host it names. The send cannot be
+    // recalled; persisting nothing does not make it additive.
+    { title: "Test Notification", readOnlyHint: false, destructiveHint: true },
+    scoped("test_notification", async (args) =>
       withToolLogging("test_notification", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2087,12 +2162,14 @@ export function registerTools(
         .describe("Optional on-chain expiry override"),
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
+    // Produces a signed transfer authorization against org funds, and
+    // broadcastMode "schedule" sends it without a further call.
     {
       title: "Tempo Sign and Hold",
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
     },
-    withScopeCheck("tempo_sign_and_hold", scope, async (args) =>
+    scoped("tempo_sign_and_hold", async (args) =>
       withToolLogging("tempo_sign_and_hold", undefined, async () => {
         const {
           idempotency_key: idempotencyKey,
@@ -2138,12 +2215,13 @@ export function registerTools(
         .string()
         .describe("Held payment ID from tempo_sign_and_hold"),
     },
+    // Permanently voids a pending payment; the signature cannot be revived.
     {
       title: "Tempo Cancel Hold",
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
     },
-    withScopeCheck("tempo_cancel_hold", scope, async (args) =>
+    scoped("tempo_cancel_hold", async (args) =>
       withToolLogging("tempo_cancel_hold", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2168,12 +2246,13 @@ export function registerTools(
         .describe("Held payment ID from tempo_sign_and_hold"),
       idempotency_key: IDEMPOTENCY_KEY_ARG,
     },
+    // Broadcasts the held transfer. Irreversible movement of real funds.
     {
       title: "Tempo Release Hold",
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
     },
-    withScopeCheck("tempo_release_hold", scope, async (args) =>
+    scoped("tempo_release_hold", async (args) =>
       withToolLogging("tempo_release_hold", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2224,8 +2303,19 @@ export function registerMetaTools(
   server: McpServer,
   internalApiBaseUrl: string,
   authHeader: string,
-  scope?: string
+  scope?: string,
+  credentialType?: AuthMethod
 ): void {
+  // Binds the request's scope and credential family once, so every tool below
+  // reads as a gate on the tool name and nothing has to remember to thread the
+  // denial context through 40 call sites.
+  const scoped = <H extends AnyToolHandler>(
+    toolName: string,
+    handler: H,
+    readOnlyWhen?: ReadOnlyWhen
+  ): H =>
+    withScopeCheck(toolName, scope, handler, readOnlyWhen, credentialType);
+
   // Meta-tool 1: Search and discover available protocol actions
   server.tool(
     "search_protocol_actions",
@@ -2249,7 +2339,7 @@ export function registerMetaTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("search_protocol_actions", scope, async (args) =>
+    scoped("search_protocol_actions", async (args) =>
       withToolLogging("search_protocol_actions", undefined, async () => {
         const params = new URLSearchParams();
         if (args.protocol) {
@@ -2341,12 +2431,15 @@ export function registerMetaTools(
           "Action parameters as key-value pairs (e.g., {network: '1', address: '0x...'}). Use search_protocol_actions to discover required params."
         ),
     },
+    // actionType selects both reads (chronicle/eth-usd-read) and writes
+    // (aave-v3/supply) through one entry point, and a static annotation
+    // cannot vary by argument, so it takes the worst case of the two.
     {
       title: "Execute Protocol Action",
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
     },
-    withScopeCheck("execute_protocol_action", scope, async (args) =>
+    scoped("execute_protocol_action", async (args) =>
       withToolLogging("execute_protocol_action", undefined, async () => {
         const parts = args.actionType.split("/");
         if (parts.length < 2) {
@@ -2413,7 +2506,7 @@ export function registerMetaTools(
         ),
     },
     { title: "Search Workflows", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("search_workflows", scope, async (args) =>
+    scoped("search_workflows", async (args) =>
       withToolLogging("search_workflows", undefined, async () => {
         const params = new URLSearchParams();
         if (args.query) {
@@ -2455,8 +2548,10 @@ export function registerMetaTools(
         .record(z.string(), z.unknown())
         .describe("Input fields as declared in the workflow's inputSchema"),
     },
-    { title: "Call Workflow", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("call_workflow", scope, async (args) =>
+    // Invokes a third-party listing whose body we do not control, and a paid
+    // listing charges USDC on retry after the 402 is settled.
+    { title: "Call Workflow", readOnlyHint: false, destructiveHint: true },
+    scoped("call_workflow", async (args) =>
       withToolLogging("call_workflow", undefined, async () => {
         try {
           const data = await callApi(
@@ -2523,8 +2618,11 @@ export function registerMetaTools(
           "Workflow type: 'read' for read-only, 'write' for state-changing"
         ),
     },
-    { title: "List Workflow", readOnlyHint: false, destructiveHint: false },
-    withScopeCheck("list_workflow", scope, async (args) =>
+    // Makes a private workflow publicly callable and full-replaces the
+    // listing's inputSchema/outputMapping, matching unlist_workflow, its
+    // inverse.
+    { title: "List Workflow", readOnlyHint: false, destructiveHint: true },
+    scoped("list_workflow", async (args) =>
       withToolLogging("list_workflow", undefined, async () => {
         const { workflowId, ...metadata } = args;
         const data = await callApi(
@@ -2551,7 +2649,7 @@ export function registerMetaTools(
         .describe("The internal ID of the workflow to unlist"),
     },
     { title: "Unlist Workflow", readOnlyHint: false, destructiveHint: true },
-    withScopeCheck("unlist_workflow", scope, async (args) =>
+    scoped("unlist_workflow", async (args) =>
       withToolLogging("unlist_workflow", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2599,12 +2697,14 @@ export function registerMetaTools(
         .optional()
         .describe("Updated price in USDC (only allowed while unlisted)"),
     },
+    // inputSchema, outputMapping and price are full replaces on a listing
+    // other agents are already calling.
     {
       title: "Update Workflow Listing",
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
     },
-    withScopeCheck("update_workflow_listing", scope, async (args) =>
+    scoped("update_workflow_listing", async (args) =>
       withToolLogging("update_workflow_listing", undefined, async () => {
         const { workflowId, ...patch } = args;
         const data = await callApi(
@@ -2644,7 +2744,7 @@ export function registerMetaTools(
         ),
     },
     { title: "Validate Workflow", readOnlyHint: true, destructiveHint: false },
-    withScopeCheck("validate_workflow", scope, async (args) =>
+    scoped("validate_workflow", async (args) =>
       withToolLogging("validate_workflow", undefined, async () => {
         const path = args.deepCheck
           ? `/api/workflows/${encodeURIComponent(args.workflowId)}/validate?deepCheck=true`
@@ -2681,7 +2781,7 @@ export function registerMetaTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("prepare_test_pin_data", scope, async (args) =>
+    scoped("prepare_test_pin_data", async (args) =>
       withToolLogging("prepare_test_pin_data", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,
@@ -2710,7 +2810,7 @@ export function registerMetaTools(
       readOnlyHint: true,
       destructiveHint: false,
     },
-    withScopeCheck("get_workflow_listing", scope, async (args) =>
+    scoped("get_workflow_listing", async (args) =>
       withToolLogging("get_workflow_listing", undefined, async () => {
         const data = await callApi(
           internalApiBaseUrl,

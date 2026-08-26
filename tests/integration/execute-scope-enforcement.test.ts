@@ -89,8 +89,14 @@ vi.mock("@/lib/features/route-guard", () => ({
 }));
 
 vi.mock("@/lib/logging", () => ({
-  ErrorCategory: { DATABASE: "DATABASE" },
+  ErrorCategory: { DATABASE: "DATABASE", AUTH: "AUTH" },
   logSystemError: vi.fn(),
+  // requireScope emits this on every denial, which is what these tests assert.
+  logSecurityEvent: vi.fn(),
+  // Also emitted on every denial, for the Prometheus counter. Absent from this
+  // mock the call throws and the route answers 500 instead of the 403 under
+  // test, so the gate would look broken for a reason that is purely the stub.
+  logUserError: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({

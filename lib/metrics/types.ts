@@ -126,6 +126,7 @@ export const MetricNames = {
   // User-caused error metrics
   USER_VALIDATION_ERRORS: "errors.user.validation.total",
   USER_CONFIGURATION_ERRORS: "errors.user.configuration.total",
+  USER_AUTHORIZATION_ERRORS: "errors.user.authorization.total",
   EXTERNAL_SERVICE_ERRORS: "errors.external.service.total",
   NETWORK_RPC_ERRORS: "errors.network.rpc.total",
   TRANSACTION_BLOCKCHAIN_ERRORS: "errors.transaction.blockchain.total",
@@ -138,6 +139,12 @@ export const MetricNames = {
   // A dropped security audit row is itself security-relevant: make silent loss
   // observable so the best-effort path can be alerted on.
   SECURITY_AUDIT_WRITE_FAILED: "errors.system.security_audit_write.total",
+  // The per-organization MCP limiter serves a decision from its per-pod
+  // fallback whenever the shared Redis window is unreachable, which silently
+  // multiplies the fleet-wide ceiling by the replica count. A throttled log
+  // line cannot answer "is the shared limiter enforcing right now"; this
+  // counter can.
+  MCP_RATE_LIMIT_DEGRADED: "ratelimit.mcp.degraded.total",
 
   // Sponsorship metrics
   SPONSORSHIP_TRANSACTIONS_TOTAL: "sponsorship.transactions.total",

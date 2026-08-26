@@ -395,3 +395,12 @@ jobs:
             done
           done
           exit $failed
+
+      # The values files above are rendered by helm. networkpolicy.yaml is not:
+      # install.sh substitutes it with envsubst, and two of the values it takes
+      # are multi-line YAML lists. The script renders it the way install.sh
+      # does and checks the result. Its docstring says what goes wrong without
+      # it, and it runs locally with no arguments.
+      - name: Render the egress policy
+        working-directory: deploy/keeperhub-stack/self-hosted
+        run: ./test-harness/check-policy-render.py

@@ -110,6 +110,16 @@ const WRITE_ABI = JSON.stringify([
   },
 ]);
 
+const CHECK_ABI = JSON.stringify([
+  {
+    type: "function",
+    name: "readValue",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "value", type: "uint256" }],
+  },
+]);
+
 type RouteCase = {
   name: string;
   post: (req: Request) => Promise<Response>;
@@ -157,8 +167,8 @@ const ROUTES: RouteCase[] = [
       post("/api/execute/check-and-execute", {
         chainId: "8453",
         contractAddress: ADDRESS,
-        functionName: "doWork",
-        abi: WRITE_ABI,
+        functionName: "readValue",
+        abi: CHECK_ABI,
         condition: { operator: "eq", value: "1" },
         action: {
           contractAddress: ADDRESS,

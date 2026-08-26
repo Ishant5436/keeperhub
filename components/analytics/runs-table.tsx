@@ -134,21 +134,37 @@ function formatGasAsEth(weiString: string | null): string {
   return `${eth.toFixed(4)} ETH`;
 }
 
-// Run-level gas: multi-network runs can't sum into one token, so they render
-// as "Composed" (per-network amounts live in the expanded steps). A single
-// network shows its total in that network's token.
+// Run-level gas: a run that spent on more than one chain can't sum into one
+// token, so it renders as "Composed" (per-network amounts live in the expanded
+// steps). A single chain shows its total in that chain's token.
+//
+// The question is which chains the gas landed on, not which chains the run
+// touched - `networks` carries the second and answers the first only for a run
+// whose every step spent gas. A workflow that writes on one chain and reads on
+// another has one gas chain and two targeted ones, and its total is perfectly
+// summable. `gasNetworks` is the set this actually needs.
+//
+// Ledger-only gas (a sponsored leg with no step rollup) names no chain of its
+// own, so it borrows the run's, which is unambiguous only when the run touched
+// a single one.
 //
 // The step rollup wins over the sponsorship ledger because it covers every
 // transaction the run made. A run that starts sponsored and falls back to
 // direct signing has only its sponsored leg in the ledger, so preferring the
 // ledger would drop the rest.
-function runGasDisplay(run: UnifiedRun): ReactNode {
-  if (run.networks.length > 1) {
+export function runGasDisplay(run: UnifiedRun): ReactNode {
+  const spentAcrossChains =
+    run.gasNetworks.length > 1 ||
+    (run.gasNetworks.length === 0 && run.networks.length > 1);
+  if (spentAcrossChains) {
     return "Composed";
   }
   const wei = run.gasUsedWei ?? run.gasCostWei;
   if (wei) {
-    return formatGasNative(wei, run.networks[0] ?? run.network);
+    return formatGasNative(
+      wei,
+      run.gasNetworks[0] ?? run.networks[0] ?? run.network
+    );
   }
   return formatGasAsEth(run.gasUsedWei);
 }

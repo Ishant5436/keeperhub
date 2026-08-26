@@ -93,6 +93,7 @@ describe("validateApiKey -- anonymous and failure propagation", () => {
       organizationId: "org-1",
       apiKeyId: "oauth:user-1",
       scope: "mcp:write",
+      credentialType: "oauth",
     });
     expect(mockAuthenticateApiKey).not.toHaveBeenCalled();
   });
@@ -110,6 +111,51 @@ describe("validateApiKey -- anonymous and failure propagation", () => {
 
     const result = await validateApiKey(request());
 
-    expect(result).toEqual({ organizationId: "org-2", apiKeyId: "key-1" });
+    expect(result).toEqual({
+      organizationId: "org-2",
+      apiKeyId: "key-1",
+      credentialType: "api-key",
+    });
+  });
+
+  it("propagates the scope an API key was minted with", async () => {
+    mockAuthenticateOAuthToken.mockResolvedValue({
+      authenticated: false,
+      statusCode: 401,
+    });
+    mockAuthenticateApiKey.mockResolvedValue({
+      authenticated: true,
+      organizationId: "org-2",
+      apiKeyId: "key-1",
+      userId: "user-2",
+      scope: "mcp:read",
+    });
+
+    const result = await validateApiKey(request());
+
+    expect(result).toEqual({
+      organizationId: "org-2",
+      apiKeyId: "key-1",
+      scope: "mcp:read",
+      credentialType: "api-key",
+    });
+  });
+
+  it("leaves scope undefined for a key whose scope column is NULL", async () => {
+    mockAuthenticateOAuthToken.mockResolvedValue({
+      authenticated: false,
+      statusCode: 401,
+    });
+    mockAuthenticateApiKey.mockResolvedValue({
+      authenticated: true,
+      organizationId: "org-2",
+      apiKeyId: "key-1",
+      scope: undefined,
+    });
+
+    const result = await validateApiKey(request());
+
+    expect(result).not.toHaveProperty("error");
+    expect((result as { scope?: string }).scope).toBeUndefined();
   });
 });

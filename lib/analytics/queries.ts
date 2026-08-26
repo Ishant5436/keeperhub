@@ -28,6 +28,10 @@ import {
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { ERROR_STATUSES } from "@/lib/errors/execution-status";
 import {
+  getDefaultDailySolanaValueCapLamports,
+  getDefaultDailyValueCapWei,
+} from "@/lib/execute/spend-cap-defaults";
+import {
   sumOrgSolanaValueTodayLamports,
   sumOrgValueTodayWei,
 } from "@/lib/execute/value-ledger";
@@ -1023,31 +1027,59 @@ async function fetchWorkflowRuns(
   // workflow_execution_logs was a workaround that picked an arbitrary single
   // hash per run; multi-tx workflows (approve+swap, fan-outs) silently lost
   // every hash but one.
+  // Gas and network are read as COALESCE(denormalised column, JSONB extract).
+  // The columns (migration 0117) are written by lib/workflow/executor/logging.ts
+  // - network at step start, gas_used_wei at step complete - and are NULL on
+  // every row written before it, so a column-only read returns no chain and no
+  // gas for historical runs. scripts/backfill-exec-log-network-gas.ts fills
+  // those rows; the JSONB arm is what keeps this correct while that runs, and on
+  // any row it has not reached. The re-parse cost the comment above
+  // fetchNetworkBreakdown records is not in play here: this subquery is already
+  // restricted to one page of executions (see pagedExecutionIds above), which is
+  // why it could afford the JSONB extract before this change.
+  const logStepNetwork = sql`COALESCE(${workflowExecutionLogs.network}, ${logInputField("network")})`;
+  const logStepHasGas = sql`(${workflowExecutionLogs.gasUsedWei} IS NOT NULL OR ${logOutputField("gasUsed")} IS NOT NULL)`;
+  const logStepGasWei = sql`COALESCE(${workflowExecutionLogs.gasUsedWei}, CAST(${logOutputField("gasUsed")} AS NUMERIC))`;
+
   const logSummary = db
     .select({
       executionId: workflowExecutionLogs.executionId,
-      gasUsedWei:
-        sql<string>`COALESCE(SUM(CAST(${logOutputField("gasUsed")} AS NUMERIC)), 0)::text`.as(
-          "gasUsedWei"
-        ),
-      network: sql<string | null>`MIN(
-        CASE WHEN ${logOutputField("gasUsed")} IS NOT NULL
-        THEN ${logInputField("network")}
-        END
+      gasUsedWei: sql<string>`COALESCE(SUM(${logStepGasWei}), 0)::text`.as(
+        "gasUsedWei"
+      ),
+      // A gas-bearing step names the chain the run actually spent on, so it
+      // wins; any step that named one is the fallback. Both arms only matter
+      // because this subquery no longer filters on gas: it used to require
+      // gasUsed IS NOT NULL, and since WHERE runs before GROUP BY, a run that
+      // never reached broadcast contributed no rows, formed no group, and left
+      // the join NULL - so a pre-flight failure (insufficient balance, spend
+      // cap, a bad address) came back with no chain at all, even when its own
+      // error named one ("Insufficient BASE balance"). A consumer of the audit
+      // trail could not tell which chain a failed run was on. logging.ts writes
+      // network at step start, before any such failure.
+      network: sql<string | null>`COALESCE(
+        MIN(CASE WHEN ${logStepHasGas} THEN ${logStepNetwork} END),
+        MIN(${logStepNetwork})
       )`.as("network"),
       networks: sql<
         string[]
-      >`COALESCE(ARRAY_AGG(DISTINCT ${logInputField("network")}) FILTER (WHERE ${logInputField("network")} IS NOT NULL), '{}')`.as(
+      >`COALESCE(ARRAY_AGG(DISTINCT ${logStepNetwork}) FILTER (WHERE ${logStepNetwork} IS NOT NULL), '{}')`.as(
         "networks"
+      ),
+      // The subset of `networks` that actually spent gas. The runs table needs
+      // both sets and they are not the same one: the Network column wants every
+      // chain the run touched, while the gas cell can only render an amount
+      // when the wei it is summing landed on a single chain, since two chains'
+      // native tokens do not add. Deriving the second from the first held only
+      // while this subquery filtered on gas.
+      gasNetworks: sql<
+        string[]
+      >`COALESCE(ARRAY_AGG(DISTINCT ${logStepNetwork}) FILTER (WHERE ${logStepNetwork} IS NOT NULL AND ${logStepHasGas}), '{}')`.as(
+        "gasNetworks"
       ),
     })
     .from(workflowExecutionLogs)
-    .where(
-      and(
-        sql`${workflowExecutionLogs.executionId} IN (${pagedExecutionIds})`,
-        sql`${logOutputField("gasUsed")} IS NOT NULL`
-      )
-    )
+    .where(sql`${workflowExecutionLogs.executionId} IN (${pagedExecutionIds})`)
     .groupBy(workflowExecutionLogs.executionId)
     .as("log_summary");
 
@@ -1082,6 +1114,7 @@ async function fetchWorkflowRuns(
       gasUsedWei: logSummary.gasUsedWei,
       network: logSummary.network,
       networks: logSummary.networks,
+      gasNetworks: logSummary.gasNetworks,
       gasCostWei: gasCostSummary.gasCostWei,
       transactionHashes: workflowExecutions.transactionHashes,
       error: workflowExecutions.error,
@@ -1114,6 +1147,7 @@ async function fetchWorkflowRuns(
     directType: null,
     network: row.network ?? null,
     networks: row.networks ?? [],
+    gasNetworks: row.gasNetworks ?? [],
     gasCostWei:
       row.gasCostWei && row.gasCostWei !== "0" ? row.gasCostWei : null,
     transactionHashes: row.transactionHashes,
@@ -1188,6 +1222,7 @@ async function fetchDirectRuns(
     directType: row.type as UnifiedRun["directType"],
     network: row.network,
     networks: row.network ? [row.network] : [],
+    gasNetworks: row.network && row.gasUsedWei ? [row.network] : [],
     gasCostWei: row.gasUsedWei,
     // Direct executions are genuinely single-tx. Synthesize the entry so
     // consumers can render workflow + direct runs through the same array
@@ -1393,6 +1428,10 @@ export async function getSpendCapData(organizationId: string): Promise<{
   dailyUsedWei: string;
   dailySolanaCapLamports: string | null;
   dailySolanaUsedLamports: string;
+  effectiveDailyCapWei: string;
+  effectiveDailySolanaCapLamports: string;
+  usingDefaultDailyCap: boolean;
+  usingDefaultDailySolanaCap: boolean;
 }> {
   // Mirror spending-cap enforcement exactly: the notional VALUE moved per org
   // per day, summed across BOTH stores (direct executions AND the workflow/
@@ -1416,11 +1455,24 @@ export async function getSpendCapData(organizationId: string): Promise<{
     sumOrgSolanaValueTodayLamports(db, organizationId),
   ]);
 
+  // The configured columns are reported as-is (null means "this org set
+  // nothing"), alongside the figure enforcement will actually use. Without the
+  // effective pair, an unconfigured org -- and the get_spending_limits MCP tool
+  // an agent asks before planning a transfer -- would be told there is no cap
+  // while the platform default is quietly denying requests.
+  const configuredWei = capResult[0]?.dailyValueCapWei ?? null;
+  const configuredLamports = capResult[0]?.dailySolanaValueCapLamports ?? null;
+
   return {
-    dailyCapWei: capResult[0]?.dailyValueCapWei ?? null,
+    dailyCapWei: configuredWei,
     dailyUsedWei: dailyUsedWei.toString(),
-    dailySolanaCapLamports: capResult[0]?.dailySolanaValueCapLamports ?? null,
+    dailySolanaCapLamports: configuredLamports,
     dailySolanaUsedLamports: dailySolanaUsedLamports.toString(),
+    effectiveDailyCapWei: configuredWei ?? getDefaultDailyValueCapWei(),
+    effectiveDailySolanaCapLamports:
+      configuredLamports ?? getDefaultDailySolanaValueCapLamports(),
+    usingDefaultDailyCap: configuredWei === null,
+    usingDefaultDailySolanaCap: configuredLamports === null,
   };
 }
 
