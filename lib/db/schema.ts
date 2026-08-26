@@ -1039,7 +1039,11 @@ export {
   type OrganizationPolicyRow,
   organizationPolicies,
   type PolicyDecisionRow,
+  type PolicyLimitReservationRow,
+  type PolicyLimitUsageRow,
   policyDecisions,
+  policyLimitReservations,
+  policyLimitUsage,
   type ResourceGrantRow,
   resourceGrants,
 } from "./schema-policy";

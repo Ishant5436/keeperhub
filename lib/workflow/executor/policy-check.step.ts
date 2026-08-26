@@ -16,6 +16,11 @@ import { PolicyCheckpoint, type PolicyRole, PrincipalKind } from "@/lib/policy";
 import { resolveCallCapability } from "@/lib/policy/catalog/call-capability";
 import { capabilityForAction, extractFacts } from "@/lib/policy/facts";
 import { enforcePolicy } from "@/lib/policy/guard";
+import {
+  type ReservationHandle,
+  releaseReservations,
+  settleReservations,
+} from "@/lib/policy/limits";
 import { withUsdValue } from "@/lib/policy/price";
 import type { Principal } from "@/lib/policy/types";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
@@ -34,6 +39,8 @@ export type PolicyCheckInput = {
 
 export type PolicyCheckResult = {
   blocked: boolean;
+  /** Budget taken for this node, to settle or release once it finishes. */
+  reservations?: readonly ReservationHandle[];
   /** User-facing, already redacted. Empty when the action was permitted. */
   message: string;
   reason?: string;
@@ -154,5 +161,29 @@ export async function policyCheckStep(
     message: verdict.blocked ? (verdict.decision.message ?? "") : "",
     reason: verdict.decision.reason,
     outcome: verdict.decision.outcome,
+    reservations: verdict.reservations ?? [],
   };
+}
+
+/**
+ * Close out the budget a node took.
+ *
+ * Settled when the node succeeded, released when it did not. A failed
+ * transaction that keeps its reservation would let a run of failures exhaust a
+ * budget nothing was ever spent from.
+ */
+export async function policySettleStep(input: {
+  reservations: readonly ReservationHandle[];
+  succeeded: boolean;
+}): Promise<void> {
+  "use step";
+
+  if (input.reservations.length === 0) {
+    return;
+  }
+  if (input.succeeded) {
+    await settleReservations(input.reservations);
+    return;
+  }
+  await releaseReservations(input.reservations);
 }

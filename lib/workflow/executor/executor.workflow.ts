@@ -61,7 +61,10 @@ import {
 } from "@/lib/workflow/executor/get-completed-step-output";
 import { awaitCompletedStepOutputStep } from "@/lib/workflow/executor/get-completed-step-output.step";
 import { createPendingTracker } from "@/lib/workflow/executor/pending-tasks";
-import { policyCheckStep } from "@/lib/workflow/executor/policy-check.step";
+import {
+  policyCheckStep,
+  policySettleStep,
+} from "@/lib/workflow/executor/policy-check.step";
 import {
   EXCEEDED_MAX_RETRIES_REGEX,
   FAILED_AFTER_RETRIES_REGEX,
@@ -611,7 +614,7 @@ export async function preloadStepFunctions(
  * IMPORTANT: Steps receive only the integration ID as a reference to fetch credentials.
  * This prevents credentials from being logged in workflow observability output.
  */
-async function executeActionStep(input: {
+type ActionStepInput = {
   actionType: string;
   config: Record<string, unknown>;
   outputs: NodeOutputs;
@@ -619,32 +622,23 @@ async function executeActionStep(input: {
   stepFunctions: StepFunctionTable;
   nodeMap?: ReadonlyMap<string, unknown>;
   executionResults?: Record<string, ExecutionResult>;
-}) {
-  const { actionType, config, outputs, context, stepFunctions } = input;
+};
 
-  // Build step input WITHOUT credentials, but WITH integrationId reference and logging context
-  const stepInput: Record<string, unknown> = {
-    ...config,
-    _actionType: actionType,
-    _context: context,
-  };
+/**
+ * Check policy, run the action, then close out whatever budget it took.
+ *
+ * The settle and release live here rather than beside each of the action's many
+ * return paths. A reservation that is never closed would hold budget a run
+ * never spent, and one missed return path is exactly the kind of omission that
+ * is invisible until a customer's daily cap stops letting anything through.
+ */
+async function executeActionStep(input: ActionStepInput) {
+  const { actionType, config, context } = input;
 
-  // Resolved by preloadStepFunctions before any step ran. Looking it up
-  // synchronously is what keeps the step invocation in program order -- an
-  // await here would hand the ordering back to microtask scheduling.
-  const stepFunction = stepFunctions.get(actionType);
-  if (!stepFunction) {
-    return {
-      success: false,
-      error: `Unknown action type: "${actionType}". This action is not registered in the plugin system. Available system actions: ${Object.keys(SYSTEM_ACTIONS).join(", ")}.`,
-    };
-  }
-
-  // the node checks its own policy before it dispatches, after its
-  // templates have resolved. Installed here rather than inside each action so
-  // that a plugin author who never hears about policy cannot leave a hole: an
-  // omission at this one site is visible, an omission across 437 step files is
-  // not.
+  // The node checks its own policy before it dispatches, after its own
+  // templates resolve. Doing it here, once, rather than inside each action, is
+  // what makes it unavoidable: an omission at this single site is visible, an
+  // omission across 437 step files is not.
   //
   // A refusal is returned as an ordinary failed step so the executor records it
   // with the policy fault domain. Throwing would reach the message classifier,
@@ -668,6 +662,44 @@ async function executeActionStep(input: {
     };
   }
 
+  const reservations = policyVerdict.reservations ?? [];
+  if (reservations.length === 0) {
+    return await runActionStep(input);
+  }
+
+  try {
+    const result = await runActionStep(input);
+    await policySettleStep({
+      reservations,
+      succeeded: (result as { success?: boolean }).success !== false,
+    });
+    return result;
+  } catch (error) {
+    await policySettleStep({ reservations, succeeded: false });
+    throw error;
+  }
+}
+
+async function runActionStep(input: ActionStepInput) {
+  const { actionType, config, outputs, context, stepFunctions } = input;
+
+  // Build step input WITHOUT credentials, but WITH integrationId reference and logging context
+  const stepInput: Record<string, unknown> = {
+    ...config,
+    _actionType: actionType,
+    _context: context,
+  };
+
+  // Resolved by preloadStepFunctions before any step ran. Looking it up
+  // synchronously is what keeps the step invocation in program order -- an
+  // await here would hand the ordering back to microtask scheduling.
+  const stepFunction = stepFunctions.get(actionType);
+  if (!stepFunction) {
+    return {
+      success: false,
+      error: `Unknown action type: "${actionType}". This action is not registered in the plugin system. Available system actions: ${Object.keys(SYSTEM_ACTIONS).join(", ")}.`,
+    };
+  }
   // Special handling for Condition action - needs template evaluation
   if (actionType === "Condition") {
     const originalExpression =

@@ -3,6 +3,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -275,3 +276,85 @@ export const contractCatalog = pgTable(
 );
 
 export type ContractCatalogRow = typeof contractCatalog.$inferSelect;
+
+/**
+ * Cumulative usage against one limit, in one window.
+ *
+ * The row is the counter, and reserving is a conditional increment: two
+ * concurrent actions cannot both read the same headroom and both proceed,
+ * because the second update sees the first one's increment. Counting after the
+ * fact would let both through and discover the overspend afterwards, which is
+ * exactly what a spend limit exists to prevent.
+ */
+export const policyLimitUsage = pgTable(
+  "policy_limit_usage",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => generateId()),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    policyId: text("policy_id").notNull(),
+    sid: text("sid").notNull(),
+    metric: text("metric").notNull(),
+    window: text("window").notNull(),
+    /** Start of the window this row counts, so an old window is never reused. */
+    windowStart: timestamp("window_start").notNull(),
+    /** What the limit is counted per: the organization, a workflow, an asset. */
+    scopeKey: text("scope_key").notNull(),
+    /** Decimal string, so a token amount survives without float rounding. */
+    used: numeric("used").notNull().default("0"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("policy_limit_usage_window_idx").on(
+      table.policyId,
+      table.sid,
+      table.metric,
+      table.window,
+      table.windowStart,
+      table.scopeKey
+    ),
+    index("policy_limit_usage_org_idx").on(table.organizationId),
+  ]
+);
+
+/**
+ * One reservation held against a window.
+ *
+ * Settled when the action succeeds and released when it fails, so a failed
+ * transaction does not permanently consume budget. A signed authorization
+ * someone else can redeem later is settled immediately and never released,
+ * because its redemption is not observable to us.
+ */
+export const policyLimitReservations = pgTable(
+  "policy_limit_reservations",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => generateId()),
+    usageId: text("usage_id")
+      .notNull()
+      .references(() => policyLimitUsage.id, { onDelete: "cascade" }),
+    amount: numeric("amount").notNull(),
+    status: text("status")
+      .$type<"reserved" | "settled" | "released">()
+      .notNull()
+      .default("reserved"),
+    /** A reservation nothing settles or releases is swept back after this. */
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("policy_limit_reservations_usage_idx").on(table.usageId),
+    index("policy_limit_reservations_status_idx").on(
+      table.status,
+      table.expiresAt
+    ),
+  ]
+);
+
+export type PolicyLimitUsageRow = typeof policyLimitUsage.$inferSelect;
+export type PolicyLimitReservationRow =
+  typeof policyLimitReservations.$inferSelect;

@@ -24,8 +24,10 @@ import {
   PolicyOutcome,
 } from "./constants";
 import { evaluatePolicy } from "./engine";
+import { POLICY_DENIAL_MESSAGE } from "./errors";
 import { failClosedDecision, shouldBlock } from "./evaluator";
 import { EMPTY_CALLDATA, intentDigest } from "./intent-digest";
+import { type ReservationHandle, reserveLimits } from "./limits";
 import {
   type GrantSubject,
   getCompiledPolicySet,
@@ -34,6 +36,7 @@ import {
 } from "./store";
 import type {
   AssetFact,
+  CompiledPolicySet,
   CounterpartyFact,
   PolicyDecision,
   PolicyFacts,
@@ -60,6 +63,11 @@ export type GuardInput = {
 export type GuardVerdict = {
   blocked: boolean;
   decision: PolicyDecision;
+  /**
+   * Budget taken for this action, to be settled when it succeeds and released
+   * when it fails. Empty when nothing was charged.
+   */
+  reservations?: readonly ReservationHandle[];
 };
 
 /**
@@ -179,6 +187,69 @@ function receiptFor(
 
 function knownValue<T>(fact: { state: string; value?: unknown }): T | null {
   return fact.state === FactState.KNOWN ? ((fact.value as T) ?? null) : null;
+}
+
+/**
+ * Take the budget the permitting statements require.
+ *
+ * Reserving before the action rather than counting after it is what makes
+ * concurrent actions safe: two transfers racing for the last of a daily cap
+ * each see the other's reservation, so they cannot both squeeze under it.
+ *
+ * A limit with no headroom turns the allow into a denial, which is the only
+ * honest outcome: the statement permitted the action, and the budget did not.
+ */
+async function chargeLimits(input: {
+  organizationId: string;
+  decision: PolicyDecision;
+  policySet: CompiledPolicySet;
+  facts: PolicyFacts;
+}): Promise<{
+  decision: PolicyDecision;
+  reservations: readonly ReservationHandle[];
+}> {
+  if (input.decision.outcome !== PolicyOutcome.ALLOW) {
+    return { decision: input.decision, reservations: [] };
+  }
+
+  const matched = new Set(
+    input.decision.matched.map((m) => `${m.policyId}|${m.sid}`)
+  );
+  const limits = input.policySet.policies.flatMap((policy) =>
+    policy.statements
+      .filter((statement) => matched.has(`${policy.policyId}|${statement.sid}`))
+      .flatMap((statement) =>
+        statement.limits.map((limit) => ({
+          policyId: policy.policyId,
+          sid: statement.sid,
+          limit,
+        }))
+      )
+  );
+
+  if (limits.length === 0) {
+    return { decision: input.decision, reservations: [] };
+  }
+
+  const outcome = await reserveLimits({
+    organizationId: input.organizationId,
+    limits,
+    facts: input.facts,
+  });
+
+  if (outcome.ok) {
+    return { decision: input.decision, reservations: outcome.reservations };
+  }
+
+  return {
+    decision: {
+      ...input.decision,
+      outcome: PolicyOutcome.DENY,
+      reason: PolicyDecisionReason.LIMIT_EXCEEDED,
+      message: POLICY_DENIAL_MESSAGE[PolicyDecisionReason.LIMIT_EXCEEDED],
+    },
+    reservations: [],
+  };
 }
 
 async function recordDecision(
@@ -347,8 +418,21 @@ export async function enforcePolicy(input: GuardInput): Promise<GuardVerdict> {
       policySet
     );
 
-    await recordDecision(input, organizationId, decision);
-    return { blocked: shouldBlock(decision), decision };
+    // An allow only stands once its budget is taken. Deciding without charging
+    // would let a policy declare a daily cap that nothing enforces.
+    const charged = await chargeLimits({
+      organizationId,
+      decision,
+      policySet,
+      facts: grant.facts,
+    });
+
+    await recordDecision(input, organizationId, charged.decision);
+    return {
+      blocked: shouldBlock(charged.decision),
+      decision: charged.decision,
+      reservations: charged.reservations,
+    };
   } catch (error) {
     // The line that stops an engine bug becoming an authorization bypass.
     logSystemWarn(
