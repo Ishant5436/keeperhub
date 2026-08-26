@@ -81,7 +81,7 @@ export function ResourcePicker({
 
         <div className="flex flex-col gap-1.5">
           <FieldLabel
-            hint="Search the protocol registry, or choose Another address to name any contract by hand. Only deployments on the selected chain are offered."
+            hint="A known protocol deployment, which fills in the address for you. Choose the last option to name a contract the registry does not carry. Selecting a chain first narrows the list to that chain."
             htmlFor="resource-contract"
           >
             Contract

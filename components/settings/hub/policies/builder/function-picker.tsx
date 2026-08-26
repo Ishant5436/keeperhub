@@ -135,15 +135,6 @@ export function FunctionPicker({
     onChange([...next]);
   };
 
-  if (!catalog.verified) {
-    return (
-      <p className="text-muted-foreground text-xs">
-        This contract has no published ABI, so its functions cannot be listed.
-        Enter a selector directly, or leave it open to cover the whole contract.
-      </p>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-3">
       <SearchableSelect
@@ -161,12 +152,22 @@ export function FunctionPicker({
         </p>
       )}
 
-      <Input
-        aria-label="Search functions"
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by name, signature, or selector"
-        value={query}
-      />
+      {catalog.verified ? null : (
+        <p className="text-muted-foreground text-xs">
+          This contract has no published ABI, so its functions cannot be listed.
+          Leave the rule open to cover the whole contract, or name a selector in
+          the document directly.
+        </p>
+      )}
+
+      {catalog.verified && (
+        <Input
+          aria-label="Search functions"
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, signature, or selector"
+          value={query}
+        />
+      )}
 
       {groups.length === 0 && (
         <p className="text-muted-foreground text-xs">

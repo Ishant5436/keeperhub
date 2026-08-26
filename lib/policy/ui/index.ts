@@ -1,4 +1,9 @@
 export {
+  describeStatement,
+  type RuleClause,
+  type RuleSummary,
+} from "@/lib/policy/ui/describe";
+export {
   ACTION_OPTIONS,
   ANY_STABLECOIN_DENOMINATION,
   actorOptions,

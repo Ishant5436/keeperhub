@@ -128,7 +128,7 @@ export function ContractCombobox({
   const selected = options.find((option) => option.key === value);
   const label = selected
     ? `${selected.protocolName} - ${selected.label}`
-    : "Another address";
+    : "An address not listed here";
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
@@ -173,7 +173,12 @@ export function ContractCombobox({
                   value === CUSTOM_CONTRACT ? "opacity-100" : "opacity-0"
                 )}
               />
-              Another address
+              <div className="flex min-w-0 flex-col">
+                <span>An address not listed here</span>
+                <span className="text-muted-foreground text-xs">
+                  Type it into the Address field below
+                </span>
+              </div>
             </CommandItem>
 
             {filtered.slice(0, VISIBLE_LIMIT).map((option) => (

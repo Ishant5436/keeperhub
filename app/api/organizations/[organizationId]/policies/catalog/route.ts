@@ -21,6 +21,10 @@ import {
   getCapabilitiesByPlane,
   PolicyPlane,
 } from "@/lib/policy";
+// Registers the protocol definitions as a side effect. Without it the registry
+// is empty here and the contract picker offers nothing, which reads as "this
+// organization has no protocols" rather than "this module never loaded them".
+import "@/protocols";
 import { getRegisteredProtocols } from "@/lib/protocol-registry";
 import { requireOrgPolicyAccess } from "../_lib/access";
 

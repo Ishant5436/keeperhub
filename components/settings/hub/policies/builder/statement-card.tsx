@@ -19,6 +19,7 @@ import { CounterpartyPicker } from "./counterparty-picker";
 import { DenominationField } from "./denomination-field";
 import { FieldLabel } from "./field-label";
 import { ResourcePicker } from "./resource-picker";
+import { RuleSummary } from "./rule-summary";
 import { SearchableSelect } from "./searchable-select";
 
 /**
@@ -45,6 +46,8 @@ export function StatementCard({
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+      <RuleSummary value={value} />
+
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-1 flex-col gap-1.5">
           <Label htmlFor={`sid-${index}`}>Name</Label>
