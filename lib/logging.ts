@@ -178,7 +178,7 @@ export const ErrorCategory = {
   NETWORK_RPC: "network_rpc",
   TRANSACTION: "transaction",
   BILLING: "billing",
-  // KEEP-1080: the organization's own guardrail refused the action. Neither a
+  // the organization's own guardrail refused the action. Neither a
   // user mistake nor a platform failure, so it gets its own bucket and stays
   // out of the failure-rate view.
   POLICY: "policy",

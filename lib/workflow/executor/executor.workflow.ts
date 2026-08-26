@@ -640,7 +640,7 @@ async function executeActionStep(input: {
     };
   }
 
-  // KEEP-1080: the node checks its own policy before it dispatches, after its
+  // the node checks its own policy before it dispatches, after its
   // templates have resolved. Installed here rather than inside each action so
   // that a plugin author who never hears about policy cannot leave a hole: an
   // omission at this one site is visible, an omission across 437 step files is

@@ -62,7 +62,7 @@ type Rule = {
  * overlap; more specific patterns should come before broader ones.
  */
 const RULES: readonly Rule[] = [
-  // KEEP-1080: a policy denial carries its fault domain structurally, so this
+  // a policy denial carries its fault domain structurally, so this
   // rule is a backstop for the case where the class is lost crossing a
   // boundary that only preserves the message. Without it the default below
   // classifies a working guardrail as a platform failure and pages somebody.

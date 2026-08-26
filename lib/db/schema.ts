@@ -710,7 +710,7 @@ export const workflowExecutions = pgTable(
       | "auth"
       | "infrastructure"
       | "workflow_engine"
-      // KEEP-1080: an organization policy refused the action. Separate from
+      // an organization policy refused the action. Separate from
       // "validation" and "configuration" so a dashboard can tell a guardrail
       // working from a workflow that is misconfigured.
       | "policy"

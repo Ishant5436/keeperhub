@@ -27,7 +27,7 @@ export const ExecutionErrorType = {
    */
   EXTERNAL: "external",
   /**
-   * The organization's own guardrail refused the action (KEEP-1080).
+   * The organization's own guardrail refused the action.
    *
    * Its own domain rather than USER because it is not a mistake: the run did
    * exactly what the organization asked for. Folding it into USER would make an

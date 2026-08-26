@@ -128,7 +128,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // KEEP-1080: adding a counterparty is a control-plane change, so policy
+    // adding a counterparty is a control-plane change, so policy
     // governs it. Without this a rule saying "only send to address book
     // entries" is decorative: anyone constrained by it could widen it simply by
     // adding themselves an entry.

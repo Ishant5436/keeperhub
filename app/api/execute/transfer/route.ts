@@ -237,7 +237,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       reservedValueWei = parsedValue.valueWei;
     }
   }
-  // KEEP-1080: policy check immediately before the reservation, which is the
+  // policy check immediately before the reservation, which is the
   // last gate before a transaction is built. The direct-execution API never
   // reaches the workflow engine, so without this the most agent-exposed surface
   // in the product would be the one surface policy did not cover.
