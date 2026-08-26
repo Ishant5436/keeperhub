@@ -12,8 +12,21 @@ import {
   resolveOrganizationId,
 } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
+import { ArnSegment, Capability, PolicyRole } from "@/lib/policy";
+import { enforceControlPlane } from "@/lib/policy/control-plane";
+import { getOrgRole } from "@/lib/security/org-role";
 
 // GET - List all address book entries for the current organization
+
+/** The caller's role, defaulting to the least authority when it is unknown. */
+async function orgRoleOf(
+  userId: string,
+  organizationId: string
+): Promise<PolicyRole> {
+  const role = await getOrgRole(userId, organizationId);
+  return (role as PolicyRole | null) ?? PolicyRole.MEMBER;
+}
+
 export async function GET(request: Request) {
   try {
     const authCtx = await resolveOrganizationId(request);
@@ -113,6 +126,23 @@ export async function POST(request: Request) {
         { error: "Invalid Ethereum address format" },
         { status: 400 }
       );
+    }
+
+    // KEEP-1080: adding a counterparty is a control-plane change, so policy
+    // governs it. Without this a rule saying "only send to address book
+    // entries" is decorative: anyone constrained by it could widen it simply by
+    // adding themselves an entry.
+    const policyRefusal = await enforceControlPlane({
+      organizationId: activeOrgId,
+      userId,
+      role: await orgRoleOf(userId, activeOrgId),
+      capability: Capability.ADDRESSBOOK_CREATE,
+      resource: { type: ArnSegment.ADDRESSBOOK, id: address.toLowerCase() },
+      authMethod: authCtx.authMethod,
+      apiKeyId: authCtx.apiKeyId ?? undefined,
+    });
+    if (policyRefusal) {
+      return policyRefusal;
     }
 
     // Create new entry (store lowercase for consistency)

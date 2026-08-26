@@ -7,6 +7,7 @@ import {
   applyBigIntConversion,
   needsBigIntMode,
 } from "@/lib/bigint-condition-utils";
+import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import {
   ErrorCategory,
   logSystemError,
@@ -60,6 +61,7 @@ import {
 } from "@/lib/workflow/executor/get-completed-step-output";
 import { awaitCompletedStepOutputStep } from "@/lib/workflow/executor/get-completed-step-output.step";
 import { createPendingTracker } from "@/lib/workflow/executor/pending-tasks";
+import { policyCheckStep } from "@/lib/workflow/executor/policy-check.step";
 import {
   EXCEEDED_MAX_RETRIES_REGEX,
   FAILED_AFTER_RETRIES_REGEX,
@@ -635,6 +637,34 @@ async function executeActionStep(input: {
     return {
       success: false,
       error: `Unknown action type: "${actionType}". This action is not registered in the plugin system. Available system actions: ${Object.keys(SYSTEM_ACTIONS).join(", ")}.`,
+    };
+  }
+
+  // KEEP-1080: the node checks its own policy before it dispatches, after its
+  // templates have resolved. Installed here rather than inside each action so
+  // that a plugin author who never hears about policy cannot leave a hole: an
+  // omission at this one site is visible, an omission across 437 step files is
+  // not.
+  //
+  // A refusal is returned as an ordinary failed step so the executor records it
+  // with the policy fault domain. Throwing would reach the message classifier,
+  // which treats an unrecognised message as a platform fault.
+  const policyVerdict = await policyCheckStep({
+    actionType,
+    config,
+    organizationId: context.organizationId,
+    createdBy: context.createdBy,
+    executionId: context.executionId,
+    nodeId: context.nodeId,
+    workflowId: context.workflowId,
+    triggerType: context.triggerType,
+  });
+  if (policyVerdict.blocked) {
+    return {
+      success: false,
+      error: policyVerdict.message,
+      errorClass: ExecutionErrorType.POLICY,
+      policyReason: policyVerdict.reason,
     };
   }
 
