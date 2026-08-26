@@ -154,7 +154,8 @@ export function FunctionPicker({
 
       {catalog.verified ? null : (
         <p className="text-muted-foreground text-xs">
-          This contract has no published ABI, so its functions cannot be listed.
+          Nothing describes this contract: it is not one of the protocols this
+          platform ships, and the block explorer has no verified source for it.
           Leave the rule open to cover the whole contract, or name a selector in
           the document directly.
         </p>

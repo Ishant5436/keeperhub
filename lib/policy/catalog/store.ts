@@ -10,6 +10,10 @@ import { ErrorCategory, logSystemWarn, logWarn } from "@/lib/logging";
 import { CATALOG_SCHEMA_VERSION } from "@/lib/policy/catalog/constants";
 import { deriveContractCatalog } from "@/lib/policy/catalog/derive";
 import {
+  type DeclaredContract,
+  declaredContract,
+} from "@/lib/policy/catalog/protocol-abi";
+import {
   CatalogEntrySource,
   type ContractCatalog,
 } from "@/lib/policy/catalog/types";
@@ -158,7 +162,39 @@ async function rederive(
   return catalog;
 }
 
+/**
+ * Build from the ABI this platform ships, without asking an explorer.
+ *
+ * A registry contract is described here in full, so going to the network for
+ * it would be slower, rate limited, and would fail for a contract that is
+ * simply unverified rather than unknown.
+ */
+async function fromRegistry(
+  lookup: CatalogLookup,
+  declared: DeclaredContract
+): Promise<ContractCatalog> {
+  const catalog = deriveContractCatalog({
+    chainId: lookup.chainId,
+    address: lookup.address,
+    abi: parseAbi(declared.abi),
+    implementationAddress: null,
+    protocolSlug: declared.protocolSlug,
+  });
+  await upsert({
+    lookup: { ...lookup, protocolSlug: declared.protocolSlug },
+    catalog,
+    abi: declared.abi,
+    source: CatalogEntrySource.DERIVED,
+  });
+  return catalog;
+}
+
 async function rebuild(lookup: CatalogLookup): Promise<ContractCatalog> {
+  const declared = declaredContract(lookup.chainId, lookup.address);
+  if (declared) {
+    return await fromRegistry(lookup, declared);
+  }
+
   const resolved = await resolveAbi({
     contractAddress: lookup.address,
     network: lookup.network,

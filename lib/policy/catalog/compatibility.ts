@@ -159,7 +159,7 @@ function checkResource(
       field: "resource",
       subject: resource.pattern,
       message:
-        "This contract has no published ABI, so its functions cannot be listed. The rule still applies, but nothing can check that the selector exists.",
+        "Nothing describes this contract, so its functions cannot be listed. The rule still applies, but nothing can check that the selector exists.",
     });
     return findings;
   }
