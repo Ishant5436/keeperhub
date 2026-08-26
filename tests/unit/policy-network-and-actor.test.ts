@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PolicyRole, PrincipalKind } from "@/lib/policy";
+import { extractFacts } from "@/lib/policy/facts";
 import {
   hostMatchesAnyDomain,
   INTERNAL_ADDRESS_TOKEN,
@@ -136,5 +137,25 @@ describe("who is acting", () => {
       service: "workflow-executor",
     });
     expect(state(facts.actorRole)).not.toBe(PolicyRole.MEMBER);
+  });
+});
+
+describe("HTTP facts", () => {
+  it.each([
+    ["https://api.stripe.com/v1/charges", "api.stripe.com"],
+    ["http://a.internal.corp/admin", "a.internal.corp"],
+    ["http://169.254.169.254/latest/meta-data", "169.254.169.254"],
+  ])("reads the host out of %s", (url, host) => {
+    const facts = extractFacts({ actionType: "HTTP Request", config: { url } });
+    expect(state(facts.httpHost as Fact<string>)).toBe(host);
+  });
+
+  it("leaves the host unknown when the URL has not resolved", () => {
+    // A rule about hosts then refuses rather than reading the wrong one.
+    const facts = extractFacts({
+      actionType: "HTTP Request",
+      config: { url: "{{@n1.url}}" },
+    });
+    expect(state(facts.httpHost as Fact<string>)).not.toBe("{{@n1.url}}");
   });
 });

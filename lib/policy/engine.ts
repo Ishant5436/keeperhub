@@ -25,6 +25,7 @@ import {
 } from "./constants";
 import { makeDecision, resolveObservedOnly } from "./evaluator";
 import { readListFact } from "./fact-resolution";
+import { hostMatchesAnyDomain, ipInAnyCidr } from "./network-match";
 import { principalFacts } from "./principal-facts";
 import type {
   CompiledPolicy,
@@ -108,6 +109,32 @@ function compareEquality(
   return equal ? Match.NO : Match.YES;
 }
 
+const NEGATED_NETWORK_OPERATORS: readonly PolicyOperator[] = [
+  PolicyOperator.NOT_IN_CIDR,
+  PolicyOperator.NOT_IN_DOMAIN,
+];
+
+/**
+ * Membership of a network set, by CIDR range or by domain pattern.
+ *
+ * A value the matcher cannot read never matches, so a malformed rule refuses
+ * rather than letting something through. The list must be a list: a single
+ * string would silently compare against nothing.
+ */
+function compareNetwork(
+  op: PolicyOperator,
+  left: unknown,
+  right: PolicyConditionOperand,
+  matches: (value: string, patterns: readonly string[]) => boolean
+): Match {
+  if (!Array.isArray(right)) {
+    return Match.UNKNOWN;
+  }
+  const hit = matches(String(left), right);
+  const negated = NEGATED_NETWORK_OPERATORS.includes(op);
+  return hit === negated ? Match.NO : Match.YES;
+}
+
 function compareMembership(
   op: PolicyOperator,
   left: unknown,
@@ -157,6 +184,14 @@ function evaluatePredicate(predicate: PolicyCondition, raw: unknown): Match {
       case PolicyOperator.IN:
       case PolicyOperator.NOT_IN:
         one = compareMembership(op, raw, operand);
+        break;
+      case PolicyOperator.IN_CIDR:
+      case PolicyOperator.NOT_IN_CIDR:
+        one = compareNetwork(op, raw, operand, ipInAnyCidr);
+        break;
+      case PolicyOperator.IN_DOMAIN:
+      case PolicyOperator.NOT_IN_DOMAIN:
+        one = compareNetwork(op, raw, operand, hostMatchesAnyDomain);
         break;
       case PolicyOperator.MATCHES:
         one =

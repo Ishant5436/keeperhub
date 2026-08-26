@@ -114,6 +114,35 @@ function readCounterparties(
   return out;
 }
 
+/**
+ * What an outbound HTTP call targets.
+ *
+ * The host is parsed out separately because that is what a domain rule reads: a
+ * rule blocking "*.internal.corp" should not have to match on a full URL, and a
+ * URL that will not parse yields no host, which makes a deny about hosts fire.
+ */
+function httpFacts(
+  config: Record<string, unknown>
+): Pick<PolicyFacts, "httpHost" | "httpUrl" | "httpMethod"> {
+  const url = str(config, "url") ?? str(config, "endpoint");
+  const method = str(config, "method");
+  let host: string | undefined;
+  if (url) {
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      // An unresolved template, or a malformed address. Left unknown so a rule
+      // about hosts refuses rather than reading the wrong one.
+      host = undefined;
+    }
+  }
+  return {
+    httpHost: fromConfig(host),
+    httpUrl: fromConfig(url),
+    httpMethod: fromConfig(method?.toUpperCase()),
+  };
+}
+
 /** Capabilities whose amount is denominated in the chain's own currency. */
 const NATIVE_VALUE_CAPABILITIES: readonly Capability[] = [
   Capability.ASSET_TRANSFER_NATIVE,
@@ -309,9 +338,7 @@ export function extractFacts(input: ExtractInput): PolicyFacts {
     workflowTags: UNKNOWN,
     projectId: UNKNOWN,
     sourceIp: UNKNOWN,
-    httpHost: UNKNOWN,
-    httpUrl: UNKNOWN,
-    httpMethod: UNKNOWN,
+    ...httpFacts(config),
     resourceId: fromConfig(recipient?.toLowerCase()),
   };
 }
