@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { isValidAddress } from "@/lib/policy";
 import { chainOptions, type ResourceSelection } from "@/lib/policy/ui";
 import { useContractCatalog } from "../../hooks/use-contract-catalog";
 import type { ContractEntries } from "../hooks/use-statement-builder";
 import { usePolicyCatalog } from "../policy-context";
+import { AddressField } from "./address-field";
 import { ContractCombobox, CUSTOM_CONTRACT } from "./contract-combobox";
 import { FieldLabel } from "./field-label";
 import { FunctionPicker } from "./function-picker";
@@ -113,24 +113,13 @@ export function ResourcePicker({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <FieldLabel
-          hint="For an upgradeable protocol this is the proxy, because that is the address the transaction is sent to. The function list is read from its implementation, so the rule keeps working across upgrades."
-          htmlFor="resource-address"
-        >
-          Address
-        </FieldLabel>
-        <Input
-          className="font-mono text-xs"
-          id="resource-address"
-          onChange={(e) =>
-            onChange({ ...value, address: e.target.value, selectors: [] })
-          }
-          placeholder="0x..."
-          spellCheck={false}
-          value={value.address}
-        />
-      </div>
+      <AddressField
+        hint="For an upgradeable protocol this is the proxy, because that is the address the transaction is sent to. The function list is read from its implementation, so the rule keeps working across upgrades."
+        id="resource-address"
+        label="Address"
+        onChange={(address) => onChange({ ...value, address, selectors: [] })}
+        value={value.address}
+      />
 
       {contract.loading && (
         <p className="flex items-center gap-2 text-muted-foreground text-xs">

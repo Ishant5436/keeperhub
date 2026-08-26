@@ -2,7 +2,6 @@
 
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PolicyEffect } from "@/lib/policy";
@@ -14,9 +13,9 @@ import {
   TARGET_OPTIONS,
 } from "@/lib/policy/ui";
 import type { ContractEntries } from "../hooks/use-statement-builder";
-import { usePolicyCatalog } from "../policy-context";
 import { ActorPicker } from "./actor-picker";
 import { ControlPlanePicker } from "./control-plane-picker";
+import { CounterpartyPicker } from "./counterparty-picker";
 import { DenominationField } from "./denomination-field";
 import { FieldLabel } from "./field-label";
 import { ResourcePicker } from "./resource-picker";
@@ -42,7 +41,6 @@ export function StatementCard({
   onRemove: () => void;
   onContractLoaded: (contract: ContractEntries) => void;
 }): React.ReactElement {
-  const { catalog } = usePolicyCatalog();
   const isOnchain = value.target === StatementTarget.ONCHAIN;
 
   return (
@@ -149,43 +147,18 @@ export function StatementCard({
         />
       )}
 
-      {isOnchain && catalog.counterparties.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <FieldLabel hint="Addresses from the organization's address book. Leave every box clear to place no counterparty restriction on this rule.">
-            Counterparties this rule allows
-          </FieldLabel>
-          <div className="flex flex-col gap-1">
-            {catalog.counterparties.map((entry) => (
-              <div
-                className="flex items-center gap-2 text-xs"
-                key={entry.address}
-              >
-                <Checkbox
-                  checked={value.counterparties.includes(entry.address)}
-                  id={`cp-${index}-${entry.address}`}
-                  onCheckedChange={() =>
-                    onChange({
-                      ...value,
-                      counterparties: value.counterparties.includes(
-                        entry.address
-                      )
-                        ? value.counterparties.filter(
-                            (a) => a !== entry.address
-                          )
-                        : [...value.counterparties, entry.address],
-                    })
-                  }
-                />
-                <label htmlFor={`cp-${index}-${entry.address}`}>
-                  {entry.label}
-                </label>
-                <span className="font-mono text-muted-foreground">
-                  {entry.address}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {isOnchain && (
+        <CounterpartyPicker
+          index={index}
+          onScopeChange={(counterpartyScope) =>
+            onChange({ ...value, counterpartyScope })
+          }
+          onSelectedChange={(counterparties) =>
+            onChange({ ...value, counterparties })
+          }
+          scope={value.counterpartyScope}
+          selected={value.counterparties}
+        />
       )}
 
       {isOnchain && (

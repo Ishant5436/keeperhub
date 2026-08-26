@@ -54,8 +54,10 @@ export type StatementDraft = {
   entries: readonly SelectorCatalogEntry[];
   /** Asset identifiers the statement is limited to. Empty means any. */
   assets?: readonly string[];
-  /** Counterparty identifiers the statement is limited to. Empty means any. */
+  /** Counterparty identifiers the statement names. Empty means any. */
   counterparties?: readonly string[];
+  /** Whether those counterparties are the only ones allowed, or the excluded ones. */
+  counterpartyScope?: "any" | "only" | "except";
   condition?: PolicyConditionMap;
   limit?: readonly PolicyLimit[];
 };
@@ -170,9 +172,12 @@ export function toStatement(draft: StatementDraft): PolicyStatement {
     condition[PolicyConditionKey.ASSET] = { in: [...draft.assets] };
   }
   if (draft.counterparties?.length) {
-    condition[PolicyConditionKey.COUNTERPARTY] = {
-      in: [...draft.counterparties],
-    };
+    // An exception is written as the negation it is, so the document says what
+    // the form said rather than leaving the reader to infer it.
+    condition[PolicyConditionKey.COUNTERPARTY] =
+      draft.counterpartyScope === "except"
+        ? { notIn: [...draft.counterparties] }
+        : { in: [...draft.counterparties] };
   }
   if (draft.projectIds?.length) {
     condition[PolicyConditionKey.PROJECT_ID] = { in: [...draft.projectIds] };
@@ -218,11 +223,33 @@ export type ParsedStatement = {
   selectors: string[];
   assets: string[];
   counterparties: string[];
+  counterpartyScope: "any" | "only" | "except";
   /** Ceiling per action, as a decimal string. Empty when unset. */
   maxUsd: string;
   /** Rolling daily ceiling, as a decimal string. Empty when unset. */
   dailyUsd: string;
 };
+
+/**
+ * Reads a counterparty condition back, keeping which way round it was written.
+ *
+ * "only these" and "anything but these" are different rules and the form has to
+ * show the one that was saved.
+ */
+function readCounterparties(condition: PolicyCondition | undefined): {
+  values: string[];
+  scope: "any" | "only" | "except";
+} {
+  const excluded = condition?.notIn;
+  if (Array.isArray(excluded) && excluded.length > 0) {
+    return { values: [...excluded], scope: "except" };
+  }
+  const allowed = condition?.in;
+  if (Array.isArray(allowed) && allowed.length > 0) {
+    return { values: [...allowed], scope: "only" };
+  }
+  return { values: [], scope: "any" };
+}
 
 function readStringList(condition: PolicyCondition | undefined): string[] {
   const value = condition?.in;
@@ -301,11 +328,15 @@ export function fromStatement(
       selectors: [],
       assets: [],
       counterparties: [],
+      counterpartyScope: "any",
       maxUsd: readCeiling(statement.condition?.[PolicyConditionKey.USD_VALUE]),
       dailyUsd: "",
     };
   }
 
+  const counterparty = readCounterparties(
+    statement.condition?.[PolicyConditionKey.COUNTERPARTY]
+  );
   const described = describeArn(first);
 
   const selectors = resources
@@ -334,9 +365,8 @@ export function fromStatement(
     address: described.address ?? "",
     selectors,
     assets: readStringList(statement.condition?.[PolicyConditionKey.ASSET]),
-    counterparties: readStringList(
-      statement.condition?.[PolicyConditionKey.COUNTERPARTY]
-    ),
+    counterparties: counterparty.values,
+    counterpartyScope: counterparty.scope,
     maxUsd: readCeiling(statement.condition?.[PolicyConditionKey.USD_VALUE]),
     dailyUsd: dailyLimit?.max ?? "",
   };

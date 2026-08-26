@@ -31,6 +31,23 @@ export const ActorScope = {
 
 export type ActorScope = (typeof ActorScope)[keyof typeof ActorScope];
 
+/**
+ * How a rule treats counterparties.
+ *
+ * The exception is a mode of its own rather than something inferred from an
+ * empty list. A set of ticked boxes where unticked means "no restriction" reads
+ * as a deny-list and behaves as an allow-list, and there is no way to tell
+ * which was meant by looking at it.
+ */
+export const CounterpartyScope = {
+  ANY: "any",
+  ONLY: "only",
+  EXCEPT: "except",
+} as const;
+
+export type CounterpartyScope =
+  (typeof CounterpartyScope)[keyof typeof CounterpartyScope];
+
 export type ResourceSelection = {
   chainId: number | null;
   address: string;
@@ -54,6 +71,8 @@ export type StatementFormValue = {
   resource: ResourceSelection;
   assets: string[];
   counterparties: string[];
+  /** Whether the counterparties listed are the only ones, or the excluded ones. */
+  counterpartyScope: CounterpartyScope;
   /** Ceiling per action, in whatever `denomination` counts. */
   maxUsd: string;
   /** Rolling daily budget, in whatever `denomination` counts. */
@@ -76,6 +95,7 @@ export function emptyStatement(index: number): StatementFormValue {
     resource: { chainId: null, address: "", selectors: [] },
     assets: [],
     counterparties: [],
+    counterpartyScope: CounterpartyScope.ANY,
     maxUsd: "",
     dailyUsd: "",
     denomination: NATIVE_DENOMINATION,
@@ -151,6 +171,7 @@ export function toDraft(
     entries: selectedEntries(value, entries),
     assets: value.assets,
     counterparties: value.counterparties,
+    counterpartyScope: value.counterpartyScope,
     condition:
       value.maxUsd.trim().length > 0
         ? { usdValue: { lte: value.maxUsd.trim() } }
@@ -193,6 +214,7 @@ export function initialStatements(
       },
       assets: value.assets,
       counterparties: value.counterparties,
+      counterpartyScope: value.counterpartyScope,
       maxUsd: value.maxUsd,
       dailyUsd: value.dailyUsd,
     }));

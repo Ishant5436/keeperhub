@@ -278,3 +278,19 @@ export function denominationOptions(
     ...tokens,
   ];
 }
+
+/**
+ * Addresses the organization has already named.
+ *
+ * Anywhere a rule asks for an address, the address book is the answer the
+ * author most often wants: those are the counterparties they have already
+ * decided matter. Typing one by hand stays possible, because a rule about an
+ * address is often written before anyone bookmarks it.
+ */
+export function addressBookOptions(catalog: PolicyCatalog): PolicyOption[] {
+  return catalog.counterparties.map((entry) => ({
+    value: entry.address,
+    label: entry.label,
+    hint: entry.address,
+  }));
+}
