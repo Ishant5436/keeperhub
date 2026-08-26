@@ -1,0 +1,293 @@
+"use client";
+
+import { useCallback, useState } from "react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { type PolicyDocument, PolicyEnforcementMode } from "@/lib/policy";
+import {
+  type UnrepresentableReason,
+  unrepresentable,
+} from "@/lib/policy/catalog";
+import {
+  type OrganizationPolicySummary,
+  usePolicies,
+} from "./hooks/use-policies";
+import {
+  type EditorMode,
+  EditorModeToggle,
+} from "./policies/builder/editor-mode-toggle";
+import { PolicyBuilder } from "./policies/builder/policy-builder";
+import { PolicyCatalogProvider } from "./policies/policy-context";
+import { PolicyDecisions } from "./policies/policy-decisions";
+import { PolicyEditor } from "./policies/policy-editor";
+import { PolicySimulator } from "./policies/policy-simulator";
+import { SectionHeader, SettingsCard } from "./section";
+import { FormSkeleton } from "./skeletons";
+
+/**
+ * A policy row.
+ *
+ * Enforcement is a switch rather than a dropdown because it is the only choice
+ * that changes whether anything is blocked, and it deserves to look like a
+ * switch. Monitor is the resting state: a policy records what it would have
+ * done until somebody deliberately turns it on.
+ */
+function PolicyRow({
+  policy,
+  disabled,
+  onToggleEnforcement,
+  onToggleEnabled,
+  onEdit,
+  onRemove,
+}: {
+  policy: OrganizationPolicySummary;
+  disabled: boolean;
+  onToggleEnforcement: (next: PolicyEnforcementMode) => void;
+  onToggleEnabled: (next: boolean) => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}): React.ReactElement {
+  const enforcing = policy.enforcement === PolicyEnforcementMode.ENFORCE;
+  const pending = new Date(policy.effectiveAt).getTime() > Date.now();
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-sm">{policy.name}</span>
+          <Badge variant={enforcing ? "default" : "secondary"}>
+            {enforcing ? "Enforcing" : "Monitoring"}
+          </Badge>
+          {!policy.enabled && <Badge variant="outline">Disabled</Badge>}
+          {policy.protected && <Badge variant="outline">Protected</Badge>}
+          {pending && (
+            <Badge variant="outline">
+              Takes effect {new Date(policy.effectiveAt).toLocaleString()}
+            </Badge>
+          )}
+        </div>
+        <p className="text-muted-foreground text-xs">
+          {policy.coverage
+            ? `Binds ${policy.coverage.score}% of the available guards. `
+            : ""}
+          {policy.description ??
+            `Governs ${policy.document.manages.length} scope${
+              policy.document.manages.length === 1 ? "" : "s"
+            }, ${policy.document.statements.length} statement${
+              policy.document.statements.length === 1 ? "" : "s"
+            }.`}
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Enforce</span>
+          <Switch
+            aria-label={`Enforce ${policy.name}`}
+            checked={enforcing}
+            disabled={disabled || !policy.enabled}
+            onCheckedChange={(next) =>
+              onToggleEnforcement(
+                next
+                  ? PolicyEnforcementMode.ENFORCE
+                  : PolicyEnforcementMode.MONITOR
+              )
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Enabled</span>
+          <Switch
+            aria-label={`Enable ${policy.name}`}
+            checked={policy.enabled}
+            disabled={disabled}
+            onCheckedChange={onToggleEnabled}
+          />
+        </div>
+        <Button disabled={disabled} onClick={onEdit} size="sm" variant="ghost">
+          Edit
+        </Button>
+        <Button
+          disabled={disabled || policy.protected}
+          onClick={onRemove}
+          size="sm"
+          variant="ghost"
+        >
+          Remove
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function PoliciesSection(): React.ReactElement {
+  const {
+    policies,
+    loading,
+    saving,
+    violations,
+    warnings,
+    create,
+    update,
+    remove,
+    clearFeedback,
+  } = usePolicies();
+  const [editing, setEditing] = useState<OrganizationPolicySummary | null>(
+    null
+  );
+  const [composing, setComposing] = useState(false);
+  const [mode, setMode] = useState<EditorMode>("builder");
+  const [fallbackReasons, setFallbackReasons] = useState<string[]>([]);
+  const [draft, setDraft] = useState<PolicyDocument | null>(null);
+
+  const closeEditor = useCallback(() => {
+    setEditing(null);
+    setComposing(false);
+    setFallbackReasons([]);
+    setDraft(null);
+    setMode("builder");
+    clearFeedback();
+  }, [clearFeedback]);
+
+  /**
+   * Open a stored policy, in the builder where it can be shown there.
+   *
+   * A statement the builder cannot render sends the author to the source
+   * editor with the reason named, rather than refusing to open the policy or
+   * silently dropping what it cannot draw.
+   */
+  const openForEdit = useCallback(
+    (policy: OrganizationPolicySummary) => {
+      clearFeedback();
+      const reasons = policy.document.statements
+        .map((statement) => unrepresentable(statement))
+        .filter((reason): reason is UnrepresentableReason => reason !== null)
+        .map((reason) => `${reason.sid}: ${reason.reason}`);
+      setFallbackReasons(reasons);
+      setMode(reasons.length > 0 ? "source" : "builder");
+      setEditing(policy);
+    },
+    [clearFeedback]
+  );
+
+  return (
+    <PolicyCatalogProvider>
+      <SectionHeader
+        description="Rules that bound what workflows, agents and members may do here. A policy claims a slice of activity; inside that slice nothing is permitted unless a statement permits it. Everything it does not claim is untouched."
+        title="Policies"
+      />
+
+      <SettingsCard
+        action={
+          <Button
+            disabled={saving}
+            onClick={() => {
+              clearFeedback();
+              setComposing(true);
+            }}
+            size="sm"
+          >
+            New policy
+          </Button>
+        }
+        description="A new policy starts in monitor mode: it records what it would have blocked without blocking anything. Turn enforcement on once the decisions look right."
+        title="Policies"
+      >
+        {loading && <FormSkeleton rows={3} />}
+        {!loading && policies.length === 0 && (
+          <p className="text-muted-foreground text-sm">
+            No policies yet. Without one, nothing here is governed and every
+            action is allowed.
+          </p>
+        )}
+        {!loading && policies.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {policies.map((policy) => (
+              <PolicyRow
+                disabled={saving}
+                key={policy.id}
+                onEdit={() => openForEdit(policy)}
+                onRemove={() => remove(policy.id)}
+                onToggleEnabled={(next) => update(policy.id, { enabled: next })}
+                onToggleEnforcement={(next) =>
+                  update(policy.id, { enforcement: next })
+                }
+                policy={policy}
+              />
+            ))}
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <Alert className="mt-3">
+            <AlertDescription>
+              {warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </AlertDescription>
+          </Alert>
+        )}
+      </SettingsCard>
+
+      {(composing || editing) &&
+        (mode === "builder" ? (
+          <PolicyBuilder
+            draft={draft}
+            modeToggle={
+              <EditorModeToggle
+                builderDisabled={fallbackReasons.length > 0}
+                mode={mode}
+                onChange={setMode}
+              />
+            }
+            onCancel={closeEditor}
+            onDraftChange={setDraft}
+            onSave={async (document) => {
+              const ok = editing
+                ? await update(editing.id, { document })
+                : await create(document);
+              if (ok) {
+                closeEditor();
+              }
+            }}
+            policy={editing}
+            saving={saving}
+            violations={violations}
+            warnings={warnings}
+          />
+        ) : (
+          <PolicyEditor
+            draft={draft}
+            fallbackReasons={fallbackReasons}
+            modeToggle={
+              <EditorModeToggle
+                builderDisabled={fallbackReasons.length > 0}
+                mode={mode}
+                onChange={setMode}
+              />
+            }
+            onCancel={closeEditor}
+            onDraftChange={setDraft}
+            onSave={async (document) => {
+              const ok = editing
+                ? await update(editing.id, { document })
+                : await create(document);
+              if (ok) {
+                closeEditor();
+              }
+            }}
+            policy={editing}
+            saving={saving}
+            violations={violations}
+          />
+        ))}
+
+      <PolicySimulator />
+
+      <PolicyDecisions />
+    </PolicyCatalogProvider>
+  );
+}
