@@ -5,6 +5,7 @@ import type { ethers } from "ethers";
 import { toChecksumAddress } from "@/lib/address-utils";
 import { db } from "@/lib/db";
 import { type OrganizationWallet, organizationWallets } from "@/lib/db/schema";
+import { guardSigner } from "@/lib/policy/signing-guard";
 import { getRpcProviderFromUrls } from "@/lib/rpc/provider-factory";
 import { ensureOrganizationSolanaAddress } from "@/lib/turnkey/ensure-solana-address";
 import { isSolanaWalletProvisioningEnabled } from "@/lib/turnkey/solana-provisioning-flag";
@@ -36,6 +37,15 @@ export async function getOrganizationWallet(
   return wallet[0];
 }
 
+/**
+ * The organization's signer, wrapped so policy is unavoidable.
+ *
+ * Guarding here rather than at each route is the point. Not every path to a
+ * signature goes through the workflow engine: direct execution, agent calls and
+ * one-off runs all reach a signer another way, and a rule that only holds on
+ * some paths is not a rule. A route added tomorrow inherits the check without
+ * knowing policy exists.
+ */
 export async function initializeWalletSigner(
   organizationId: string,
   rpcUrl: string,
@@ -45,7 +55,10 @@ export async function initializeWalletSigner(
   const rpcManager = await getRpcProviderFromUrls(rpcUrl, undefined, chainId);
   const provider = rpcManager.getProvider();
 
-  return initializeTurnkeySigner(wallet, provider);
+  return guardSigner(initializeTurnkeySigner(wallet, provider), {
+    organizationId,
+    chainId,
+  });
 }
 
 function initializeTurnkeySigner(

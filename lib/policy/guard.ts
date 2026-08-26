@@ -18,12 +18,14 @@ import type { Capability } from "./capabilities";
 import {
   FactProvenance,
   FactState,
+  POLICY_RECEIPT_TTL_MS,
   type PolicyCheckpoint,
   PolicyDecisionReason,
   PolicyOutcome,
 } from "./constants";
 import { evaluatePolicy } from "./engine";
 import { failClosedDecision, shouldBlock } from "./evaluator";
+import { EMPTY_CALLDATA, intentDigest } from "./intent-digest";
 import {
   type GrantSubject,
   getCompiledPolicySet,
@@ -147,6 +149,38 @@ function summariseFacts(facts: PolicyFacts): Record<string, unknown> {
   return out;
 }
 
+/**
+ * The digest an allow leaves behind for the signer to find.
+ *
+ * Only an allow issues one: a denial never reaches a signer, and an unmanaged
+ * action needs no receipt because nothing governs it. A receipt is refused
+ * when the action's target is not fully known, since a digest over unknowns
+ * would match the wrong transaction.
+ */
+function receiptFor(
+  input: GuardInput,
+  decision: PolicyDecision
+): string | null {
+  if (decision.outcome !== PolicyOutcome.ALLOW) {
+    return null;
+  }
+  const chainId = knownValue<number>(input.facts.chainId);
+  const to = knownValue<string>(input.facts.contractAddress);
+  if (chainId === null || to === null) {
+    return null;
+  }
+  return intentDigest({
+    chainId,
+    to,
+    selector: knownValue<string>(input.facts.selector) ?? EMPTY_CALLDATA,
+    valueWei: knownValue<string>(input.facts.nativeValueWei) ?? "0",
+  });
+}
+
+function knownValue<T>(fact: { state: string; value?: unknown }): T | null {
+  return fact.state === FactState.KNOWN ? ((fact.value as T) ?? null) : null;
+}
+
 async function recordDecision(
   input: GuardInput,
   organizationId: string,
@@ -173,6 +207,14 @@ async function recordDecision(
       matchedSids: decision.matched.map((m) => m.sid),
       governingPolicyIds: decision.governingPolicyIds,
       facts: summariseFacts(input.facts),
+      // A receipt, so the signing check can recognise an action this decision
+      // already permitted rather than deciding it a second time without the
+      // context this layer had.
+      intentDigest: receiptFor(input, decision),
+      receiptStatus: receiptFor(input, decision) ? "pending" : null,
+      receiptExpiresAt: receiptFor(input, decision)
+        ? new Date(Date.now() + POLICY_RECEIPT_TTL_MS)
+        : null,
       observedOnly: decision.observedOnly,
       policyVersion: decision.policyVersion,
       principalKind: input.principal.kind,
