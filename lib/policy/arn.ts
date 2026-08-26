@@ -103,14 +103,20 @@ export type ArnParseResult =
   | { ok: false; error: string };
 
 const SELECTOR_PATTERN = /^0x[0-9a-f]{8}$/;
-const ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
+const HEX_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+/** Base58 as Solana writes it: no 0, O, I or l, and 32 to 44 characters. */
+const BASE58_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function normalizeId(type: ArnSegment, raw: string): string {
   if (raw === ARN_WILDCARD_SEGMENT || raw === ARN_WILDCARD_DEEP) {
     return raw;
   }
   if (ADDRESS_SEGMENTS.includes(type)) {
-    return raw.toLowerCase();
+    // Only an EVM address is case-insensitive. A base58 address carries no
+    // checksum, so lowercasing one does not fail, it decodes to a different
+    // and still valid key: the rule would then be about a program nobody
+    // named. Anything not 0x-prefixed keeps the case it was written with.
+    return isHexAddress(raw) ? raw.toLowerCase() : raw;
   }
   if (type === ArnSegment.FUNCTION) {
     return raw === ARN_SELECTOR_NONE ? raw : raw.toLowerCase();
@@ -228,8 +234,20 @@ export function isValidSelector(value: string): boolean {
   return value === ARN_SELECTOR_NONE || SELECTOR_PATTERN.test(value);
 }
 
+/** An EVM address: 0x and twenty bytes, case-insensitive. */
+function isHexAddress(value: string): boolean {
+  return HEX_ADDRESS_PATTERN.test(value);
+}
+
+/**
+ * An address the grammar can hold.
+ *
+ * Two families, deliberately kept apart. An EVM address is hex and compared
+ * case-insensitively; a base58 address is compared exactly, because case is
+ * part of the key rather than presentation.
+ */
 export function isValidAddress(value: string): boolean {
-  return ADDRESS_PATTERN.test(value);
+  return isHexAddress(value) || BASE58_ADDRESS_PATTERN.test(value);
 }
 
 /**

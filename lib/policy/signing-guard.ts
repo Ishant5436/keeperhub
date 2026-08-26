@@ -11,6 +11,7 @@ import {
   FactProvenance,
   FactState,
   PolicyCheckpoint,
+  PolicyDecisionReason,
   PrincipalKind,
 } from "@/lib/policy/constants";
 import { PolicyDeniedError } from "@/lib/policy/errors";
@@ -20,6 +21,8 @@ import {
   intentDigest,
   selectorOf,
 } from "@/lib/policy/intent-digest";
+import { unwrapForwardedCall } from "@/lib/policy/safe-unwrap";
+import { programsInvoked } from "@/lib/policy/solana-programs";
 import type { Fact, PolicyFacts } from "@/lib/policy/types";
 
 const UNKNOWN = { state: FactState.UNKNOWN } as const;
@@ -31,6 +34,10 @@ function known<T>(value: T): Fact<T> {
     provenance: FactProvenance.AUTHORITATIVE,
   };
 }
+
+type SolanaSigner = {
+  signTransaction(unsignedBytes: Uint8Array): Promise<Uint8Array>;
+};
 
 export type SigningContext = {
   organizationId: string;
@@ -156,6 +163,23 @@ export async function assertSigningAllowed(
     return;
   }
 
+  // A Safe or a Roles modifier forwards the call, so the transaction names the
+  // wrapper and not the address the money reaches. Checking only the outer call
+  // would make routing through a Safe a way around every rule about a target.
+  const forwarded = unwrapForwardedCall(tx.data);
+  if (forwarded) {
+    await decide(context, forwarded);
+  }
+
+  await decide(context, { to, selector, valueWei });
+}
+
+/** Check one call, whether it is the transaction itself or one it forwards. */
+async function decide(
+  context: SigningContext,
+  call: { to: string; selector: string; valueWei: string }
+): Promise<void> {
+  const { to, selector, valueWei } = call;
   const baseCapability =
     selector === EMPTY_CALLDATA
       ? Capability.ASSET_TRANSFER_NATIVE
@@ -223,6 +247,62 @@ export function guardSigner(
             sendTransaction: (request: unknown) => Promise<unknown>;
           }
         ).sendTransaction(tx);
+      };
+    },
+  });
+}
+
+/**
+ * Check a Solana transaction against policy before it is signed.
+ *
+ * A Solana signer is handed serialized bytes rather than a target and calldata,
+ * so the programs it invokes are read back out of the message. Every program in
+ * the transaction is checked, because one instruction naming a denied program
+ * is enough to refuse the whole thing: they are signed together and land
+ * together.
+ *
+ * Bytes that will not decode are refused. A transaction nobody can describe is
+ * not one that can be shown to comply.
+ */
+export async function assertSolanaSigningAllowed(
+  context: SigningContext,
+  bytes: Uint8Array
+): Promise<void> {
+  const programs = programsInvoked(bytes);
+  if (programs.length === 0) {
+    throw new PolicyDeniedError({
+      reason: PolicyDecisionReason.FACT_UNRESOLVED,
+    });
+  }
+
+  for (const program of programs) {
+    await decide(context, {
+      to: program,
+      selector: EMPTY_CALLDATA,
+      valueWei: "0",
+    });
+  }
+}
+
+/**
+ * Wrap a Solana signer so nothing it signs escapes policy.
+ *
+ * The EVM and Solana paths share no code below the signer, so each one has to
+ * be guarded where it is built. A rule that holds on one chain family and not
+ * the other is not a rule.
+ */
+export function guardSolanaSigner<T extends SolanaSigner>(
+  signer: T,
+  context: SigningContext
+): T {
+  return new Proxy(signer, {
+    get(target, property, receiver) {
+      if (property !== "signTransaction") {
+        return Reflect.get(target, property, receiver);
+      }
+      return async (bytes: Uint8Array) => {
+        await assertSolanaSigningAllowed(context, bytes);
+        return await target.signTransaction(bytes);
       };
     },
   });

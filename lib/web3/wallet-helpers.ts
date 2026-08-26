@@ -5,8 +5,9 @@ import type { ethers } from "ethers";
 import { toChecksumAddress } from "@/lib/address-utils";
 import { db } from "@/lib/db";
 import { type OrganizationWallet, organizationWallets } from "@/lib/db/schema";
-import { guardSigner } from "@/lib/policy/signing-guard";
+import { guardSigner, guardSolanaSigner } from "@/lib/policy/signing-guard";
 import { getRpcProviderFromUrls } from "@/lib/rpc/provider-factory";
+import { SUPPORTED_CHAIN_IDS } from "@/lib/rpc/types";
 import { ensureOrganizationSolanaAddress } from "@/lib/turnkey/ensure-solana-address";
 import { isSolanaWalletProvisioningEnabled } from "@/lib/turnkey/solana-provisioning-flag";
 import { TurnkeySolanaSigner } from "@/lib/turnkey/solana-signer";
@@ -142,8 +143,17 @@ export async function initializeSolanaWallet(
   return { signer, address: wallet.solanaAddress as string };
 }
 
+/**
+ * The organization's Solana signer, wrapped so policy is unavoidable.
+ *
+ * The EVM and Solana paths share no code below the signer, so each is guarded
+ * where it is built. A rule that holds on one chain family and not the other is
+ * not a rule.
+ */
 export async function initializeSolanaWalletSigner(
-  organizationId: string
+  organizationId: string,
+  chainId: number = SUPPORTED_CHAIN_IDS.SOLANA_MAINNET
 ): Promise<SolanaTransactionSigner> {
-  return (await initializeSolanaWallet(organizationId)).signer;
+  const { signer } = await initializeSolanaWallet(organizationId);
+  return guardSolanaSigner(signer, { organizationId, chainId });
 }
