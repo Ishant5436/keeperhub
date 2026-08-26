@@ -102,7 +102,12 @@ export type ArnParseResult =
   | { ok: true; arn: ParsedArn }
   | { ok: false; error: string };
 
-const SELECTOR_PATTERN = /^0x[0-9a-f]{8}$/;
+/**
+ * Accepts either case, because the parser lowercases a selector rather than
+ * rejecting it. A validator stricter than the parser would refuse an
+ * identifier the grammar itself accepts.
+ */
+const SELECTOR_PATTERN = /^0x[0-9a-fA-F]{8}$/;
 const HEX_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 /** Base58 as Solana writes it: no 0, O, I or l, and 32 to 44 characters. */
 const BASE58_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
