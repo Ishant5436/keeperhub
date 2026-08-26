@@ -184,8 +184,8 @@ export const policyDecisions = pgTable(
     signals: jsonb("signals").$type<Record<string, unknown>>(),
     observedOnly: boolean("observed_only").notNull().default(false),
     intentDigest: text("intent_digest"),
-    // pending until consumed by the signing-time check, then consumed. Expired
-    // rows cannot be replayed.
+    // pending until consumed by the signing-time check, then consumed. An
+    // expired receipt authorises nothing.
     receiptStatus: text("receipt_status").$type<
       "pending" | "consumed" | "expired"
     >(),

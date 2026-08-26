@@ -78,8 +78,7 @@ export type GuardVerdict = {
 /**
  * Written in place of a value the log cannot represent.
  *
- * Rows carrying it cannot be faithfully re-decided, so replay counts them and
- * reports its own numbers as a floor.
+ * Rows carrying it record that a value existed without recording what it was.
  */
 export const UNSUMMARISED = "[unsummarised]" as const;
 

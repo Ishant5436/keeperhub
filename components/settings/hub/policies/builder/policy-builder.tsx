@@ -13,7 +13,6 @@ import type {
 } from "../../hooks/use-policies";
 import { SettingsCard } from "../../section";
 import { useStatementBuilder } from "../hooks/use-statement-builder";
-import { ReplayPanel } from "./replay-panel";
 import { StatementCard } from "./statement-card";
 import { ValidationPane } from "./validation-pane";
 
@@ -134,8 +133,6 @@ export function PolicyBuilder({
           <Plus className="size-4" />
           Add a rule
         </Button>
-
-        <ReplayPanel document={builder.document} />
 
         <ValidationPane
           findings={builder.findings}
