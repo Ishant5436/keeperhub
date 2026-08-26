@@ -710,6 +710,10 @@ export const workflowExecutions = pgTable(
       | "auth"
       | "infrastructure"
       | "workflow_engine"
+      // KEEP-1080: an organization policy refused the action. Separate from
+      // "validation" and "configuration" so a dashboard can tell a guardrail
+      // working from a workflow that is misconfigured.
+      | "policy"
       | "unknown"
     >(),
     errorType: text("error_type").$type<ExecutionErrorType>(),
@@ -1029,6 +1033,16 @@ export {
   type WorkflowPayment,
   workflowPayments,
 } from "./schema-payments";
+export {
+  type ContractCatalogRow,
+  contractCatalog,
+  type OrganizationPolicyRow,
+  organizationPolicies,
+  type PolicyDecisionRow,
+  policyDecisions,
+  type ResourceGrantRow,
+  resourceGrants,
+} from "./schema-policy";
 export {
   type NewTempoHeldPayment,
   type TempoHeldPayment,
