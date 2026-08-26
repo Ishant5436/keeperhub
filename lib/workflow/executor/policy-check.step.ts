@@ -159,14 +159,12 @@ export async function policyCheckStep(
 
   return {
     blocked: verdict.blocked,
-    // Naming the rule and where to change it turns a refusal into something
-    // actionable. A denial that only says "blocked by policy" leaves the reader
-    // hunting for which of their own rules did it.
+    // Why, and where to look, and nothing about which rule decided. This text
+    // reaches whoever ran the workflow, and a member who cannot read policy
+    // must not learn its contents by being refused by it.
     message: verdict.blocked
       ? explainDenial({
           reason: verdict.decision.reason,
-          sid: verdict.decision.matched[0]?.sid,
-          policyId: verdict.decision.matched[0]?.policyId,
           organizationId: input.organizationId,
         })
       : "",

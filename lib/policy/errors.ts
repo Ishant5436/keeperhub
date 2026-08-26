@@ -130,6 +130,7 @@ export function toPolicyDenial(
  */
 export function policyPageLink(input: {
   organizationId: string;
+  /** Included only where the reader is already known to be allowed to see it. */
   policyId?: string;
   sid?: string;
 }): string {
@@ -146,26 +147,28 @@ export function policyPageLink(input: {
 }
 
 /**
- * The denial an operator reads, naming the rule that produced it.
+ * The denial whoever ran the workflow reads.
  *
- * Only the statement name is exposed, never a condition or a limit value: the
- * message reaches whoever ran the workflow, who may not be allowed to read the
- * policy that refused them.
+ * Says why, and where to look. It says nothing about which rule decided, and
+ * that is deliberate: reading policy is limited to admins and owners, while any
+ * member can run a workflow, so the denial must not become a way around that
+ * permission. A statement name is written by the author and routinely carries
+ * the thing it bounds, so "Rule: max-100k-usdc-to-treasury" discloses the cap
+ * as surely as printing the number would.
+ *
+ * The deciding statement is still recorded on the decision, which the policy
+ * page reads under the same admin check. Someone allowed to see which rule
+ * fired can see it there.
  */
 export function explainDenial(input: {
   reason: PolicyDecisionReason;
-  sid?: string;
   organizationId?: string;
-  policyId?: string;
 }): string {
   const base = POLICY_DENIAL_MESSAGE[input.reason];
-  const rule = input.sid ? ` Rule: ${input.sid}.` : "";
-  const link = input.organizationId
-    ? ` Review it at ${policyPageLink({
-        organizationId: input.organizationId,
-        policyId: input.policyId,
-        sid: input.sid,
-      })}`
-    : "";
-  return `${base}${rule}${link}`;
+  if (!input.organizationId) {
+    return base;
+  }
+  return `${base} Review your organization's policies at ${policyPageLink({
+    organizationId: input.organizationId,
+  })}`;
 }
