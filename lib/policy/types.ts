@@ -214,6 +214,15 @@ export type PolicyDocument = {
   manages: readonly string[];
   statements: readonly PolicyStatement[];
   postconditions?: PolicyPostcondition;
+  /**
+   * Confirms that a statement granting authority over the policy system itself
+   * is intended.
+   *
+   * Rules about API keys, members, the address book or policy govern the
+   * footing every other rule stands on, so the compiler refuses them until the
+   * author says out loud that this is deliberate.
+   */
+  acknowledgeSelfReferential?: boolean;
 };
 
 export type OrganizationPolicy = {

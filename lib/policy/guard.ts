@@ -13,7 +13,12 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { policyDecisions } from "@/lib/db/schema";
-import { ErrorCategory, logSystemWarn, logUserError } from "@/lib/logging";
+import {
+  ErrorCategory,
+  logSystemWarn,
+  logUserError,
+  logWarn,
+} from "@/lib/logging";
 import type { Capability } from "./capabilities";
 import {
   FactProvenance,
@@ -252,6 +257,46 @@ async function chargeLimits(input: {
   };
 }
 
+/**
+ * Announce a refusal that monitor mode let through.
+ *
+ * Monitor mode exists to show what a policy would do before it can hurt
+ * anything, and a signal nobody is told about does not do that. The decision
+ * log holds it either way; this is what makes it visible to whoever is watching
+ * a run rather than only to whoever thinks to open the page.
+ *
+ * A warning rather than an error: the policy is working, and the organization
+ * asked for it not to block yet. Raising it as a system error would page
+ * somebody every time a customer tries a rule out.
+ */
+function reportObservedBlock(
+  input: GuardInput,
+  organizationId: string,
+  decision: PolicyDecision
+): void {
+  if (!decision.observedOnly) {
+    return;
+  }
+  if (
+    decision.outcome === PolicyOutcome.ALLOW ||
+    decision.outcome === PolicyOutcome.UNMANAGED
+  ) {
+    return;
+  }
+
+  logWarn("[Policy] A policy in monitor mode would have blocked this action", {
+    organizationId,
+    capability: input.capability,
+    outcome: decision.outcome,
+    reason: decision.reason,
+    // Safe to name here: this reaches the operator's own logs, not the
+    // person who ran the workflow.
+    matched: decision.matched.map((m) => m.sid).join(",") || "none",
+    workflowId: input.workflowId ?? "",
+    nodeId: input.nodeId ?? "",
+  });
+}
+
 async function recordDecision(
   input: GuardInput,
   organizationId: string,
@@ -428,6 +473,7 @@ export async function enforcePolicy(input: GuardInput): Promise<GuardVerdict> {
     });
 
     await recordDecision(input, organizationId, charged.decision);
+    reportObservedBlock(input, organizationId, charged.decision);
     return {
       blocked: shouldBlock(charged.decision),
       decision: charged.decision,

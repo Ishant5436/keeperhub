@@ -327,9 +327,7 @@ export function compilePolicy(input: CompileInput): CompileOutcome {
     );
   }
 
-  const acknowledge =
-    (document as { acknowledgeSelfReferential?: boolean })
-      .acknowledgeSelfReferential === true;
+  const acknowledge = document.acknowledgeSelfReferential === true;
 
   const scope = compileManagedScope(ctx, document);
   const statements: CompiledStatement[] = [];
