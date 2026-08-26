@@ -14,6 +14,7 @@ import "server-only";
 
 import { PolicyCheckpoint, type PolicyRole, PrincipalKind } from "@/lib/policy";
 import { resolveCallCapability } from "@/lib/policy/catalog/call-capability";
+import { explainDenial } from "@/lib/policy/errors";
 import { capabilityForAction, extractFacts } from "@/lib/policy/facts";
 import { enforcePolicy } from "@/lib/policy/guard";
 import {
@@ -158,7 +159,17 @@ export async function policyCheckStep(
 
   return {
     blocked: verdict.blocked,
-    message: verdict.blocked ? (verdict.decision.message ?? "") : "",
+    // Naming the rule and where to change it turns a refusal into something
+    // actionable. A denial that only says "blocked by policy" leaves the reader
+    // hunting for which of their own rules did it.
+    message: verdict.blocked
+      ? explainDenial({
+          reason: verdict.decision.reason,
+          sid: verdict.decision.matched[0]?.sid,
+          policyId: verdict.decision.matched[0]?.policyId,
+          organizationId: input.organizationId,
+        })
+      : "",
     reason: verdict.decision.reason,
     outcome: verdict.decision.outcome,
     reservations: verdict.reservations ?? [],

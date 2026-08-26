@@ -59,6 +59,13 @@ export type ContractCatalog = {
    * list comes from here; the identifier still pins `address`.
    */
   implementationAddress: string | null;
+  /**
+   * A proxy known to front this address, when this address is an
+   * implementation. Set by looking for a contract that names this one, which is
+   * what lets a rule pinned to the wrong half be caught rather than silently
+   * matching nothing.
+   */
+  proxiedBy?: string | null;
   entries: readonly SelectorCatalogEntry[];
   /** Selectors exposed by more than one function on this contract. */
   collisions: readonly string[];

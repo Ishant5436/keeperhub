@@ -35,6 +35,7 @@ export type CompatibilitySeverity =
 export const CompatibilityCode = {
   SELECTOR_NOT_ON_CONTRACT: "selector-not-on-contract",
   RESOURCE_MATCHES_NO_SELECTOR: "resource-matches-no-selector",
+  IMPLEMENTATION_NOT_PROXY: "implementation-not-proxy",
   CONDITION_BINDS_NOTHING: "condition-binds-nothing",
   LIMIT_BINDS_NOTHING: "limit-binds-nothing",
   UNLIMITED_VALUE_ALLOW: "unlimited-value-allow",
@@ -134,6 +135,21 @@ function checkResource(
   resource: ResolvedResource
 ): CompatibilityFinding[] {
   const findings: CompatibilityFinding[] = [];
+
+  // Naming the implementation instead of the proxy is the quietest way to
+  // write a rule that governs nothing: the transaction is sent to the proxy, so
+  // an identifier pinned to the address behind it never matches.
+  if (resource.address && resource.catalog?.proxiedBy) {
+    findings.push({
+      code: CompatibilityCode.IMPLEMENTATION_NOT_PROXY,
+      severity: CompatibilitySeverity.ERROR,
+      sid: statement.sid,
+      field: "resource",
+      subject: resource.pattern,
+      message: `This is the implementation behind ${resource.catalog.proxiedBy}, not the address calls are sent to. Name the proxy instead, or this rule matches nothing.`,
+    });
+    return findings;
+  }
 
   if (resource.address && resource.catalog?.entries.length === 0) {
     findings.push({

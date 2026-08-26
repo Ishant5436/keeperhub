@@ -59,6 +59,31 @@ function isFresh(fetchedAt: Date, source: string): boolean {
   return Date.now() - fetchedAt.getTime() < ttl;
 }
 
+/**
+ * A proxy that names this address as its implementation.
+ *
+ * Answers the question a rule author cannot: "is this the address calls are
+ * actually sent to, or the one behind it". Only contracts already in the
+ * catalog are known, so a null answer means "no proxy on record" rather than
+ * "definitely not an implementation".
+ */
+async function findProxyFronting(
+  chainId: number,
+  address: string
+): Promise<string | null> {
+  const [row] = await db
+    .select({ address: contractCatalog.address })
+    .from(contractCatalog)
+    .where(
+      and(
+        eq(contractCatalog.chainId, chainId),
+        eq(contractCatalog.implementationAddress, address)
+      )
+    )
+    .limit(1);
+  return row?.address ?? null;
+}
+
 async function readRow(chainId: number, address: string) {
   const [row] = await db
     .select()
@@ -191,6 +216,7 @@ export async function getContractCatalog(
       chainId: row.chainId,
       address: row.address,
       implementationAddress: row.implementationAddress,
+      proxiedBy: await findProxyFronting(normalized.chainId, address),
       entries: row.entries,
       collisions: row.collisions,
     };
@@ -210,7 +236,11 @@ export async function getContractCatalog(
   }
 
   try {
-    return await rebuild(normalized);
+    const built = await rebuild(normalized);
+    return {
+      ...built,
+      proxiedBy: await findProxyFronting(normalized.chainId, address),
+    };
   } catch (error) {
     logWarn("[PolicyCatalog] No ABI available for contract", {
       chainId: String(normalized.chainId),

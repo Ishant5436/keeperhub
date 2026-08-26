@@ -119,3 +119,51 @@ export function toPolicyDenial(
     correlationId,
   });
 }
+
+/**
+ * Where an organization changes the rule that refused an action.
+ *
+ * A denial that only says "blocked by policy" leaves the reader to find which
+ * of their rules did it, and a rule they cannot find is one they cannot fix.
+ * The link carries the deciding statement so the page can open on it.
+ */
+export function policyPageLink(input: {
+  organizationId: string;
+  policyId?: string;
+  sid?: string;
+}): string {
+  const base = `/settings/${input.organizationId}/policies`;
+  if (!input.policyId) {
+    return base;
+  }
+  const params = new URLSearchParams({ policy: input.policyId });
+  if (input.sid) {
+    params.set("rule", input.sid);
+  }
+  return `${base}?${params.toString()}`;
+}
+
+/**
+ * The denial an operator reads, naming the rule that produced it.
+ *
+ * Only the statement name is exposed, never a condition or a limit value: the
+ * message reaches whoever ran the workflow, who may not be allowed to read the
+ * policy that refused them.
+ */
+export function explainDenial(input: {
+  reason: PolicyDecisionReason;
+  sid?: string;
+  organizationId?: string;
+  policyId?: string;
+}): string {
+  const base = POLICY_DENIAL_MESSAGE[input.reason];
+  const rule = input.sid ? ` Rule: ${input.sid}.` : "";
+  const link = input.organizationId
+    ? ` Review it at ${policyPageLink({
+        organizationId: input.organizationId,
+        policyId: input.policyId,
+        sid: input.sid,
+      })}`
+    : "";
+  return `${base}${rule}${link}`;
+}
