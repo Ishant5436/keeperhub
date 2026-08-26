@@ -123,16 +123,18 @@ export function toPolicyDenial(
 /**
  * Where an organization changes the rule that refused an action.
  *
- * A denial that only says "blocked by policy" leaves the reader to find which
- * of their rules did it, and a rule they cannot find is one they cannot fix.
- * The link carries the deciding statement so the page can open on it.
+ * Absolute, matching the quota and payment notices, because a denial is read
+ * outside the app as often as inside it: in an execution log, an email, an
+ * agent's reply or a CLI transcript. A path alone is only clickable in one of
+ * those places.
  */
 export function policyPageLink(input: {
   organizationId: string;
   policyId?: string;
   sid?: string;
 }): string {
-  const base = `/settings/${input.organizationId}/policies`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com";
+  const base = `${appUrl}/settings/${input.organizationId}/policies`;
   if (!input.policyId) {
     return base;
   }

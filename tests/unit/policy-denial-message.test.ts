@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PolicyDecisionReason } from "@/lib/policy";
-import { explainDenial, policyPageLink } from "@/lib/policy/errors";
+import {
+  explainDenial,
+  POLICY_DENIAL_MESSAGE,
+  policyPageLink,
+} from "@/lib/policy/errors";
 
 const ORG = "85a32c46-a6b5-401c-9d88-598cf573e042";
 
@@ -17,10 +21,16 @@ describe("what a blocked run tells the reader", () => {
     ).toContain("Rule: no-borrowing-ever");
   });
 
-  it("links to the policy, opened on that rule", () => {
-    expect(
-      policyPageLink({ organizationId: ORG, policyId: "pol_9f2", sid: "cap" })
-    ).toBe(`/settings/${ORG}/policies?policy=pol_9f2&rule=cap`);
+  it("links absolutely, so it is clickable outside the app too", () => {
+    // A denial is read in an execution log, an email, an agent's reply or a CLI
+    // transcript as often as in the app. A path alone works in one of those.
+    const link = policyPageLink({
+      organizationId: ORG,
+      policyId: "pol_9f2",
+      sid: "cap",
+    });
+    expect(link).toMatch(/^https?:\/\//);
+    expect(link).toContain(`/settings/${ORG}/policies?policy=pol_9f2&rule=cap`);
   });
 
   it("still links to the page when nothing matched", () => {
@@ -30,7 +40,7 @@ describe("what a blocked run tells the reader", () => {
       reason: PolicyDecisionReason.NO_MATCHING_ALLOW,
       organizationId: ORG,
     });
-    expect(message).toContain(`/settings/${ORG}/policies`);
+    expect(message).toMatch(/https?:\/\/\S+\/settings\/[^/]+\/policies/);
     expect(message).not.toContain("Rule:");
   });
 
@@ -43,21 +53,26 @@ describe("what a blocked run tells the reader", () => {
     ).toContain("no remaining allowance");
   });
 
-  it("leaks no condition or limit value", () => {
+  it("carries the reason, the rule and the link, and nothing else", () => {
     // The message reaches whoever ran the workflow, who may not be allowed to
-    // read the policy that refused them.
+    // read the policy that refused them. Pinning the exact shape is what stops
+    // a condition or a limit value being added to it later.
     const message = explainDenial({
       reason: PolicyDecisionReason.LIMIT_EXCEEDED,
       sid: "daily-cap",
       policyId: "pol_9f2",
       organizationId: ORG,
     });
-    expect(message).not.toMatch(/\d{4,}/);
+    expect(message).toBe(
+      `${POLICY_DENIAL_MESSAGE[PolicyDecisionReason.LIMIT_EXCEEDED]} Rule: daily-cap. Review it at ${policyPageLink(
+        { organizationId: ORG, policyId: "pol_9f2", sid: "daily-cap" }
+      )}`
+    );
   });
 
   it("omits the link when the organization is unknown", () => {
     expect(
       explainDenial({ reason: PolicyDecisionReason.ENGINE_ERROR })
-    ).not.toContain("/settings/");
+    ).not.toContain("/policies");
   });
 });
