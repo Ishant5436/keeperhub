@@ -2,7 +2,6 @@ export {
   ACTION_OPTIONS,
   ANY_STABLECOIN_DENOMINATION,
   actorOptions,
-  addressBookOptions,
   assetForDenomination,
   chainOptions,
   denominationOptions,
