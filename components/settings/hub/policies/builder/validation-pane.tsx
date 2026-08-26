@@ -53,6 +53,13 @@ function EntryList({
   );
 }
 
+/**
+ * The count is always shown, including zero.
+ *
+ * Hiding a zero made three tabs look identical and inert: switching between
+ * them appeared to do nothing, because nothing distinguished a tab with no
+ * findings from one that was not working.
+ */
 function CountedTab({
   value,
   label,
@@ -65,21 +72,19 @@ function CountedTab({
   return (
     <TabsTrigger value={value}>
       {label}
-      {count > 0 && (
-        <Badge className="ml-1.5" variant="secondary">
-          {count}
-        </Badge>
-      )}
+      <Badge className="ml-1.5" variant={count > 0 ? "secondary" : "outline"}>
+        {count}
+      </Badge>
     </TabsTrigger>
   );
 }
 
 /**
- * Everything known about the document, split by what it means.
+ * What is known about the document, split by what it means for saving.
  *
- * Counts live in the tab labels so a problem is visible without opening the
- * tab that holds it. Errors block a save; the other three do not, because a
- * rule that is merely unusual is still the author's to make.
+ * When nothing is wrong there is nothing to sort through, so the tabs are
+ * replaced by a single line saying so. Three empty tabs read as a broken
+ * control rather than as a clean bill of health.
  */
 export function ValidationPane({
   findings,
@@ -107,35 +112,49 @@ export function ValidationPane({
     })),
   ];
   const security = toEntries(findings, CompatibilitySeverity.SECURITY);
+  const total = errors.length + warningEntries.length + security.length;
+
+  if (total === 0) {
+    return (
+      <div className="rounded-lg border border-border p-3">
+        <p className="font-medium text-sm">Nothing to flag</p>
+        <p className="text-muted-foreground text-xs">
+          Every rule selects something that exists, every condition and limit
+          binds on it, and nothing grants more than it appears to. Checks appear
+          here as you pick contracts and functions.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <Tabs defaultValue={errors.length > 0 ? "errors" : "security"}>
       <TabsList>
-        <CountedTab count={security.length} label="Security" value="security" />
         <CountedTab count={errors.length} label="Errors" value="errors" />
         <CountedTab
           count={warningEntries.length}
           label="Warnings"
           value="warnings"
         />
+        <CountedTab count={security.length} label="Security" value="security" />
       </TabsList>
 
-      <TabsContent value="security">
-        <EntryList
-          empty="Nothing here grants more than it appears to."
-          entries={security}
-        />
-      </TabsContent>
       <TabsContent value="errors">
         <EntryList
-          empty="No statement is empty or unsatisfiable."
+          empty="No rule is empty or impossible to satisfy. A rule that grants nothing at all would appear here and would stop the policy saving."
           entries={errors}
         />
       </TabsContent>
       <TabsContent value="warnings">
         <EntryList
-          empty="Every condition and limit binds on something."
+          empty="Every condition and limit binds on something. A condition none of the selected functions expose would appear here."
           entries={warningEntries}
+        />
+      </TabsContent>
+      <TabsContent value="security">
+        <EntryList
+          empty="Nothing here grants more than it appears to. A function that forwards arbitrary calls, or an allow with no limit on what it may move, would appear here."
+          entries={security}
         />
       </TabsContent>
     </Tabs>

@@ -42,6 +42,24 @@ export const STATEMENT_TARGET_LABEL: Record<StatementTarget, string> = {
   [StatementTarget.POLICY]: "Policies",
 };
 
+/**
+ * The singular form, for a field that narrows a rule to one of them.
+ *
+ * "Which one" on its own says nothing: the reader has to remember what kind of
+ * thing the rule is about to know what they are being asked for.
+ */
+export const STATEMENT_TARGET_SINGULAR: Partial<
+  Record<StatementTarget, string>
+> = {
+  [StatementTarget.WORKFLOW]: "workflow",
+  [StatementTarget.WALLET]: "Safe",
+  [StatementTarget.MEMBER]: "member",
+  [StatementTarget.INTEGRATION]: "connection",
+  [StatementTarget.ADDRESSBOOK]: "address book entry",
+  [StatementTarget.APIKEY]: "API key",
+  [StatementTarget.POLICY]: "policy",
+};
+
 /** What each control-plane target governs, shown under its name. */
 export const STATEMENT_TARGET_HINT: Partial<Record<StatementTarget, string>> = {
   [StatementTarget.OFFCHAIN]:

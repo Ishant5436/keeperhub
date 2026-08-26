@@ -11,6 +11,7 @@ import {
   onlyCreates,
   STATEMENT_TARGET_HINT,
   STATEMENT_TARGET_LABEL,
+  STATEMENT_TARGET_SINGULAR,
   StatementTarget,
   supportsProjectScope,
 } from "@/lib/policy/catalog";
@@ -183,10 +184,11 @@ export function ControlPlanePicker({
       {namesResource && !creationOnly && (
         <div className="flex flex-col gap-1.5">
           <FieldLabel
-            hint="A rule normally covers every resource of this kind. Narrowing it to one id leaves all the others governed by whatever else this policy says, or unmanaged if nothing does."
+            hint="A rule normally covers every one of them. Narrowing it to a single one leaves all the others governed by whatever else this policy says, or unmanaged if nothing does."
             htmlFor={`resource-id-${index}`}
           >
-            Which one
+            Limit to one {STATEMENT_TARGET_SINGULAR[target] ?? "resource"}{" "}
+            (optional)
           </FieldLabel>
           {options.length > 0 ? (
             <SearchableSelect
@@ -206,8 +208,9 @@ export function ControlPlanePicker({
             />
           )}
           <p className="text-muted-foreground text-xs">
-            Leave this empty to cover every entry under{" "}
-            {STATEMENT_TARGET_LABEL[target].toLowerCase()}.
+            Leave it empty and the rule covers every{" "}
+            {STATEMENT_TARGET_SINGULAR[target] ?? "resource"} in the
+            organization.
           </p>
         </div>
       )}

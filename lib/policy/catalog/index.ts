@@ -28,6 +28,7 @@ export {
   onlyCreates,
   STATEMENT_TARGET_HINT,
   STATEMENT_TARGET_LABEL,
+  STATEMENT_TARGET_SINGULAR,
   StatementTarget,
   supportsProjectScope,
   TARGET_RESOURCE_LIST,

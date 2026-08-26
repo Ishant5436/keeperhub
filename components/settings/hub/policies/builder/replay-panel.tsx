@@ -28,14 +28,19 @@ export function ReplayPanel({
     <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="font-medium text-sm">What this would have changed</p>
+          <p className="font-medium text-sm">
+            Try this policy against what already happened
+          </p>
           <p className="text-muted-foreground text-xs">
-            Re-decides the last week of recorded decisions against this
-            document. Nothing is charged against any limit and nothing is saved.
+            Takes the decisions this organization already made over the last
+            week and asks each one again, using the policy as it stands here.
+            Anything that would come out differently is listed below, so you can
+            see what turning this on would do before it does it. Nothing is
+            saved and no budget is charged.
           </p>
         </div>
         <Button disabled={running} onClick={run} size="sm" variant="outline">
-          {running ? "Replaying..." : "Replay"}
+          {running ? "Checking..." : "Check against history"}
         </Button>
       </div>
 
@@ -61,8 +66,10 @@ export function ReplayPanel({
 
           {result.evaluated === 0 && (
             <p className="text-muted-foreground text-xs">
-              There are no recorded decisions in this window, so there is
-              nothing to compare against yet.
+              Nothing to compare against yet. Decisions are recorded when a
+              policy governs an action, so this fills up once a policy is saved
+              and a workflow runs. On a new organization it stays empty until
+              then, which is expected rather than a failure.
             </p>
           )}
 
