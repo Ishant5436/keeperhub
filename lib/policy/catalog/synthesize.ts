@@ -163,9 +163,19 @@ export function draftCapabilities(draft: StatementDraft): string[] {
   if (draft.entries.length === 0) {
     return [...RISK_CLASS_CAPABILITIES[PolicyRiskClass.UNKNOWN]];
   }
+
   const capabilities = new Set<string>();
   for (const entry of draft.entries) {
     capabilities.add(entry.capability);
+    // The plain form as well. At decision time the semantic capability is read
+    // from the same catalog, and where that cannot be reached the request
+    // carries the plain one instead. Listing only the semantic form would let a
+    // rule stop matching the exact function it names, silently, because a
+    // lookup failed. The resource still pins which function this is about, so
+    // naming both widens the verb and not the reach.
+    for (const base of RISK_CLASS_CAPABILITIES[entry.riskClass]) {
+      capabilities.add(base);
+    }
   }
   return [...capabilities];
 }

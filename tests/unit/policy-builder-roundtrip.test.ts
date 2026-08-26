@@ -157,19 +157,26 @@ describe("managed scope", () => {
 });
 
 describe("capabilities a rule emits", () => {
+  const entries = catalogEntries().filter((e) => e.name === "supply");
+  const emitted = draftCapabilities({
+    sid: "r",
+    effect: PolicyEffect.ALLOW,
+    target: StatementTarget.ONCHAIN,
+    chainId: 8453,
+    address: POOL,
+    selectors: [entries[0].selector],
+    entries,
+  });
+
   it("names what the selected functions do, not a coarse class", () => {
-    const entries = catalogEntries().filter((e) => e.name === "supply");
-    expect(
-      draftCapabilities({
-        sid: "r",
-        effect: PolicyEffect.ALLOW,
-        target: StatementTarget.ONCHAIN,
-        chainId: 8453,
-        address: POOL,
-        selectors: [entries[0].selector],
-        entries,
-      })
-    ).toEqual(["protocol.lending.supply"]);
+    expect(emitted).toContain("protocol.lending.supply");
+  });
+
+  it("names the plain verb too, so a lookup failure cannot unmatch the rule", () => {
+    // The capability a request carries is read from the same catalog. Where
+    // that cannot be reached it carries the plain verb, and a rule listing only
+    // the semantic form would stop matching the function it names.
+    expect(emitted).toContain("contract.write");
   });
 });
 

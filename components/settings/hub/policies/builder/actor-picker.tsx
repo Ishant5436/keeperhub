@@ -98,16 +98,21 @@ export function ActorPicker({
       {scope === ActorScope.ROLES && (
         <div className="flex flex-wrap gap-4">
           {POLICY_ROLES.map((role) => (
-            <div className="flex items-center gap-2 text-xs" key={role}>
+            <button
+              aria-pressed={roles.includes(role)}
+              className="flex items-center gap-2 rounded-sm px-1 py-1 text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={role}
+              onClick={() => toggleRole(role)}
+              type="button"
+            >
               <Checkbox
+                aria-hidden
                 checked={roles.includes(role)}
-                id={`role-${index}-${role}`}
-                onCheckedChange={() => toggleRole(role)}
+                className="pointer-events-none"
+                tabIndex={-1}
               />
-              <label htmlFor={`role-${index}-${role}`}>
-                {ROLE_LABEL[role] ?? role}
-              </label>
-            </div>
+              {ROLE_LABEL[role] ?? role}
+            </button>
           ))}
           {roles.length === 0 && (
             <p className="text-muted-foreground text-xs">

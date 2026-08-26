@@ -243,7 +243,17 @@ export async function getContractCatalog(
   const normalized = { ...lookup, address };
 
   const row = await readRow(normalized.chainId, address);
+
+  // A contract the registry now describes must not keep serving a row that
+  // recorded not knowing it. That row was written when nothing could answer,
+  // and it would go on saying so for hours after a protocol is added, which
+  // reads as a contract with no functions rather than a stale answer.
+  const supersededByRegistry =
+    row?.source === CatalogEntrySource.UNVERIFIED &&
+    declaredContract(normalized.chainId, address) !== null;
+
   const current =
+    !supersededByRegistry &&
     row?.catalogVersion === CATALOG_SCHEMA_VERSION &&
     isFresh(row.fetchedAt, row.source);
 

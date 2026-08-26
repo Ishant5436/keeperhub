@@ -338,3 +338,66 @@ describe("carving functions out of a rule", () => {
     expect(decide(set, BAD, SUPPLY).outcome).toBe(PolicyOutcome.ALLOW);
   });
 });
+
+describe("a rule pinned to exact functions", () => {
+  /**
+   * The capability a request carries is read from the contract's catalog. Where
+   * that cannot be reached the request carries the plain form instead, and a
+   * rule listing only the semantic form would stop matching the very function
+   * it names, without anything appearing to be wrong.
+   */
+  const PINNED: PolicyDocument = {
+    schemaVersion: POLICY_SCHEMA_VERSION,
+    name: "Supply only, at this pool",
+    enforcement: "enforce",
+    manages: [SCOPE],
+    statements: [
+      {
+        sid: "supply-here",
+        effect: "allow",
+        capability: ["protocol.lending.supply", "contract.write"],
+        resource: [`kh:chain/${CHAIN}/contract/${CONTRACT}/fn/${SUPPLY}`],
+      },
+    ],
+  };
+
+  const set = compile(PINNED);
+
+  function withCapability(capability: string, selector: string) {
+    return evaluatePolicy(
+      {
+        principal: {
+          kind: PrincipalKind.MEMBER,
+          userId: "u",
+          organizationId: "o",
+          role: PolicyRole.OWNER,
+        },
+        organizationId: "o",
+        capability: capability as never,
+        facts: { ...facts(GOOD, selector), capability } as never,
+        checkpoint: PolicyCheckpoint.NODE,
+      },
+      set
+    );
+  }
+
+  it("matches when the catalog named the semantic capability", () => {
+    expect(withCapability("protocol.lending.supply", SUPPLY).outcome).toBe(
+      PolicyOutcome.ALLOW
+    );
+  });
+
+  it("still matches when the catalog could not be read", () => {
+    expect(withCapability("contract.write", SUPPLY).outcome).toBe(
+      PolicyOutcome.ALLOW
+    );
+  });
+
+  it("still refuses a function it does not name", () => {
+    // Naming both verbs widens what the rule recognises, not what it reaches:
+    // the resource is what says which function this is about.
+    expect(withCapability("contract.write", BORROW).outcome).toBe(
+      PolicyOutcome.DENY
+    );
+  });
+});

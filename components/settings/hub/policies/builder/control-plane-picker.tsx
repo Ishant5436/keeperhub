@@ -98,19 +98,24 @@ export function ControlPlanePicker({
         </FieldLabel>
         <div className="flex flex-col gap-1">
           {available.map((capability) => (
-            <div className="flex items-center gap-2 text-xs" key={capability}>
+            <button
+              aria-pressed={capabilities.includes(capability)}
+              className="flex w-full items-center gap-2 rounded-sm px-1 py-1 text-left text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={capability}
+              onClick={() => toggle(capability)}
+              type="button"
+            >
               <Checkbox
+                aria-hidden
                 checked={capabilities.includes(capability)}
-                id={`cap-${index}-${capability}`}
-                onCheckedChange={() => toggle(capability)}
+                className="pointer-events-none"
+                tabIndex={-1}
               />
-              <label htmlFor={`cap-${index}-${capability}`}>
-                {capabilityLabel(capability)}
-              </label>
+              <span>{capabilityLabel(capability)}</span>
               <span className="font-mono text-muted-foreground">
                 {capability}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       </div>

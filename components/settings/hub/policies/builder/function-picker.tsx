@@ -47,33 +47,37 @@ function FunctionRow({
   onToggle: (selector: string) => void;
 }): React.ReactElement {
   return (
-    <div className="flex items-start gap-2 py-1">
+    // The whole row is the target. A checkbox is a small thing to hit, and a
+    // row that responds to a click only on its box gives no sign that the rest
+    // of it is inert.
+    <button
+      aria-pressed={selected}
+      className="flex w-full items-start gap-2 rounded-sm px-1 py-1.5 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => onToggle(entry.selector)}
+      type="button"
+    >
       <Checkbox
-        aria-label={entry.signature}
+        aria-hidden
         checked={selected}
-        className="mt-0.5"
-        id={`fn-${entry.selector}`}
-        onCheckedChange={() => onToggle(entry.selector)}
+        className="pointer-events-none mt-0.5"
+        tabIndex={-1}
       />
       <div className="min-w-0 flex-1">
-        <label
-          className="flex flex-wrap items-center gap-2 font-mono text-xs"
-          htmlFor={`fn-${entry.selector}`}
-        >
+        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
           <span className="truncate">{entry.signature}</span>
           <span className="text-muted-foreground">{entry.selector}</span>
           {entry.isDispatcher && (
             <Badge variant="destructive">Forwards any call</Badge>
           )}
           {isCollision && <Badge variant="outline">Shared selector</Badge>}
-        </label>
+        </div>
         {entry.conditionKeys.length > 0 && (
           <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
             Can bind: {entry.conditionKeys.join(", ")}
           </p>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -185,18 +189,30 @@ export function FunctionPicker({
             className="rounded-md border border-border p-3"
             key={group.riskClass}
           >
-            <div className="flex items-center gap-2">
+            <button
+              aria-pressed={allSelected}
+              className="flex w-full items-center gap-2 rounded-sm px-1 py-1 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => toggleGroup(group.entries)}
+              type="button"
+            >
               <Checkbox
-                aria-label={`Select all ${group.label}`}
+                aria-hidden
                 checked={allSelected}
-                onCheckedChange={() => toggleGroup(group.entries)}
+                className="pointer-events-none"
+                tabIndex={-1}
               />
               <RiskBadge riskClass={group.riskClass} />
               <span className="text-muted-foreground text-xs">
                 {group.entries.length}
               </span>
-            </div>
-            <div className="mt-2 flex flex-col divide-y divide-border">
+              <span className="ml-auto text-muted-foreground text-xs">
+                {allSelected ? "Clear all" : "Select all"}
+              </span>
+            </button>
+            {/* No dividers: each row already reads as its own target through
+                its hover background, and a rule between rows cuts across that
+                background rather than separating anything. */}
+            <div className="mt-2 flex flex-col gap-0.5">
               {group.entries.map((entry) => (
                 <FunctionRow
                   entry={entry}
