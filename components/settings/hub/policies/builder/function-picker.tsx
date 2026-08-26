@@ -5,8 +5,23 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { SelectorCatalogEntry } from "@/lib/policy/catalog/types";
+import { SelectorScope } from "@/lib/policy/ui";
 import type { ContractCatalogResponse } from "../../hooks/use-contract-catalog";
 import { RiskBadge } from "./risk-badge";
+import { SearchableSelect } from "./searchable-select";
+
+const SCOPE_OPTIONS = [
+  {
+    value: SelectorScope.THESE,
+    label: "These functions",
+    hint: "The rule covers only what is ticked",
+  },
+  {
+    value: SelectorScope.EXCEPT,
+    label: "Every function except these",
+    hint: "The rule covers the whole contract, minus what is ticked",
+  },
+];
 
 function matchesQuery(entry: SelectorCatalogEntry, query: string): boolean {
   if (query.length === 0) {
@@ -72,11 +87,16 @@ function FunctionRow({
 export function FunctionPicker({
   catalog,
   selected,
+  scope,
   onChange,
+  onScopeChange,
 }: {
   catalog: ContractCatalogResponse;
   selected: readonly string[];
+  /** Whether the ticked functions are covered, or carved out of the rule. */
+  scope: SelectorScope;
   onChange: (selectors: string[]) => void;
+  onScopeChange: (next: SelectorScope) => void;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -126,6 +146,21 @@ export function FunctionPicker({
 
   return (
     <div className="flex flex-col gap-3">
+      <SearchableSelect
+        id="function-scope"
+        onChange={(next) => onScopeChange(next as SelectorScope)}
+        options={SCOPE_OPTIONS}
+        value={scope}
+      />
+
+      {scope === SelectorScope.EXCEPT && (
+        <p className="text-muted-foreground text-xs">
+          The rule covers the whole contract, with the ticked functions taken
+          out of it. On a refusal that is how one function is carved out: a
+          permission written beside the refusal would not reopen it.
+        </p>
+      )}
+
       <Input
         aria-label="Search functions"
         onChange={(e) => setQuery(e.target.value)}

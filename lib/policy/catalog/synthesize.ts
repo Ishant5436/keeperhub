@@ -58,6 +58,8 @@ export type StatementDraft = {
   counterparties?: readonly string[];
   /** Whether those counterparties are the only ones allowed, or the excluded ones. */
   counterpartyScope?: "any" | "only" | "except";
+  /** Whether the selectors are the functions covered, or the ones carved out. */
+  selectorScope?: "these" | "except";
   condition?: PolicyConditionMap;
   limit?: readonly PolicyLimit[];
 };
@@ -132,7 +134,10 @@ export function draftResources(draft: StatementDraft): string[] {
   if (draft.address.length === 0) {
     return [chainWideArn(draft.chainId)];
   }
-  if (draft.selectors.length === 0) {
+  // Carving functions out keeps the resource contract-wide: the rule is about
+  // the whole contract, with the named functions removed by a condition. Pinning
+  // the resource to them would say the opposite.
+  if (draft.selectors.length === 0 || draft.selectorScope === "except") {
     return [contractWideArn(draft.chainId, draft.address)];
   }
   return draft.selectors.map((selector) =>
@@ -179,6 +184,9 @@ export function toStatement(draft: StatementDraft): PolicyStatement {
         ? { notIn: [...draft.counterparties] }
         : { in: [...draft.counterparties] };
   }
+  if (draft.selectorScope === "except" && draft.selectors.length > 0) {
+    condition[PolicyConditionKey.SELECTOR] = { notIn: [...draft.selectors] };
+  }
   if (draft.projectIds?.length) {
     condition[PolicyConditionKey.PROJECT_ID] = { in: [...draft.projectIds] };
   }
@@ -224,6 +232,7 @@ export type ParsedStatement = {
   assets: string[];
   counterparties: string[];
   counterpartyScope: "any" | "only" | "except";
+  selectorScope: "these" | "except";
   /** Ceiling per action, as a decimal string. Empty when unset. */
   maxUsd: string;
   /** Rolling daily ceiling, as a decimal string. Empty when unset. */
@@ -329,6 +338,7 @@ export function fromStatement(
       assets: [],
       counterparties: [],
       counterpartyScope: "any",
+      selectorScope: "these",
       maxUsd: readCeiling(statement.condition?.[PolicyConditionKey.USD_VALUE]),
       dailyUsd: "",
     };
@@ -339,9 +349,17 @@ export function fromStatement(
   );
   const described = describeArn(first);
 
-  const selectors = resources
-    .map((resource) => describeArn(resource).selector)
-    .filter((selector): selector is string => selector !== null);
+  // A carve-out lives in the condition, not the resource, so the functions are
+  // read back from there when one is present.
+  const carved = readStringList(
+    statement.condition?.[PolicyConditionKey.SELECTOR]
+  );
+  const selectors =
+    carved.length > 0
+      ? carved
+      : resources
+          .map((resource) => describeArn(resource).selector)
+          .filter((selector): selector is string => selector !== null);
 
   const dailyLimit = statement.limit?.find(
     (limit) => limit.metric === "usd" && limit.window === "1d"
@@ -367,6 +385,7 @@ export function fromStatement(
     assets: readStringList(statement.condition?.[PolicyConditionKey.ASSET]),
     counterparties: counterparty.values,
     counterpartyScope: counterparty.scope,
+    selectorScope: carved.length > 0 ? "except" : "these",
     maxUsd: readCeiling(statement.condition?.[PolicyConditionKey.USD_VALUE]),
     dailyUsd: dailyLimit?.max ?? "",
   };
@@ -426,6 +445,7 @@ const BUILDER_CONDITION_KEYS: readonly string[] = [
   PolicyConditionKey.WORKFLOW_TAG,
   PolicyConditionKey.ACTOR_ROLE,
   PolicyConditionKey.ACTOR_ID,
+  PolicyConditionKey.SELECTOR,
 ];
 
 /** The only limit shape the builder can edit: a rolling daily dollar cap. */

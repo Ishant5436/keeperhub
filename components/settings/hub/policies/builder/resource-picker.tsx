@@ -92,6 +92,7 @@ export function ResourcePicker({
             onSelect={(option) => {
               setSource(option.key);
               onChange({
+                ...value,
                 chainId: option.chainId,
                 address: option.address,
                 protocolSlug: option.protocolSlug,
@@ -161,6 +162,10 @@ export function ResourcePicker({
         <FunctionPicker
           catalog={contract.catalog}
           onChange={(selectors) => onChange({ ...value, selectors })}
+          onScopeChange={(selectorScope) =>
+            onChange({ ...value, selectorScope })
+          }
+          scope={value.selectorScope}
           selected={value.selectors}
         />
       )}

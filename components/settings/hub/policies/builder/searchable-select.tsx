@@ -78,6 +78,7 @@ export function SearchableSelect({
   searchPlaceholder,
   className,
   onChange,
+  customOption,
 }: {
   id?: string;
   options: readonly SearchableOption[];
@@ -86,18 +87,35 @@ export function SearchableSelect({
   searchPlaceholder?: string;
   className?: string;
   onChange: (next: string) => void;
+  /**
+   * Turns what was typed into a choosable option when it is not in the list.
+   *
+   * Lets one control both pick and accept: a value nobody has bookmarked is
+   * still usable, without a second field or a mode to switch into.
+   */
+  customOption?: (query: string) => SearchableOption | null;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const debounced = useDebounce(query, SEARCH_DELAY_MS);
 
-  const filtered = useMemo(
-    () => options.filter((option) => matches(option, debounced)),
-    [options, debounced]
-  );
+  const filtered = useMemo(() => {
+    const hits = options.filter((option) => matches(option, debounced));
+    const custom = customOption?.(debounced);
+    // Offered only when it is not already in the list, so the same address does
+    // not appear twice under two names.
+    if (custom && !options.some((option) => option.value === custom.value)) {
+      return [custom, ...hits];
+    }
+    return hits;
+  }, [options, debounced, customOption]);
   const groups = useMemo(() => groupOptions(filtered), [filtered]);
-  const selected = options.find((option) => option.value === value);
-  const searchable = options.length >= SEARCH_THRESHOLD;
+  const selected =
+    options.find((option) => option.value === value) ??
+    (value ? { value, label: value } : undefined);
+  // A control that accepts a typed value always needs its box, however short
+  // the list is: the box is how the value is entered, not only how it is found.
+  const searchable = options.length >= SEARCH_THRESHOLD || customOption != null;
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
@@ -131,7 +149,11 @@ export function SearchableSelect({
             />
           )}
           <CommandList>
-            <CommandEmpty>Nothing matches that.</CommandEmpty>
+            <CommandEmpty>
+              {customOption
+                ? "Type a full address to use one that is not saved."
+                : "Nothing matches that."}
+            </CommandEmpty>
             {groups.map(([group, entries]) => {
               const items = entries.map((option) => (
                 <CommandItem

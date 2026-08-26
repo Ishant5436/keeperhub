@@ -48,12 +48,28 @@ export const CounterpartyScope = {
 export type CounterpartyScope =
   (typeof CounterpartyScope)[keyof typeof CounterpartyScope];
 
+/**
+ * Whether the chosen functions are the ones a rule covers, or the ones it
+ * leaves out.
+ *
+ * "Refuse everything here except withdraw" is a different rule from "refuse
+ * withdraw", and without this the second is the only one the form can write.
+ */
+export const SelectorScope = {
+  THESE: "these",
+  EXCEPT: "except",
+} as const;
+
+export type SelectorScope = (typeof SelectorScope)[keyof typeof SelectorScope];
+
 export type ResourceSelection = {
   chainId: number | null;
   address: string;
   protocolSlug?: string;
   /** Selectors chosen in the picker. Empty means the whole contract. */
   selectors: string[];
+  /** Whether those selectors are what the rule covers, or what it carves out. */
+  selectorScope: SelectorScope;
 };
 
 /** One rule, as the form holds it. */
@@ -92,7 +108,12 @@ export function emptyStatement(index: number): StatementFormValue {
     actorRoles: [],
     actorIds: [],
     actorScope: ActorScope.ANYONE,
-    resource: { chainId: null, address: "", selectors: [] },
+    resource: {
+      chainId: null,
+      address: "",
+      selectors: [],
+      selectorScope: SelectorScope.THESE,
+    },
     assets: [],
     counterparties: [],
     counterpartyScope: CounterpartyScope.ANY,
@@ -172,6 +193,7 @@ export function toDraft(
     assets: value.assets,
     counterparties: value.counterparties,
     counterpartyScope: value.counterpartyScope,
+    selectorScope: value.resource.selectorScope,
     condition:
       value.maxUsd.trim().length > 0
         ? { usdValue: { lte: value.maxUsd.trim() } }
@@ -211,6 +233,7 @@ export function initialStatements(
         chainId: value.chainId,
         address: value.address,
         selectors: value.selectors,
+        selectorScope: value.selectorScope as SelectorScope,
       },
       assets: value.assets,
       counterparties: value.counterparties,

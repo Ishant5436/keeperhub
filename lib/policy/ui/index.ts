@@ -33,6 +33,7 @@ export {
   emptyStatement,
   initialStatements,
   type ResourceSelection,
+  SelectorScope,
   type StatementFormValue,
   scopeOf,
   selectedEntries,

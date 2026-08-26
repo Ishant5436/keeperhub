@@ -294,3 +294,47 @@ describe("carving one method out of a prohibition", () => {
     expect(decide(beside, BAD, SUPPLY).outcome).toBe(PolicyOutcome.DENY);
   });
 });
+
+describe("carving functions out of a rule", () => {
+  /** Refuse the whole contract, except one function. */
+  const DENY_EXCEPT_SUPPLY: PolicyDocument = {
+    schemaVersion: POLICY_SCHEMA_VERSION,
+    name: "Refuse this contract, except supply",
+    enforcement: "enforce",
+    manages: [SCOPE],
+    statements: [
+      {
+        sid: "deny-all-but-supply",
+        effect: "deny",
+        capability: ["contract.write"],
+        resource: [RESOURCE],
+        condition: { selector: { notIn: [SUPPLY] } },
+      },
+      {
+        sid: "allow-in-scope",
+        effect: "allow",
+        capability: ["contract.write"],
+        resource: [RESOURCE],
+      },
+    ],
+  };
+
+  const set = compile(DENY_EXCEPT_SUPPLY);
+
+  it("permits the carved-out function", () => {
+    expect(decide(set, GOOD, SUPPLY).outcome).toBe(PolicyOutcome.ALLOW);
+  });
+
+  it("refuses every other function on the contract", () => {
+    const decision = decide(set, GOOD, BORROW);
+    expect(decision.outcome).toBe(PolicyOutcome.DENY);
+    expect(decision.reason).toBe("explicit_deny");
+  });
+
+  it("refuses regardless of who the counterparty is", () => {
+    // The carve-out is about the function, so it does not quietly become a rule
+    // about addresses.
+    expect(decide(set, BAD, BORROW).outcome).toBe(PolicyOutcome.DENY);
+    expect(decide(set, BAD, SUPPLY).outcome).toBe(PolicyOutcome.ALLOW);
+  });
+});

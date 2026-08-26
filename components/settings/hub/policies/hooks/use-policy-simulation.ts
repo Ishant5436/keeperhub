@@ -23,6 +23,7 @@ import {
   type PolicyOption,
   resourceOptions,
   roleFromOption,
+  SelectorScope,
   USD_DENOMINATION,
 } from "@/lib/policy/ui";
 import { useSettingsContext } from "../../settings-context";
@@ -88,6 +89,7 @@ export function usePolicySimulation(): PolicySimulationState {
     chainId: null,
     address: "",
     selectors: [],
+    selectorScope: SelectorScope.THESE,
   });
   const [amount, setAmount] = useState("");
   const [denomination, setDenomination] = useState(NATIVE_DENOMINATION);
