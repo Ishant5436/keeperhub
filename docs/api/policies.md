@@ -164,7 +164,7 @@ refuses, and a deny overrides even an owner's role.
 
 ## Conditions
 
-Conditions are combined with AND. For OR, add another statement.
+Conditions in a statement are combined with AND, which is what most rules want.
 
 | Key | Matches on |
 |---|---|
@@ -181,6 +181,34 @@ Conditions are combined with AND. For OR, add another statement.
 
 Operators: `eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `in`, `notIn`, `matches`,
 `inCidr`, `notInCidr`, `inDomain`, `notInDomain`.
+
+### Either-or
+
+For a genuine either-or, group the alternatives with `anyOf` rather than
+splitting the rule into two statements that then drift apart.
+
+```json
+"condition": {
+  "asset": { "in": ["kh:asset/class/stablecoin"] },
+  "anyOf": [
+    { "chainId": { "eq": 1 } },
+    { "chainId": { "eq": 8453 } }
+  ]
+}
+```
+
+Everything outside the group still applies, so this reads as "a stablecoin, on
+either of these chains". `allOf` groups conditions that must all hold, which is
+only useful nested inside an `anyOf`. Groups may contain groups, up to five
+deep.
+
+A group follows the same fail-closed rule as anything else. An `anyOf` matches
+when a branch definitely matches; if none does and any branch could not be
+determined, the group is undetermined, which an `allow` cannot be satisfied by
+and a `deny` treats as a hit.
+
+For negation use the operators, `neq`, `notIn`, `notInCidr` and `notInDomain`,
+rather than a group.
 
 A fact is known, absent, or undetermined. When a condition cannot be
 determined, an `allow` does not match and a `deny` does. You cannot permit
@@ -321,12 +349,27 @@ readable form:
 The last two are refusals by design. Policy fails closed, including on its own
 errors, so a fault can never become permission.
 
+## Grants
+
+A policy says what may be done. A grant says what a workflow can reach at all,
+which is a different question: without one there is nothing to call, so there
+is no check to forget.
+
+Grants are derived from what a workflow is built out of and issued per
+workflow. A workflow holding no grants is unconstrained, which is what lets an
+organization adopt them gradually, and a workflow holding grants is confined to
+them.
+
+A refusal for want of a grant reports `not_granted` and is not a policy
+refusal. The fix is to issue the grant, not to edit a rule.
+
+A workflow whose target is written as a reference to another node's output
+cannot be pinned in advance, so it is left ungranted rather than given a guess.
+
 ## Not yet supported
 
 - Postconditions can be written into a document but are not yet checked after
   an action completes.
-- Resource grants are recorded but do not yet constrain what a workflow can
-  reach.
-- Tempo payments and the agentic wallet are not yet covered by policy.
-- Nested condition groups. Each statement is a flat set of AND conditions; for
-  OR, add another statement.
+- An agentic wallet is governed only once it is linked, because linking is what
+  records the organization answerable for it. One provisioned and never linked
+  belongs to nobody, so no rule reaches it.
