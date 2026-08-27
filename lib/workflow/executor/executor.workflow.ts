@@ -98,6 +98,7 @@ import { ARRAY_SOURCE_RE } from "@/lib/workflow/nodes/for-each/utils";
 import { triggerStep } from "@/lib/workflow/nodes/trigger/step";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
 import { splitTemplateRef } from "@/lib/workflow/template-ref";
+import { triggerTypeOf } from "@/lib/workflow/trigger-type";
 import { LEGACY_ACTION_MAPPINGS } from "@/plugins/legacy-mappings";
 
 // System actions that don't have plugins - maps to module import functions.
@@ -2008,24 +2009,10 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     "trigger nodes"
   );
 
-  // Detect trigger type for step context (gas strategy uses this for multiplier selection)
-  const workflowTriggerType: string = (() => {
-    const triggerNode = nodes.find((n) => n.data.type === "trigger");
-    if (!triggerNode) {
-      return "manual";
-    }
-    const tt = triggerNode.data.config?.triggerType as string | undefined;
-    if (tt === "Webhook") {
-      return "webhook";
-    }
-    if (tt === "Scheduled" || tt === "Schedule") {
-      return "scheduled";
-    }
-    if (tt === "Event") {
-      return "event";
-    }
-    return "manual";
-  })();
+  // What started this run, shared with the metrics label and with the policy
+  // check below. Undefined when the trigger is one nothing recognises, which
+  // leaves the policy fact absent rather than claiming a person did it.
+  const workflowTriggerType = triggerTypeOf(nodes);
 
   // Helper to get a meaningful node name
   function getNodeName(node: WorkflowNode): string {
