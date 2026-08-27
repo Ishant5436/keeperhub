@@ -34,6 +34,7 @@ export type CompatibilitySeverity =
 
 export const CompatibilityCode = {
   SELECTOR_NOT_ON_CONTRACT: "selector-not-on-contract",
+  CAPABILITY_MISMATCH: "capability-mismatch",
   RESOURCE_MATCHES_NO_SELECTOR: "resource-matches-no-selector",
   IMPLEMENTATION_NOT_PROXY: "implementation-not-proxy",
   CONDITION_BINDS_NOTHING: "condition-binds-nothing",
@@ -305,6 +306,58 @@ function checkLimits(
 }
 
 /**
+ * A statement whose verb does not match the functions it names.
+ *
+ * The capability is a gate: a statement whose capability list does not include
+ * the one a request carries never matches, whatever its resource says. So a
+ * rule can name exactly the right contract and the right function and still do
+ * nothing, with nothing about it looking wrong.
+ *
+ * Which way that fails depends on the effect, and neither is good. A permission
+ * that never matches refuses work the author meant to allow. A prohibition that
+ * never matches is inert, and is only covered at all because a claimed scope
+ * refuses by default.
+ */
+function checkCapabilities(
+  statement: PolicyStatement,
+  entries: readonly SelectorCatalogEntry[]
+): CompatibilityFinding[] {
+  if (entries.length === 0 || statement.capability.length === 0) {
+    return [];
+  }
+
+  const named = new Set(statement.capability);
+  const unreachable = entries.filter((entry) => !named.has(entry.capability));
+  if (unreachable.length === 0 || unreachable.length < entries.length) {
+    // A partial mismatch is covered by the per-function report below; this is
+    // for the case where the statement can match none of them.
+    return unreachable.length === 0
+      ? []
+      : [
+          {
+            code: CompatibilityCode.CAPABILITY_MISMATCH,
+            severity: CompatibilitySeverity.WARNING,
+            sid: statement.sid,
+            field: "capability",
+            subject: unreachable[0]?.signature,
+            message: `${unreachable.length} of the selected functions are not covered by this rule's action, so it does not apply to them. Add ${unreachable[0]?.capability} to cover them.`,
+          },
+        ];
+  }
+
+  return [
+    {
+      code: CompatibilityCode.CAPABILITY_MISMATCH,
+      severity: CompatibilitySeverity.ERROR,
+      sid: statement.sid,
+      field: "capability",
+      subject: entries[0]?.signature,
+      message: `This rule's action does not cover any function it names, so it never applies. The functions selected are ${[...new Set(entries.map((e) => e.capability))].join(", ")}.`,
+    },
+  ];
+}
+
+/**
  * An allow over functions that move value, with nothing capping how much.
  *
  * Legal and enforceable, so not an error, but it is the difference between "may
@@ -353,6 +406,7 @@ export function checkStatement(
   findings.push(...checkChainConsistency(statement, resources));
 
   const entries = resources.flatMap((resource) => selectedEntries(resource));
+  findings.push(...checkCapabilities(statement, entries));
   findings.push(...checkConditions(statement, entries));
   findings.push(...checkLimits(statement, entries));
   findings.push(...checkUnlimitedValue(statement, entries));
