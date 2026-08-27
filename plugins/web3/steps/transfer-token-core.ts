@@ -16,6 +16,7 @@ import {
   supportedTokens,
   workflowExecutions,
 } from "@/lib/db/schema";
+import { checkStablecoinTransferAmount } from "@/lib/execute/stablecoin-cap";
 import { getTransactionUrl } from "@/lib/explorer";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 import {
@@ -25,7 +26,7 @@ import {
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import { rpcRelayErrorClass } from "@/lib/rpc/providers";
-import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
+import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { getErrorMessage } from "@/lib/utils";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -309,6 +310,28 @@ export async function transferTokenCore(
   }
 
   const { organizationId, userId } = orgCtx;
+
+  // Stablecoin ceiling. An ERC-20 transfer carries a native value of 0, so the
+  // daily value cap reserves nothing for it and cannot see it at all. Checked
+  // here rather than in the calling route so every entrance is covered: the
+  // direct transfer API, the node-execution API, and the workflow step.
+  const stablecoinCap = await checkStablecoinTransferAmount({
+    organizationId,
+    chainId,
+    tokenAddress,
+    amount,
+    context: "transfer-token",
+  });
+  if (stablecoinCap.kind !== "allowed") {
+    // Same classification as writeContractCore's identical refusal. Without it
+    // the two cores file the same policy denial under different fault domains
+    // in the metrics, so the deny rate cannot be read across them.
+    return {
+      success: false,
+      error: stablecoinCap.error,
+      errorClass: ExecutionErrorType.USER,
+    };
+  }
 
   // Resolve RPC config (with failover)
   let rpcUrl: string;

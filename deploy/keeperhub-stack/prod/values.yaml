@@ -269,6 +269,18 @@ app:
     EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS:
       type: kv
       value: "500000000"
+    # Ceiling on a single stablecoin outflow, in micro-USD (6 decimals). Per
+    # transaction, not per day. 100 USD.
+    EXECUTE_DEFAULT_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "100000000"
+    # Ceiling on the TOTAL stablecoin outflow of one transaction, in micro-USD.
+    # Applies alongside the per-call figure, not instead of it: a batch payout
+    # packs up to 50 recipients into a single transaction, so the per-call
+    # figure alone would cap a payroll run at 2 USD a head. 2,000 USD.
+    EXECUTE_DEFAULT_BATCH_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "2000000000"
     METRICS_COLLECTOR:
       type: kv
       value: "prometheus"
@@ -987,6 +999,18 @@ executor:
     EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS:
       type: kv
       value: "500000000"
+    # Ceiling on a single stablecoin outflow, in micro-USD (6 decimals). Per
+    # transaction, not per day. 100 USD.
+    EXECUTE_DEFAULT_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "100000000"
+    # Ceiling on the TOTAL stablecoin outflow of one transaction, in micro-USD.
+    # Applies alongside the per-call figure, not instead of it: a batch payout
+    # packs up to 50 recipients into a single transaction, so the per-call
+    # figure alone would cap a payroll run at 2 USD a head. 2,000 USD.
+    EXECUTE_DEFAULT_BATCH_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "2000000000"
     JOB_TTL_SECONDS:
       type: kv
       value: "300"

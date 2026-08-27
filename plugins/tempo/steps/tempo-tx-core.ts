@@ -32,6 +32,7 @@ import { TxEnvelopeTempo } from "ox/tempo";
 import { encodeFunctionData, type Hex, toFunctionSelector } from "viem";
 import { Abis } from "viem/tempo";
 import { toChecksumAddress } from "@/lib/address-utils";
+import { checkStablecoinCalldataBatch } from "@/lib/execute/stablecoin-cap";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
@@ -415,6 +416,24 @@ export async function signTempoTx(
     throw new Error(
       "Tempo transactions require an EOA wallet. Safe accounts are not supported on Tempo; disable Safe mode for this workflow."
     );
+  }
+
+  // Stablecoin ceiling. Tempo moves TIP-20 stablecoins as its primary asset and
+  // carries no native value at all, so the daily value cap never sees a Tempo
+  // send. Every Tempo write is signed here, so one check covers transfer-with-
+  // memo, batch payouts, held payments and swaps.
+  // Batched, not per call. signTempoTx carries every call of a batch payout in
+  // one 0x76 transaction, so checking each in isolation let ten entries of 99
+  // USD each clear a 100 USD ceiling while the transaction moved 990 USD, with
+  // nothing bounding the entry count.
+  const stablecoinDecision = await checkStablecoinCalldataBatch({
+    organizationId,
+    chainId,
+    context: "tempo",
+    calls,
+  });
+  if (stablecoinDecision.kind !== "allowed") {
+    throw new Error(stablecoinDecision.error);
   }
 
   const wallet = await getOrganizationWallet(organizationId);

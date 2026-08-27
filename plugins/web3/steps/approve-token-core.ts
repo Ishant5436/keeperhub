@@ -9,6 +9,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { ethers } from "ethers";
+import { checkStablecoinContractCall } from "@/lib/execute/stablecoin-cap";
 import ERC20_ABI from "@/lib/contracts/abis/erc20.json";
 import { db } from "@/lib/db";
 import { explorerConfigs, workflowExecutions } from "@/lib/db/schema";
@@ -21,7 +22,7 @@ import {
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import { rpcRelayErrorClass } from "@/lib/rpc/providers";
-import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
+import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import { getErrorMessage } from "@/lib/utils";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -327,6 +328,28 @@ export async function approveTokenCore(
         approvedAmountDisplay = amount;
       }
 
+      // Stablecoin ceiling. This step calls ERC-20 approve directly, so it
+      // never passes through writeContractCore where the ceiling is applied --
+      // it was the one unbounded-allowance path the cap did not cover, and the
+      // cheapest complete drain a leaked key has: grant the allowance here,
+      // call transferFrom off platform afterwards, where nothing checks.
+      const stablecoinCap = await checkStablecoinContractCall({
+        organizationId,
+        chainId,
+        contractAddress: tokenAddress,
+        functionName: "approve",
+        inputTypes: ["address", "uint256"],
+        args: [spenderAddress, amountRaw],
+        context: "approve-token",
+      });
+      if (stablecoinCap.kind !== "allowed") {
+        return {
+          success: false,
+          error: stablecoinCap.error,
+          errorClass: ExecutionErrorType.USER,
+        };
+      }
+
       const sponsoredResult = await executeSponsoredContractTransaction({
         organizationId,
         executionId: _context.executionId ?? "direct-execution",
@@ -462,6 +485,26 @@ export async function approveTokenCore(
             error: `Invalid amount format: ${getErrorMessage(error)}`,
           };
         }
+      }
+
+      // Same ceiling as the sponsored branch above. Both reach ERC-20 approve
+      // directly without passing through writeContractCore, so each needs the
+      // check on its own: this is the Safe/EOA path.
+      const stablecoinCap = await checkStablecoinContractCall({
+        organizationId,
+        chainId,
+        contractAddress: tokenAddress,
+        functionName: "approve",
+        inputTypes: ["address", "uint256"],
+        args: [spenderAddress, amountRaw],
+        context: "approve-token",
+      });
+      if (stablecoinCap.kind !== "allowed") {
+        return {
+          success: false,
+          error: stablecoinCap.error,
+          errorClass: ExecutionErrorType.USER,
+        };
       }
 
       let receipt: Awaited<ReturnType<typeof adapter.executeContractCall>>;

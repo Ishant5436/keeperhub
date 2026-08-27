@@ -1514,7 +1514,7 @@ export function registerTools(
 
   server.tool(
     "list_integrations",
-    "List all configured integrations (credentials) for the organization, each with its id, name, and type. These are required for actions like Discord notifications, Sendgrid emails, or web3 writes. A web3 integration's entry already includes its checksummed wallet address; config is omitted -- call get_wallet_integration with an entry's id for its decrypted config.",
+    "List all configured integrations (credentials) for the organization, each with its id, name, and type. These are required for actions like Discord notifications, Sendgrid emails, or web3 writes. A web3 integration's entry already includes its checksummed wallet address. Credential values are never returned by any endpoint; reference an integration by its id and the platform supplies the credential at execution time.",
     {},
     { title: "List Integrations", readOnlyHint: true, destructiveHint: false },
     scoped("list_integrations", async (_args) =>
@@ -1534,7 +1534,7 @@ export function registerTools(
 
   server.tool(
     "get_wallet_integration",
-    "Get details for a specific wallet integration, including its decrypted config -- not present on list_integrations' entries, which already carry the checksummed wallet address. Call list_integrations first to find the integrationId; its response already tells you which integrations are type 'web3'. Required for web3 write actions like fund transfers and contract writes.",
+    "Get details for a specific wallet integration. Call list_integrations first to find the integrationId; its response already tells you which integrations are type 'web3'. Required for web3 write actions like fund transfers and contract writes. Credential values are never included in the response.",
     {
       integrationId: z
         .string()
