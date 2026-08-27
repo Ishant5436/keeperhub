@@ -13,8 +13,11 @@ import "server-only";
  */
 
 import { NextResponse } from "next/server";
+import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { buildAssetArn, buildContractCallArn } from "./arn";
 import type { Capability } from "./capabilities";
+import { resolveCallCapability } from "./catalog/call-capability";
+import { capabilityForAction, extractFacts } from "./facts";
 import { enforcePolicy } from "./guard";
 import {
   FactProvenance,
@@ -23,6 +26,7 @@ import {
   PolicyRole,
   PrincipalKind,
 } from "./index";
+import { withUsdValue } from "./price";
 import type { PolicyFacts } from "./types";
 
 const UNKNOWN = { state: FactState.UNKNOWN } as const;
@@ -141,6 +145,81 @@ export async function enforceDirectExecutionPolicy(
     organizationId: check.organizationId,
     capability: check.capability,
     facts: directFacts(check),
+    checkpoint: PolicyCheckpoint.NODE,
+    grantSubject: { kind: "principal", id: check.apiKeyId },
+  });
+
+  if (!verdict.blocked) {
+    return null;
+  }
+
+  return NextResponse.json(
+    {
+      error: verdict.decision.message ?? "Blocked by an organization policy",
+      code: "policy_denied",
+      reason: verdict.decision.reason,
+      retryable: false,
+    },
+    { status: 403 }
+  );
+}
+
+/**
+ * The policy check for a direct call that runs a node action.
+ *
+ * `/api/execute/node` and `/api/execute/check-and-execute` take an action type
+ * and a config, which is what a workflow node is, so they reuse the node's own
+ * extraction rather than a second, thinner one. That matters most for reads: a
+ * read never reaches a signer, so the signing check cannot stand behind it, and
+ * before this the only read anybody governed was one inside a workflow.
+ *
+ * The chain is priced and the selector resolved exactly as the node check does
+ * it, so the same rule reaches the same verdict whichever door the call came
+ * through.
+ */
+export async function enforceDirectNodePolicy(check: {
+  organizationId: string;
+  apiKeyId: string;
+  actionType: string;
+  config: Record<string, unknown>;
+}): Promise<NextResponse | null> {
+  const capability = capabilityForAction(check.actionType);
+  if (!capability) {
+    // No capability mapping yet, so no rule can name it. The registry test is
+    // what stops a write-capable action sitting here unnoticed.
+    return null;
+  }
+
+  const network = check.config.network;
+  const chainId =
+    typeof network === "string" && network.trim() !== ""
+      ? (getChainIdFromNetwork(network) ?? undefined)
+      : undefined;
+
+  const extracted = extractFacts({
+    actionType: check.actionType,
+    config: check.config,
+    chainId,
+    triggerType: "direct",
+  });
+  const facts = await withUsdValue(extracted, chainId);
+
+  const effectiveCapability = await resolveCallCapability({
+    chainId,
+    facts,
+    fallback: capability,
+  });
+
+  const verdict = await enforcePolicy({
+    principal: {
+      kind: PrincipalKind.API_KEY,
+      apiKeyId: check.apiKeyId,
+      organizationId: check.organizationId,
+      role: PolicyRole.MEMBER,
+    },
+    organizationId: check.organizationId,
+    capability: effectiveCapability,
+    facts,
     checkpoint: PolicyCheckpoint.NODE,
     grantSubject: { kind: "principal", id: check.apiKeyId },
   });
