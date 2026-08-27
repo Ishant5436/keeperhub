@@ -1042,35 +1042,7 @@
       "idx": 148,
       "version": "7",
       "when": 1787339408362,
-      "tag": "0148_keep_1080_policy_engine",
-      "breakpoints": true
-    },
-    {
-      "idx": 149,
-      "version": "7",
-      "when": 1787425808362,
-      "tag": "0149_keep_1080_contract_catalog",
-      "breakpoints": true
-    },
-    {
-      "idx": 150,
-      "version": "7",
-      "when": 1787512208362,
-      "tag": "0150_policy_limit_ledger",
-      "breakpoints": true
-    },
-    {
-      "idx": 151,
-      "version": "7",
-      "when": 1787598608362,
-      "tag": "0151_agentic_wallet_organization",
-      "breakpoints": true
-    },
-    {
-      "idx": 152,
-      "version": "7",
-      "when": 1787872269760,
-      "tag": "0152_policy_snapshot_catchup",
+      "tag": "0148_keep_1080_organization_policies",
       "breakpoints": true
     }
   ]

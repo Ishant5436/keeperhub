@@ -100,6 +100,18 @@ describe("the check every signature passes through", () => {
     expect(enforcePolicy).not.toHaveBeenCalled();
   });
 
+  it("does not crash the signer when the receipt cannot be read", async () => {
+    // An unreadable receipt is not a receipt. Letting the error escape would
+    // turn an infrastructure problem into a crash inside the signer, where the
+    // point is that every outcome is a decision. It falls through to the full
+    // check, which refuses on its own if the store is unreachable.
+    consumeReceiptRows.mockRejectedValue(new Error("database is down"));
+    await expect(
+      assertSigningAllowed(CONTEXT, { to: TARGET, data: TRANSFER })
+    ).resolves.toBeUndefined();
+    expect(enforcePolicy).toHaveBeenCalledTimes(1);
+  });
+
   it("treats a missing value as zero rather than as undetermined", async () => {
     await assertSigningAllowed(CONTEXT, { to: TARGET, data: TRANSFER });
     const [{ facts }] = enforcePolicy.mock.calls[0] as [

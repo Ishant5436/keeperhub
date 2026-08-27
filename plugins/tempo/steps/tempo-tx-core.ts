@@ -413,18 +413,6 @@ export async function signTempoTx(
     throw new Error("Tempo transaction must contain at least one call");
   }
 
-  // Every call this envelope carries is judged before anything is signed.
-  // Tempo builds and signs its own envelope rather than going through an
-  // ethers signer, so the guard that stands behind every other write does not
-  // stand behind this one unless it is called here. A call the node check
-  // already cleared carries a receipt and is not charged twice.
-  for (const call of calls) {
-    await assertSigningAllowed(
-      { organizationId, chainId },
-      { to: call.to, data: call.data, value: BigInt(0) }
-    );
-  }
-
   const signerMode = await resolveSignerMode(organizationId, chainId);
   if (signerMode.kind !== SIGNER_MODE.EOA) {
     throw new Error(
@@ -448,6 +436,22 @@ export async function signTempoTx(
   });
   if (stablecoinDecision.kind !== "allowed") {
     throw new Error(stablecoinDecision.error);
+  }
+
+  // Every call this envelope carries is judged before anything is signed.
+  // Tempo builds and signs its own envelope rather than going through an
+  // ethers signer, so the guard that stands behind every other write does not
+  // stand behind this one unless it is called here.
+  //
+  // After the ceiling above, which is a fixed cap that needs no policy to
+  // decide, and before anything is signed, which is the only ordering that
+  // matters. A call the node check already cleared carries a receipt and is
+  // not charged twice.
+  for (const call of calls) {
+    await assertSigningAllowed(
+      { organizationId, chainId },
+      { to: call.to, data: call.data, value: BigInt(0) }
+    );
   }
 
   const wallet = await getOrganizationWallet(organizationId);

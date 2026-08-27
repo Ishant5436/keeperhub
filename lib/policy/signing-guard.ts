@@ -58,18 +58,28 @@ async function consumeReceipt(
   organizationId: string,
   digest: string
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ id: policyDecisions.id })
-    .from(policyDecisions)
-    .where(
-      and(
-        eq(policyDecisions.organizationId, organizationId),
-        eq(policyDecisions.intentDigest, digest),
-        eq(policyDecisions.receiptStatus, "pending"),
-        gt(policyDecisions.receiptExpiresAt, new Date())
+  // A receipt that cannot be read is not a receipt. Letting the error escape
+  // would turn an infrastructure problem into a crash inside the signer, where
+  // the whole point is that every outcome is a decision. Falling through means
+  // the call is judged in full, and that path refuses when the store is
+  // unreachable, so nothing is permitted by an error here.
+  let row: { id: string } | undefined;
+  try {
+    [row] = await db
+      .select({ id: policyDecisions.id })
+      .from(policyDecisions)
+      .where(
+        and(
+          eq(policyDecisions.organizationId, organizationId),
+          eq(policyDecisions.intentDigest, digest),
+          eq(policyDecisions.receiptStatus, "pending"),
+          gt(policyDecisions.receiptExpiresAt, new Date())
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
+  } catch {
+    return false;
+  }
 
   if (!row) {
     return false;
