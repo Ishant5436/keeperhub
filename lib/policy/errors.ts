@@ -35,6 +35,10 @@ export const POLICY_DENIAL_MESSAGE: Readonly<
     "Blocked by an organization policy: a spending or rate limit has no remaining allowance.",
   [Reason.FACT_UNRESOLVED]:
     "Blocked by an organization policy: this action could not be checked against the policy that governs it.",
+  // Not a rule refusing something, a resource that was never handed over. The
+  // fix is a grant, not a policy edit, so the message says so.
+  [Reason.NOT_GRANTED]:
+    "Blocked: this workflow has not been given access to that resource.",
   [Reason.NO_PRINCIPAL]:
     "Blocked: the organization could not be determined for this request.",
   [Reason.STORE_UNAVAILABLE]:

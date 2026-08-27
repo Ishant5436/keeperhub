@@ -437,7 +437,7 @@ export async function enforcePolicy(input: GuardInput): Promise<GuardVerdict> {
 
     const grant = await resolveGrantFact(input, organizationId);
     if (!grant.ok) {
-      const decision = failClosedDecision(PolicyDecisionReason.FACT_UNRESOLVED);
+      const decision = failClosedDecision(PolicyDecisionReason.NOT_GRANTED);
       await recordDecision(input, organizationId, decision);
       logUserError(
         ErrorCategory.VALIDATION,

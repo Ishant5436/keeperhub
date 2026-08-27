@@ -61,6 +61,13 @@ export const PolicyDecisionReason = {
   LIMIT_EXCEEDED: "limit_exceeded",
   /** A fact a governing policy needs could not be determined. */
   FACT_UNRESOLVED: "fact_unresolved",
+  /**
+   * The subject was never given this resource, as opposed to holding it and
+   * being refused. The two need different answers: one is a missing grant,
+   * usually on a workflow nobody has issued one to, and the other is a rule
+   * doing its job. Reporting both as one makes the first look like the second.
+   */
+  NOT_GRANTED: "not_granted",
   /** The request carried no organization, so no policy set could be loaded. */
   NO_PRINCIPAL: "no_principal",
   /** The policy store was unreachable beyond the stale-serve window. */
