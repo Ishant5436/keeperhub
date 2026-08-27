@@ -1065,6 +1065,13 @@
       "when": 1787598608362,
       "tag": "0151_agentic_wallet_organization",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1787872269760,
+      "tag": "0152_policy_snapshot_catchup",
+      "breakpoints": true
     }
   ]
 }
