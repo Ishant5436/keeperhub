@@ -40,6 +40,15 @@ export type DirectExecutionCheck = {
   tokenAddress?: string;
   selector?: string;
   recipient?: string;
+  /**
+   * The native value being sent, in wei.
+   *
+   * Without it `usdValue` stays absent and a spend limit can never bind on a
+   * direct call, which is the whole point of a limit. Token amounts are not
+   * carried here: they are denominated in the token's own units, and pricing
+   * one without its decimals would produce a confident wrong number.
+   */
+  nativeValueWei?: string;
 };
 
 function directFacts(check: DirectExecutionCheck): PolicyFacts {
@@ -95,7 +104,14 @@ function directFacts(check: DirectExecutionCheck): PolicyFacts {
     protocolSlug: UNKNOWN,
     assets: UNKNOWN,
     counterparties: UNKNOWN,
-    nativeValueWei: UNKNOWN,
+    nativeValueWei: check.nativeValueWei
+      ? {
+          state: FactState.KNOWN,
+          value: check.nativeValueWei,
+          provenance: FactProvenance.AUTHORITATIVE,
+        }
+      : UNKNOWN,
+    // Priced below, from the value above.
     usdValue: UNKNOWN,
     unbounded: UNKNOWN,
     gasPriceGwei: UNKNOWN,
@@ -144,7 +160,7 @@ export async function enforceDirectExecutionPolicy(
     },
     organizationId: check.organizationId,
     capability: check.capability,
-    facts: directFacts(check),
+    facts: await withUsdValue(directFacts(check), check.chainId),
     checkpoint: PolicyCheckpoint.NODE,
     grantSubject: { kind: "principal", id: check.apiKeyId },
   });

@@ -252,6 +252,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     chainId: getChainIdFromNetwork(network) ?? undefined,
     tokenAddress: body.tokenAddress as string | undefined,
     recipient: recipientAddress,
+    // EVM only: lamports are not wei, and pricing them as wei would be wrong
+    // by nine orders of magnitude.
+    nativeValueWei:
+      isTokenTransfer || isSolanaTransfer ? undefined : reservedValueWei,
   });
   if (policyRefusal) {
     return applyRateLimitHeaders(policyRefusal, rateLimit);
