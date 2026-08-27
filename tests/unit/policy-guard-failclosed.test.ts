@@ -165,7 +165,8 @@ describe("grant resolution", () => {
       })
     );
     expect(verdict.blocked).toBe(true);
-    expect(verdict.decision.reason).toBe(PolicyDecisionReason.FACT_UNRESOLVED);
+    // Never given, as distinct from held and refused by a rule.
+    expect(verdict.decision.reason).toBe(PolicyDecisionReason.NOT_GRANTED);
   });
 
   it("does not refuse a subject that holds no grants at all", async () => {

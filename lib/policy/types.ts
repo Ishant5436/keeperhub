@@ -166,9 +166,29 @@ export type PolicyCondition = Partial<
 >;
 
 /** Condition keys are the known vocabulary or a `signal.` prefixed key. */
+/**
+ * Reserved keys that group conditions instead of naming a fact.
+ *
+ * Conditions in a map are combined with AND, which covers most rules and keeps
+ * a statement readable. These are for the rest: a genuine either-or that would
+ * otherwise have to be split into two statements that then drift apart.
+ */
+export const CONDITION_GROUP = {
+  /** Matches when any branch matches. */
+  ANY_OF: "anyOf",
+  /** Matches when every branch matches. Useful only to nest inside anyOf. */
+  ALL_OF: "allOf",
+} as const;
+
+export type ConditionGroupKey =
+  (typeof CONDITION_GROUP)[keyof typeof CONDITION_GROUP];
+
 export type PolicyConditionMap = Partial<
   Record<PolicyConditionKey | PolicySignalKey, PolicyCondition>
->;
+> & {
+  readonly anyOf?: readonly PolicyConditionMap[];
+  readonly allOf?: readonly PolicyConditionMap[];
+};
 
 export type PolicyLimit = {
   metric: PolicyLimitMetric;

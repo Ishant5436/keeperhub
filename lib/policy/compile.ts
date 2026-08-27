@@ -30,9 +30,11 @@ import type {
   CompiledStatement,
   OrganizationPolicy,
   PolicyCompileError,
+  PolicyConditionMap,
   PolicyDocument,
   PolicyStatement,
 } from "./types";
+import { CONDITION_GROUP } from "./types";
 
 const CONDITION_KEYS: ReadonlySet<string> = new Set(
   Object.values(PolicyConditionKey)
@@ -114,12 +116,44 @@ function expandCapabilities(
  * rather than a hope about how the document is used.
  */
 function checkConditions(ctx: Ctx, statement: PolicyStatement): void {
-  const condition = statement.condition;
-  if (!condition) {
+  if (!statement.condition) {
+    return;
+  }
+  checkConditionMap(ctx, statement, statement.condition, 0);
+}
+
+/** How deep a condition may nest before it stops being readable by a person. */
+const MAX_CONDITION_DEPTH = 5;
+
+/**
+ * One condition map, and any groups inside it.
+ *
+ * This recurses because the invariants have to hold everywhere, not just at the
+ * top. A signal buried two levels inside an `anyOf` on an allow is the same
+ * hole as one written plainly, and the only thing that would have made it
+ * different is that nobody looked.
+ */
+function checkConditionMap(
+  ctx: Ctx,
+  statement: PolicyStatement,
+  condition: PolicyConditionMap,
+  depth: number
+): void {
+  if (depth > MAX_CONDITION_DEPTH) {
+    fail(
+      ctx,
+      `Statement "${statement.sid}" nests conditions more than ${MAX_CONDITION_DEPTH} deep. A rule nobody can read is a rule nobody can check.`,
+      statement.sid
+    );
     return;
   }
 
-  for (const [key, predicate] of Object.entries(condition)) {
+  for (const [key, value] of Object.entries(condition)) {
+    if (key === CONDITION_GROUP.ANY_OF || key === CONDITION_GROUP.ALL_OF) {
+      checkConditionGroup(ctx, statement, key, value, depth);
+      continue;
+    }
+
     if (isSignalConditionKey(key)) {
       if (statement.effect === PolicyEffect.ALLOW) {
         fail(
@@ -136,11 +170,11 @@ function checkConditions(ctx: Ctx, statement: PolicyStatement): void {
       );
     }
 
-    if (!predicate || typeof predicate !== "object") {
+    if (!value || typeof value !== "object") {
       fail(ctx, `Condition "${key}" has no operator.`, statement.sid);
       continue;
     }
-    for (const op of Object.keys(predicate)) {
+    for (const op of Object.keys(value)) {
       if (!OPERATORS.has(op)) {
         fail(
           ctx,
@@ -149,6 +183,44 @@ function checkConditions(ctx: Ctx, statement: PolicyStatement): void {
         );
       }
     }
+  }
+}
+
+function checkConditionGroup(
+  ctx: Ctx,
+  statement: PolicyStatement,
+  key: string,
+  value: unknown,
+  depth: number
+): void {
+  if (!Array.isArray(value)) {
+    fail(
+      ctx,
+      `Statement "${statement.sid}" gives "${key}" something that is not a list of conditions.`,
+      statement.sid
+    );
+    return;
+  }
+  if (value.length === 0) {
+    // An empty either-or names no alternative, so nothing satisfies it and the
+    // statement can never match. That is always a mistake rather than a choice.
+    fail(
+      ctx,
+      `Statement "${statement.sid}" has an empty "${key}", so it can never match.`,
+      statement.sid
+    );
+    return;
+  }
+  for (const branch of value) {
+    if (!branch || typeof branch !== "object" || Array.isArray(branch)) {
+      fail(
+        ctx,
+        `Statement "${statement.sid}" has a branch in "${key}" that is not a set of conditions.`,
+        statement.sid
+      );
+      continue;
+    }
+    checkConditionMap(ctx, statement, branch as PolicyConditionMap, depth + 1);
   }
 }
 
