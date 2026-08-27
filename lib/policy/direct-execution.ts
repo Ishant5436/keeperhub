@@ -144,9 +144,12 @@ function directFacts(check: DirectExecutionCheck): PolicyFacts {
 /**
  * Returns a ready 403 when policy refuses, or null to proceed.
  *
- * An API key carries a role, so a key issued at member level cannot reach past
- * what a member could do. That is what stops the agent surface being the widest
- * one in the product.
+ * The key evaluates as a member, which is the least authority an organization
+ * has, because an API key carries no role of its own: neither key table has a
+ * role column. That is the safe reading rather than the accurate one, and it
+ * means an `actorRole` rule cannot tell an owner's key from anyone else's.
+ * Giving a key a role of its own is a schema change and an issuance decision,
+ * not something to infer here.
  */
 export async function enforceDirectExecutionPolicy(
   check: DirectExecutionCheck
