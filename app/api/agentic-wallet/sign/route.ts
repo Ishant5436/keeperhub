@@ -34,6 +34,8 @@ import {
   ALLOWED_TEMPO_CHAIN_IDS,
   BASE_CHAIN_ID,
   TEMPO_MAINNET_CHAIN_ID,
+  USDC_BASE_ADDRESS,
+  USDC_TEMPO_ADDRESS,
 } from "@/lib/agentic-wallet/constants";
 import { reserveSpend, rollbackSpend } from "@/lib/agentic-wallet/daily-spend";
 import { verifyHmacRequest } from "@/lib/agentic-wallet/hmac";
@@ -405,6 +407,7 @@ export async function POST(request: Request): Promise<Response> {
       subOrgId: auth.subOrgId,
       chainId: chain === "base" ? BASE_CHAIN_ID : resolvedTempoChainId,
       recipient: callerPayTo || undefined,
+      tokenAddress: chain === "base" ? USDC_BASE_ADDRESS : USDC_TEMPO_ADDRESS,
       amountMicro: effectiveAmountMicro,
     });
     if (policyRefusal) {

@@ -18,11 +18,10 @@ import "server-only";
  */
 
 import { NextResponse } from "next/server";
-import { buildResourceArn } from "./arn";
+import { buildAssetArn } from "./arn";
 import { Capability } from "./capabilities";
 import { enforcePolicy } from "./guard";
 import {
-  ArnSegment,
   FactProvenance,
   FactState,
   PolicyCheckpoint,
@@ -44,6 +43,16 @@ export type AgenticWalletCheck = {
   organizationId: string;
   subOrgId: string;
   chainId: number;
+  /**
+   * The token being paid, when the caller knows it.
+   *
+   * The resource is the asset, not the recipient, because that is what a token
+   * transfer presents everywhere else in the system. Naming the recipient here
+   * instead would mean a rule scoped to an asset never bound on this path while
+   * appearing to, and the recipient is already carried as a counterparty, which
+   * is where a rule about who gets paid belongs.
+   */
+  tokenAddress?: string;
   /** Who is paid. Absent on a proof that names no recipient. */
   recipient?: string;
   /** The amount in millionths of a dollar, as the challenge states it. */
@@ -67,17 +76,20 @@ function microToUsd(amountMicro: string): string | undefined {
 function agenticFacts(check: AgenticWalletCheck): PolicyFacts {
   const usd = check.amountMicro ? microToUsd(check.amountMicro) : undefined;
   const recipient = check.recipient?.toLowerCase();
+  const token = check.tokenAddress?.toLowerCase();
 
   return {
     capability: Capability.ASSET_TRANSFER_TOKEN,
-    resource: recipient
-      ? known(buildResourceArn(ArnSegment.COUNTERPARTY, recipient))
+    resource: token
+      ? known(buildAssetArn({ chainId: check.chainId, tokenAddress: token }))
       : UNKNOWN,
     chainId: known(check.chainId),
     contractAddress: UNKNOWN,
     selector: UNKNOWN,
     protocolSlug: UNKNOWN,
-    assets: UNKNOWN,
+    assets: token
+      ? known([{ address: token, amount: check.amountMicro }])
+      : UNKNOWN,
     counterparties: recipient
       ? known([{ address: recipient, role: "recipient" }])
       : UNKNOWN,

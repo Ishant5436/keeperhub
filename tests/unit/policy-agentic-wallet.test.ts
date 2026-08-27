@@ -65,6 +65,26 @@ describe("agentic wallet policy", () => {
     );
   });
 
+  it("presents the asset as the resource, as every other transfer does", async () => {
+    // Not the recipient. A rule scoped to an asset has to bind here too, and
+    // who gets paid is carried as a counterparty.
+    await enforceAgenticWalletPolicy({
+      ...BASE,
+      amountMicro: "1000000",
+      tokenAddress: "0xDEADBEEF00000000000000000000000000000001",
+    });
+    expect(factsFromLastCall().resource.value).toBe(
+      "kh:chain/8453/asset/0xdeadbeef00000000000000000000000000000001"
+    );
+  });
+
+  it("carries the recipient as a counterparty", async () => {
+    await enforceAgenticWalletPolicy({ ...BASE, amountMicro: "1000000" });
+    expect(factsFromLastCall().counterparties.value).toEqual([
+      { address: BASE.recipient.toLowerCase(), role: "recipient" },
+    ]);
+  });
+
   it("names the agent so a rule can bound this surface", async () => {
     await enforceAgenticWalletPolicy({ ...BASE, amountMicro: "1000000" });
     expect(factsFromLastCall().triggerType.value).toBe("agent");
