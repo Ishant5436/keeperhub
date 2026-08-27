@@ -25,6 +25,9 @@ Direct execution requests are limited to 60 requests per minute per API key. Eve
 
 Organizations can configure daily spending caps in wei. If the cap is exceeded, execution requests return a `403` status with the error message `Daily spending cap exceeded`.
 
+Organization policies apply to these endpoints as well, and can bound them by
+contract, counterparty, asset, amount and time. See [Policies](/api/policies).
+
 ## Safe First-Write Sequence
 
 Use the same request body from simulation through broadcast so the transaction
