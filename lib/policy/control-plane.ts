@@ -160,9 +160,16 @@ function toPrincipal(
   };
 }
 
-export async function enforceControlPlane(
+/**
+ * The verdict, without a transport shape.
+ *
+ * The route helpers return a ready `NextResponse`, but the shared auth
+ * resolvers return their own refusal type, so the decision has to be available
+ * on its own for the gate that runs inside them.
+ */
+export async function decideControlPlane(
   check: ControlPlaneCheck
-): Promise<NextResponse | null> {
+): Promise<{ blocked: boolean; message?: string; reason: string }> {
   const verdict = await enforcePolicy({
     principal: toPrincipal(check),
     organizationId: check.organizationId,
@@ -173,15 +180,26 @@ export async function enforceControlPlane(
     // role, and what may be done with them is decided by policy.
   });
 
+  return {
+    blocked: verdict.blocked,
+    message: verdict.decision.message ?? undefined,
+    reason: verdict.decision.reason,
+  };
+}
+
+export async function enforceControlPlane(
+  check: ControlPlaneCheck
+): Promise<NextResponse | null> {
+  const verdict = await decideControlPlane(check);
   if (!verdict.blocked) {
     return null;
   }
 
   return NextResponse.json(
     {
-      error: verdict.decision.message ?? "Blocked by an organization policy",
+      error: verdict.message ?? "Blocked by an organization policy",
       code: "policy_denied",
-      reason: verdict.decision.reason,
+      reason: verdict.reason,
     },
     { status: 403 }
   );
