@@ -32,6 +32,7 @@ import {
 } from "@/lib/agentic-wallet/approval";
 import {
   ALLOWED_TEMPO_CHAIN_IDS,
+  BASE_CHAIN_ID,
   TEMPO_MAINNET_CHAIN_ID,
 } from "@/lib/agentic-wallet/constants";
 import { reserveSpend, rollbackSpend } from "@/lib/agentic-wallet/daily-spend";
@@ -48,6 +49,7 @@ import { verifyWorkflowBinding } from "@/lib/agentic-wallet/workflow-binding";
 import { db } from "@/lib/db";
 import { agenticWallets } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { enforceAgenticWalletPolicy } from "@/lib/policy/agentic-wallet";
 import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
 
 export const dynamic = "force-dynamic";
@@ -379,6 +381,7 @@ export async function POST(request: Request): Promise<Response> {
     .select({
       walletAddressBase: agenticWallets.walletAddressBase,
       walletAddressTempo: agenticWallets.walletAddressTempo,
+      organizationId: agenticWallets.organizationId,
     })
     .from(agenticWallets)
     .where(eq(agenticWallets.subOrgId, auth.subOrgId))
@@ -388,6 +391,26 @@ export async function POST(request: Request): Promise<Response> {
   }
   const walletAddress =
     chain === "base" ? rows[0].walletAddressBase : rows[0].walletAddressTempo;
+
+  // The organization's own rules, before the risk tiers and before anything is
+  // reserved or signed. Risk and the daily cap are this wallet's controls; a
+  // policy is what the organization wrote, and until now it reached every other
+  // way of moving money except this one.
+  //
+  // A wallet nobody has linked has no organization to ask, so nothing here can
+  // govern it.
+  if (rows[0].organizationId) {
+    const policyRefusal = await enforceAgenticWalletPolicy({
+      organizationId: rows[0].organizationId,
+      subOrgId: auth.subOrgId,
+      chainId: chain === "base" ? BASE_CHAIN_ID : resolvedTempoChainId,
+      recipient: callerPayTo || undefined,
+      amountMicro: effectiveAmountMicro,
+    });
+    if (policyRefusal) {
+      return policyRefusal;
+    }
+  }
 
   // Risk classification runs BEFORE the Turnkey round-trip so blocked / asked
   // operations never touch the signer.
