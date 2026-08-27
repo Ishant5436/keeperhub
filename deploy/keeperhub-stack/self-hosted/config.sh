@@ -159,10 +159,46 @@ SANDBOX_ENABLED="${SANDBOX_ENABLED:-false}"
 # experience; better to install, confirm the product works, then close it down.
 EGRESS_POLICY="${EGRESS_POLICY:-false}"
 
-# The cluster's API server service address, for the egress policy. Read it with
-#   kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}'
-# The default is the kubeadm convention that minikube follows.
-APISERVER_CIDR="${APISERVER_CIDR:-10.96.0.1/32}"
+# Prove the egress policy rather than report what the cluster looks like.
+#
+# On, install.sh runs two TCP connects from a pod that is already running in the
+# namespace: one to the API server, which the policy allows and which must
+# succeed, and one to the kubelet port on the API server's own node, which the
+# policy denies and which must NOT. That measures both halves - the policy is
+# enforced, and it did not lock out the one caller that needs the API server.
+#
+# It creates nothing and deletes nothing. It costs one kubectl exec, it never
+# fails the install, and it reports "inconclusive" whenever it cannot run.
+#
+# Off by default only because it reaches into a pod, which an operator should
+# opt into rather than discover. Turn it on the first time you enable the
+# policy on a new cluster shape.
+EGRESS_POLICY_VERIFY="${EGRESS_POLICY_VERIFY:-false}"
+
+# The API server addresses and ports the egress policy allows.
+#
+# Leave both empty. install.sh reads them from the cluster it was pointed at,
+# which is the only way to be right on more than one kind of cluster: the
+# address is 10.96.0.1 on kubeadm and minikube, 10.43.0.1 on k3s, and the port
+# is 443 through the Service but 6443 or 8443 behind it.
+#
+# They are settings at all because a discovery can be wrong for a cluster this
+# profile has not seen. Anything set here replaces what was discovered. Give a
+# space- or comma-separated list; a bare address without a prefix becomes /32,
+# or /128 for IPv6:
+#
+#   APISERVER_CIDR="10.43.0.1 192.168.1.10"
+#   APISERVER_PORT="443 6443"
+#
+# BOTH the Service address and the endpoint behind it are allowed, and that is
+# not belt and braces. A pod addresses the API server by the Service ClusterIP,
+# kube-proxy rewrites the destination to the endpoint, and the CNI evaluates
+# egress policy on whichever of the two it sees. Measured on minikube with
+# calico: with only the ClusterIP allowed, every connection to the API server
+# timed out, because calico sees the rewritten address. Allowing both is the
+# only form that holds whichever address the CNI matches on.
+APISERVER_CIDR="${APISERVER_CIDR:-}"
+APISERVER_PORT="${APISERVER_PORT:-}"
 
 # The hostname the app is served on, and how it is exposed.
 #

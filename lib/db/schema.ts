@@ -17,6 +17,7 @@ import type {
   NodeExecutionStatus,
   WorkflowExecutionStatus,
 } from "../errors/execution-status";
+import type { ErrorCategory } from "../logging";
 import type { IntegrationType } from "../types/integration";
 import { generateId } from "../utils/id";
 
@@ -699,23 +700,10 @@ export const workflowExecutions = pgTable(
     // biome-ignore lint/suspicious/noExplicitAny: JSONB type - structure validated at application level
     output: jsonb("output").$type<any>(),
     error: text("error"),
-    errorCategory: text("error_category").$type<
-      | "validation"
-      | "configuration"
-      | "external_service"
-      | "network_rpc"
-      | "transaction"
-      | "billing"
-      | "database"
-      | "auth"
-      | "infrastructure"
-      | "workflow_engine"
-      // an organization policy refused the action. Separate from
-      // "validation" and "configuration" so a dashboard can tell a guardrail
-      // working from a workflow that is misconfigured.
-      | "policy"
-      | "unknown"
-    >(),
+    // $type erases at compile time, so this tracks ErrorCategory in
+    // lib/logging.ts by reference rather than by a hand-copied union that has
+    // to be remembered whenever a category is added.
+    errorCategory: text("error_category").$type<ErrorCategory>(),
     errorType: text("error_type").$type<ExecutionErrorType>(),
     errorCode: text("error_code").$type<ErrorCode>(),
     startedAt: timestamp("started_at").notNull().defaultNow(),

@@ -29,8 +29,17 @@ vi.mock("@/lib/mcp/logging", () => ({
   logMcpEvent: vi.fn(),
 }));
 
+// Resolves rather than returns: the limiter is async, and a plain object
+// would read the same whether or not the route awaited it. With a Promise, a
+// missing await leaves `allowed` undefined and every request 429s, so the
+// happy-path assertions below fail loudly instead of silently passing.
 vi.mock("@/lib/mcp/rate-limit", () => ({
-  checkMcpRateLimit: vi.fn().mockReturnValue({ allowed: true }),
+  checkMcpRateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    limit: 120,
+    remaining: 119,
+    reset: 0,
+  }),
   startCleanupInterval: vi.fn(),
 }));
 
@@ -327,6 +336,42 @@ describe("POST /mcp — authed session-resume forwards parsedBody", () => {
       { parsedBody: unknown },
     ];
     expect(options).toEqual({ parsedBody: parsed });
+  });
+
+  // The -32603 fix lives at the dispatch layer, not in the SDK. Asserting it
+  // on the helper alone would stay green if the route went back to handing
+  // `await request.json()` straight to the transport, so pin it here: what
+  // the transport receives is what actually decides the wire response.
+  it.each([
+    ["explicitly null", null],
+    ["omitted entirely", undefined],
+  ])("defaults tools/call arguments to {} when %s, before the transport sees it", async (_label, argumentsValue) => {
+    const handleRequest = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    mockGetSession.mockReturnValue({
+      organizationId: "org-1",
+      apiKeyId: "key-1",
+      transport: { handleRequest },
+    });
+
+    const params: Record<string, unknown> = { name: "get_wallet_integration" };
+    if (argumentsValue === null) {
+      params.arguments = null;
+    }
+    const request = makeRequest(
+      "POST",
+      { "mcp-session-id": "session-abc" },
+      JSON.stringify({ jsonrpc: "2.0", id: 12, method: "tools/call", params })
+    );
+    await POST(request);
+
+    expect(handleRequest).toHaveBeenCalledTimes(1);
+    const [, options] = handleRequest.mock.calls[0] as [
+      Request,
+      { parsedBody: { params: { arguments: unknown } } },
+    ];
+    expect(options.parsedBody.params.arguments).toEqual({});
   });
 
   it("rejects a cached session whose apiKeyId differs from the caller (cross-principal binding)", async () => {

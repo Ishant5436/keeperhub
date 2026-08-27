@@ -79,6 +79,26 @@ helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace
 ```
 
+**On a cluster with no cloud load balancer, the caller's address needs two
+settings.** K3s and clusters like it answer a `LoadBalancer` Service with a
+small proxy on each node. A request can arrive at a node that does not hold the
+ingress controller pod. That node forwards the request, and the source address
+becomes an address from the cluster's own pod range. Per-IP rate limits and any
+address rule you keep then work on that address instead of the caller's. Nothing
+else looks wrong, because the install works, pages load and workflows run. Set
+the controller Service to `externalTrafficPolicy: Local`, which stops the
+rewrite. Run the controller as a DaemonSet, so that every node holds a pod. One
+setting without the other is not enough. `Local` alone keeps the address only on
+the node that holds the controller, and a DaemonSet alone does not stop the
+rewrite.
+
+```bash
+helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --reuse-values \
+  --set controller.kind=DaemonSet \
+  --set controller.service.externalTrafficPolicy=Local
+```
+
 **c) TLS — pick one.**
 
 *Let the chart request certificates.* It emits a cert-manager `Certificate`
@@ -305,6 +325,7 @@ These fail quietly, leaving every pod green.
 | Install reaches the migration and fails on `CREATE TABLE` or `CREATE SCHEMA` | the role in the URL does not own the database. See the ownership note in step 2d |
 | Workflows fail only when several run at once | the database ran out of connections. Raise `max_connections` or lower `MAX_CONCURRENT_JOBS` |
 | Scheduled workflows stop firing for no obvious reason | a transaction-mode pooler between the app and the database is swallowing `LISTEN`/`NOTIFY` |
+| Every execution stalls after you turned on `EGRESS_POLICY`, and every pod is green | the policy is blocking the API server, so the executor cannot create a Job. Re-run with `EGRESS_POLICY_VERIFY=true`, which names this case |
 
 ---
 
@@ -313,13 +334,27 @@ These fail quietly, leaving every pod green.
 Once it works, deny all egress except what the product needs:
 
 ```bash
-EGRESS_POLICY=true ENV_FILE=.env IMAGE_TAG=v1 ./install.sh
+EGRESS_POLICY=true EGRESS_POLICY_VERIFY=true ENV_FILE=.env IMAGE_TAG=v1 ./install.sh
 ```
 
 This blocks your private network, your nodes and any cloud metadata service,
-while allowing DNS and the public internet. It only takes effect if your CNI
-enforces NetworkPolicy; several do not, and the installer tells you which case
-you are in.
+while allowing DNS, the API server and the public internet. The API server
+address is read from your cluster, so the rule is right on kubeadm, on minikube
+and on k3s, which put it in three different places.
+
+It only takes effect if your CNI enforces NetworkPolicy, and several do not.
+`EGRESS_POLICY_VERIFY=true` measures that rather than guessing at it: it makes
+two TCP connects from a pod that is already running, one to the API server and
+one to an address the policy denies, and reports which of three things happened.
+
+| It says | What it means |
+| --- | --- |
+| the policy is enforced and the API server is still reachable | done |
+| NOT enforced | the objects exist and nothing is restricted. Your CNI ignores NetworkPolicy |
+| BROKEN | the policy is enforced and it blocks the API server. Executions will stall while every pod stays green. Set `APISERVER_CIDR` and `APISERVER_PORT`, or turn the policy off until you have |
+
+The check creates nothing, deletes nothing and never fails the install. Leave it
+off once a cluster has passed it.
 
 ---
 

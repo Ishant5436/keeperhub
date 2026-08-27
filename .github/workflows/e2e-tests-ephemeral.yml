@@ -134,7 +134,7 @@ jobs:
   # from it instead of each running its own pnpm build. Docker-path runs skip
   # this job and pull the prebuilt ECR image instead.
   #
-  # WARNING (KEEP-1206). This bare build does NOT fit a standard runner. It needs
+  # WARNING (KEEP-1206). This bare build barely fits a standard runner. It needs
   # more than 16 GiB and at most 20 GiB (measured 2026-08-24: OOM-killed under a
   # 16 GiB hard limit, clean at 20 GiB, peak 20.1 GiB, 4 CPUs, swap off), while
   # ubuntu-latest offers 16 GiB of RAM plus roughly 4 GiB of swap. It died on
@@ -144,10 +144,14 @@ jobs:
   # image_tag, staging from build-images and prod from ci-pipeline's
   # resolve-e2e-image (the staging image for the commit the release merges).
   # The only caller left is a pull request carrying the run-e2e-tests-ephemeral
-  # label, and there is no prebuilt image to hand a PR. So that label is
-  # currently unusable: adding it makes this job OOM. Nothing has hit it because
-  # no recent PR used the label. Before relying on PR e2e again, either give this
-  # job a runner with real memory or build a PR image for it to reuse.
+  # label, and there is no prebuilt image to hand a PR.
+  #
+  # KEEP-1225: that label does work. This job completed on ubuntu-latest for a
+  # pull request twice on 2026-08-25 (runs 32837761896 and 32845353654, about
+  # 8 to 9 minutes each). It has almost no headroom though, so treat a
+  # "runner has received a shutdown signal" here as an OOM, not as a flake.
+  # Every consumer of the artifact must therefore reuse it rather than compile
+  # again: a second bare build on the same runner is what KEEP-1225 removed.
   build-app:
     needs: should-run
     if: ${{ needs.should-run.outputs.run-e2e == 'true' && inputs.image_tag == '' }}
@@ -199,12 +203,34 @@ jobs:
           # gas-funded via ensureNativeGas/anvil_setBalance, so direct signing
           # works; nothing in tests/e2e asserts the sponsored path.
           NEXT_PUBLIC_GAS_SPONSORSHIP_ENABLED: "false"
-          # Inlined into the shared artifact at build time, so the
-          # /api/ai/generate route is ungated in every consumer of the
-          # artifact. The e2e vitest job's api-key-auth suite needs it;
-          # in the protocol job the route is inert only because
-          # ANTHROPIC_API_KEY is unset there.
-          NEXT_PUBLIC_AI_PROMPT_ENABLED: "true"
+          # Off, and off for every consumer of the artifact. The only suite
+          # that asserted on /api/ai/generate is tests/e2e/vitest/
+          # api-key-auth.test.ts, and that block is describe.skip'd because
+          # the frontend no longer calls the route. Leaving it on would put
+          # the AI prompt bar over the workflow canvas
+          # (components/workflow/workflow-canvas.tsx), a surface the
+          # playwright suite has never run against. Off also matches the
+          # Docker image, which declares no such build arg at all.
+          NEXT_PUBLIC_AI_PROMPT_ENABLED: "false"
+          # KEEP-1225. Baked here, not in a consumer job: next.config.ts
+          # inlines it and compiles in app/api/admin/test/**/route.staging.ts,
+          # so a job that starts from this artifact cannot set it. The
+          # playwright suite needs it, because the strict-signin/start
+          # credential throttle only honors the X-Test-API-Key header when
+          # testEndpointsEnabled() is true, and that suite signs in
+          # repeatedly as a few shared users.
+          #
+          # Every consumer therefore carries those four admin routes, but
+          # only the playwright job unlocks them: testEndpointsEnabled()
+          # (lib/admin-auth.ts) also demands the runtime flag
+          # ALLOW_TEST_ENDPOINTS, and only that job passes it to start-app.
+          # In the other jobs the routes reject every request (401, or 403
+          # from cleanup) instead of 404ing as they did before. That
+          # runtime gate applies only under NODE_ENV=production, which
+          # `next start` supplies; a consumer that ever runs the app under
+          # another NODE_ENV would expose the routes. The staging image
+          # already bakes this flag the same way (build-images.yml).
+          INCLUDE_TEST_ENDPOINTS: "true"
           # Production builds assert SANDBOX_BACKEND=remote and SANDBOX_URL is
           # set (the /.well-known/workflow/v1/step route guard). Consumers
           # start a real sandbox; this is only the build-guard placeholder.
@@ -729,6 +755,9 @@ jobs:
           solana_wallet_provisioning_enabled: "true"
           # NEXT_PUBLIC_AI_PROMPT_ENABLED is baked into the build-app
           # artifact, so only the runtime AI provider env is set here.
+          # KEEP-1225 set that flag to "false", so /api/ai/generate now
+          # answers 503 before it reads either value and both are inert.
+          # They stay wired so re-enabling the flag needs one edit, not three.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           ai_model: claude-3-5-haiku-20241022
           safe_fetch_shadow: "true"
@@ -1381,8 +1410,13 @@ jobs:
   # Playwright E2E tests (browser-based, single worker, serial within the suite).
   # Runs in parallel with the Vitest job (each has its own ephemeral Postgres).
   e2e-playwright-ephemeral:
-    needs: [should-run]
-    if: ${{ always() && needs.should-run.outputs.run-e2e == 'true' && !failure() }}
+    needs: [should-run, build-app]
+    # build-app is skipped (not failed) on the Docker path, so admit
+    # success or skipped explicitly - a cancelled build-app must not
+    # admit this job, which would only die on artifact-not-found.
+    # !cancelled() overrides the implicit success() that would
+    # otherwise skip this job whenever build-app skips.
+    if: ${{ !cancelled() && needs.should-run.outputs.run-e2e == 'true' && (needs.build-app.result == 'success' || needs.build-app.result == 'skipped') }}
     runs-on: ${{ vars.USE_SELF_HOSTED_RUNNERS == 'true' && inputs.caller_event != 'pull_request' && 'arc-keeperhub-build' || 'ubuntu-latest' }}
     # Always staging: e2e validates against test credentials, never prod.
     environment: staging
@@ -1420,6 +1454,23 @@ jobs:
         with:
           install-playwright: "true"
           discover-plugins: "true"
+
+      # KEEP-1225. Take the application build-app already produced rather
+      # than compiling it a second time. A second compile on this runner,
+      # which also hosts the postgres service, the sandbox container and
+      # the browser binaries, killed the runner mid-build (run 32837761896,
+      # both attempts).
+      - name: Download production build
+        if: inputs.image_tag == ''
+        uses: actions/download-artifact@v8
+        with:
+          name: nextjs-production-build
+
+      - name: Unpack production build
+        if: inputs.image_tag == ''
+        run: |
+          tar -xzf next-build.tgz
+          rm next-build.tgz
 
       - name: Setup database
         uses: ./.github/actions/setup-e2e-db
@@ -1459,16 +1510,20 @@ jobs:
           turnkey_organization_id: ${{ secrets.TURNKEY_ORGANIZATION_ID }}
           solana_wallet_provisioning_enabled: "true"
           load_test_bypass_token: ${{ secrets.LOAD_TEST_BYPASS_TOKEN }}
-          # Enable testEndpointsEnabled() so the strict-signin/start credential
-          # rate-limit bypass honors playwright's X-Test-API-Key header (the
-          # suite signs in repeatedly as a few shared users). Scoped to this job.
-          include_test_endpoints: "true"
+          # Runtime half of testEndpointsEnabled(), which the strict-signin/start
+          # credential rate-limit bypass checks before it honors playwright's
+          # X-Test-API-Key header (the suite signs in repeatedly as a few shared
+          # users). The build-time half, INCLUDE_TEST_ENDPOINTS, is baked into
+          # the build-app artifact and cannot be set from here.
           allow_test_endpoints: "true"
           # Point the app's step-bundle execution at the sandbox started above.
           # The Docker path needs these forwarded explicitly; the bare-metal path
           # already hardcodes the same values.
           sandbox_backend: remote
           sandbox_url: http://localhost:8787
+          # Bare-metal path starts from the build-app artifact unpacked above
+          # instead of rebuilding.
+          prebuilt: "true"
 
       - name: Run Playwright tests
         run: pnpm test:e2e
@@ -1478,11 +1533,12 @@ jobs:
           INTEGRATION_ENCRYPTION_KEY: ${{ secrets.TEST_INTEGRATION_ENCRYPTION_KEY }}
           CI: true
           TEST_API_KEY: ${{ secrets.TEST_API_KEY }}
-          # Start application step above runs `pnpm build && pnpm start`
-          # (production), so back-forward-hydration.test.ts must assert
-          # the prod-mode contract (no reload-driven recovery). Without
-          # this var, the test defaults to dev-mode assertions and fails
-          # against the prod server.
+          # Start application step above runs `pnpm start` against the
+          # build-app artifact, so the app is a production server. That
+          # makes back-forward-hydration.test.ts assert the prod-mode
+          # contract (no reload-driven recovery), and it lets
+          # credential-bundle.test.ts run at all. Without this var, both
+          # default to dev-mode behavior and fail against the prod server.
           NEXT_BUILD_MODE: production
           # Sent as the x-load-test-mfa-bypass header by playwright.config.ts so
           # e2e sign-in clears the mandatory-MFA enrollment gate (auth.setup).

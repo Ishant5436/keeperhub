@@ -19,7 +19,9 @@ export async function GET(request: Request): Promise<Response> {
       { status: authCtx.status }
     );
   }
-  const scopeError = requireScope(authCtx.scope, SCOPE_MCP_READ);
+  const scopeError = requireScope(authCtx.scope, SCOPE_MCP_READ, {
+    credentialType: authCtx.authMethod,
+  });
   if (scopeError) {
     return scopeError;
   }
@@ -39,8 +41,9 @@ export async function GET(request: Request): Promise<Response> {
  *   dailyValueCapWei             EVM, wei      (18 decimals)
  *   dailySolanaValueCapLamports  Solana, lamports (9 decimals)
  *
- * An omitted field is left unchanged; an explicit null clears that cap
- * (unlimited). Partial updates matter here: the two caps are edited by separate
+ * An omitted field is left unchanged; an explicit null clears the org's own cap
+ * and hands that chain family back to the platform default (there is no
+ * uncapped state). Partial updates matter here: the two caps are edited by separate
  * controls, so treating an absent field as "clear" would let saving one cap
  * silently remove the other.
  *

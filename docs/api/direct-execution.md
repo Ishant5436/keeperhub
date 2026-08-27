@@ -17,13 +17,36 @@ Authorization: Bearer kh_your_api_key
 
 See [Authentication](/api/authentication) for the full auth model and [API Keys](/api/api-keys) for details on creating and managing API keys.
 
+Scope is enforced on these endpoints. A key created with `mcp:read` only can read execution status and run dry-run simulations, but is refused with `403 insufficient_scope` when it tries to broadcast. Broadcasting needs `mcp:write` or `mcp:admin`. A key created without any scope has no scope restriction and passes every gate; the same rules apply to MCP OAuth tokens.
+
 ## Rate Limits
 
 Direct execution requests are limited to 60 requests per minute per API key. Every response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` so you can pace requests; a `429` adds `Retry-After` with the seconds to wait. See [API errors](errors.md#rate-limit-headers) for the full header reference.
 
 ## Spending Caps
 
-Organizations can configure daily spending caps in wei. If the cap is exceeded, execution requests return a `403` status with the error message `Daily spending cap exceeded`.
+Two independent daily caps bound the native token **value** an organization moves (gas is not counted against them):
+
+| Cap | Unit | Applies to |
+| --- | --- | --- |
+| `dailyValueCapWei` | wei | every EVM chain |
+| `dailySolanaValueCapLamports` | lamports | Solana |
+
+**Every organization is capped, including one that has never configured anything.** An organization that has set no cap of its own, or that clears one, gets the platform default for that chain family rather than unlimited spending. There is no uncapped state: raising the ceiling means setting a higher number, not leaving the field empty. The defaults are `0.02 ETH` per day for EVM chains and `0.5 SOL` per day for Solana; self-hosted deployments can change them with the `EXECUTE_DEFAULT_DAILY_VALUE_CAP_WEI` and `EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS` environment variables.
+
+Both caps count value moved by workflow runs as well as by this API, so the two cannot be used to double-spend the same daily budget. Exceeding one returns `403` with `Daily spending cap exceeded` (or `Daily Solana spending cap exceeded`).
+
+Call `GET /api/analytics/spend-cap` before planning a large transfer. Read `effectiveDailyCapWei` and `effectiveDailySolanaCapLamports` — those are the figures enforcement uses. A null `dailyCapWei` means the organization configured nothing, not that spending is unbounded.
+
+### Stablecoin transfers
+
+An ERC-20 transfer carries no native value, so the daily caps above cannot see it. A single transaction that moves a recognised stablecoin (any token listed for that chain and flagged as a stablecoin) is limited to **100 USD**, applying the 1:1 peg to the token's own decimals. The limit is per transaction rather than per day, and covers every write path: `/api/execute/transfer`, `/api/execute/contract-call`, protocol actions, `/api/execute/node`, and the equivalent workflow steps. Over the limit nothing is signed or broadcast; the request completes as a failed execution (`202` with `status: "failed"`) whose error reads `Stablecoin transfer of ... exceeds the 100.0 USD per-transaction limit`. Self-hosted deployments can change the figure with `EXECUTE_DEFAULT_STABLECOIN_CAP_MICRO_USD` (micro-USD, so `100000000` is 100 USD).
+
+A dry run reports the same refusal: simulating an over-limit transfer returns a failed simulation carrying the limit, rather than a clean estimate for a transfer that would fail at broadcast.
+
+`approve` is bounded by the same figure, with one exception. Approving more than the limit is allowed when the spender is a contract belonging to a protocol integration, which is what makes the usual approve-then-swap pattern work. Approving more than the limit to any other address is refused, because an unbounded allowance to an address outside that set is a standing right to move the balance that no later check can see. An approval at or under the limit is always allowed.
+
+Two things this does **not** do: it does not price non-stablecoin ERC-20s, which are not bounded at all, and it does not cover Solana. SPL token transfers are outside the ceiling, and the daily Solana cap counts native SOL only.
 
 Organization policies apply to these endpoints as well, and can bound them by
 contract, counterparty, asset, amount and time. See [Policies](/api/policies).
@@ -438,6 +461,16 @@ Read a contract value, evaluate a condition, and conditionally execute a write o
 - `gte`: Greater than or equal to
 - `lte`: Less than or equal to
 
+The check function must resolve to exactly one supported scalar output.
+Solidity integers support all six operators. `address` and `bytes1` through
+`bytes32` support `eq` and `neq` only. `condition.value` must be a
+`BigInt`-compatible decimal or hexadecimal string. KeeperHub rejects empty,
+multi-output, compound, or otherwise unsupported ABI return shapes with HTTP
+`400` before the check RPC call. It also rejects an operator that the output
+type does not support, or a runtime result that cannot be compared, before the
+action executes. The action leg never forwards native value; `action.value` is
+not part of the supported request shape.
+
 ### Response
 
 **Condition Not Met:**
@@ -507,7 +540,7 @@ Add `"simulate": true` to any of the standard request bodies:
 
 `simulate` must be a strict boolean — `true` or `false`. Strings (`"true"`), numbers (`1`), and other non-boolean values are rejected with HTTP 400 to prevent silent fall-through to a real broadcast. There is no query-string form; the body field is the only way to request a dry run.
 
-Because a dry run never signs or broadcasts, an OAuth token scoped `mcp:read` may run one. Removing `simulate` to broadcast requires `mcp:write`.
+Because a dry run never signs or broadcasts, a credential scoped `mcp:read` may run one. Removing `simulate` to broadcast requires `mcp:write`.
 
 ### Response — successful simulate
 
@@ -779,7 +812,7 @@ Direct execution endpoints return detailed error information:
 **Common Error Codes:**
 
 - `401`: Invalid or missing API key
-- `403`: The daily spending cap is exceeded, or an OAuth token lacks the scope the request needs (`insufficient_scope`). API keys are unaffected by scope.
+- `403`: The daily spending cap is exceeded, or the credential lacks the scope the request needs (`insufficient_scope`). Scope is enforced for both OAuth tokens and organization API keys. A key created without a scope has no scope restriction and passes every gate. See [Spending Caps](#spending-caps) — an organization that never configured a cap is still subject to the platform default.
 - `422`: Wallet not configured, code `WALLET_NOT_CONFIGURED` (see [Wallet Management](/wallet-management/turnkey))
 - `429`: Rate limit exceeded
 - `400`: Invalid request parameters
@@ -790,18 +823,25 @@ this connection is allowed:
 ```json
 {
   "error": "insufficient_scope",
-  "message": "This endpoint requires the `mcp:write` OAuth scope. This connection is allowed `mcp:read`. Reconnecting will not raise it: the limit is set by an organization owner or admin under Settings > Developer > Agents. Do not retry; ask them to raise it.",
+  "message": "This endpoint requires the `mcp:write` scope. This credential is allowed `mcp:read`. Retrying will not widen it. An API key's scope is fixed when the key is created and cannot be raised. A new key has to be issued with the scope this endpoint requires.",
   "retryable": false,
   "required_scope": "mcp:write",
   "granted_scope": "mcp:read"
 }
 ```
 
-`granted_scope` is what the connection may do right now, which is not always the
-scope the token was issued with. An organization can cap what its agents may do,
-and a cap is applied on every call, so a token issued with `mcp:admin` reports
-`mcp:read` here while a read-only cap is in force. Reauthorizing with a wider
-scope does not lift a cap; only an owner or admin can, in the Agents settings.
+The closing sentence names the remedy for the credential that was used, because
+the two families differ. An API key's scope is written into the key when it is
+created and cannot be changed afterwards, so a new key is the only route. An
+OAuth connection is instead told that an owner or admin controls its ceiling
+under Settings > Developer > Agents.
+
+`granted_scope` is what the credential may do right now. For an OAuth token that
+is not always the scope it was issued with: an organization can cap what its
+agents may do, and the cap is applied on every call, so a token issued with
+`mcp:admin` reports `mcp:read` here while a read-only cap is in force.
+Reauthorizing with a wider scope does not lift a cap; only an owner or admin
+can, in the Agents settings. An API key reports the scope stored on the key.
 
 Broadcasting requires `mcp:write`. A dry run (`simulate: true`) neither signs nor broadcasts, so `mcp:read` is sufficient.
 

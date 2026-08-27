@@ -102,6 +102,7 @@ vi.mock("@/lib/schedule-service", async () => {
   return {
     ...actual,
     syncWorkflowSchedule: vi.fn().mockResolvedValue({ synced: true }),
+    syncPersistedWorkflowSchedule: vi.fn().mockResolvedValue(undefined),
   };
 });
 

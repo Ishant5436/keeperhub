@@ -20,7 +20,14 @@
 # matters - an escaped or hostile workflow step cannot reach the cluster
 # network, the node, the metadata service, or anything else on the private side.
 #
-# ${NAMESPACE} is substituted by install.sh.
+# install.sh substitutes three variables here: NAMESPACE, and APISERVER_CIDRS
+# and APISERVER_PORTS, which it reads from the cluster. The two API server ones
+# are pre-indented YAML lists rather than single values, because the number of
+# API server endpoints is a property of the cluster.
+#
+# Their names are written without the dollar sign on purpose. envsubst does not
+# know a comment from a value, and a multi-line list expanded inside this
+# paragraph breaks out of it and makes the whole document invalid.
 ---
 # Deny every egress packet from every pod. Everything below re-opens a hole.
 apiVersion: networking.k8s.io/v1
@@ -83,10 +90,21 @@ spec:
 # creates a Job per execution, and the dispatchers, which hold a Lease when
 # leader election is on.
 #
-# The address is the cluster's own service IP, which is why this is a values
-# question rather than a constant. 10.96.0.1/32 is the kubeadm default that
-# minikube uses. On another cluster, read it: kubectl get svc kubernetes -o
-# jsonpath='{.spec.clusterIP}'
+# The addresses and ports are read from the cluster by install.sh, because no
+# constant is right on more than one kind of cluster: the Service address is
+# 10.96.0.1 on kubeadm and minikube and 10.43.0.1 on k3s, and the port is 443
+# through the Service but 6443 or 8443 behind it. APISERVER_CIDR and
+# APISERVER_PORT in config.sh override the discovery.
+#
+# Two addresses are allowed, the Service and the endpoint behind it, because
+# only one of them is the address the CNI matches on and which one it is depends
+# on the CNI. A pod dials the ClusterIP, kube-proxy rewrites the destination to
+# the endpoint, and calico evaluates policy on the rewritten address - measured,
+# with only the ClusterIP allowed every connection to the API server timed out.
+#
+# Allowing the endpoint means allowing a node address on the API server port.
+# That is narrower than it looks: it is one port on the machines that already
+# run the workload, and every other port on them stays denied by the rule below.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -98,13 +116,9 @@ spec:
     - Egress
   egress:
     - to:
-        - ipBlock:
-            cidr: ${APISERVER_CIDR}
+${APISERVER_CIDRS}
       ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 8443
+${APISERVER_PORTS}
 ---
 # The public internet, minus every private range.
 #

@@ -230,3 +230,36 @@ describe("/mcp/public — per-IP rate limiting (c)", () => {
     expect(response.headers.get("X-RateLimit-Limit")).toBe("60");
   });
 });
+
+describe("/mcp/public — tools/call argument normalization", () => {
+  // Same reasoning as the /mcp route test: the helper is only a fix if the
+  // route still routes the body through it on the way to the transport.
+  it.each([
+    ["explicitly null", true],
+    ["omitted entirely", false],
+  ])("defaults tools/call arguments to {} when %s, before the transport sees it", async (_label, includeNullArguments) => {
+    mockGetSession.mockReturnValue({
+      organizationId: "__anon_public__",
+      scope: "mcp:public",
+      transport: { handleRequest: mockHandleRequest },
+    });
+
+    const params: Record<string, unknown> = { name: "search_workflows" };
+    if (includeNullArguments) {
+      params.arguments = null;
+    }
+    await POST(
+      makeRequest(
+        { "mcp-session-id": "anon-session" },
+        JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params })
+      )
+    );
+
+    expect(mockHandleRequest).toHaveBeenCalledTimes(1);
+    const [, options] = mockHandleRequest.mock.calls[0] as [
+      Request,
+      { parsedBody: { params: { arguments: unknown } } },
+    ];
+    expect(options.parsedBody.params.arguments).toEqual({});
+  });
+});

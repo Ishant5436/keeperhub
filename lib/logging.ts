@@ -182,6 +182,11 @@ export const ErrorCategory = {
   // user mistake nor a platform failure, so it gets its own bucket and stays
   // out of the failure-rate view.
   POLICY: "policy",
+  // A caller using a valid credential outside its grant. User-caused and
+  // reachable at the caller's own request rate, so it is deliberately not
+  // AUTH -- that is the system-side family (broken sessions, misconfigured
+  // providers) the errors dashboard sums into its System Errors panels.
+  AUTHORIZATION: "authorization",
 
   // System-caused errors
   DATABASE: "database",
@@ -215,6 +220,8 @@ function getMetricName(category: ErrorCategory): string {
       return MetricNames.TRANSACTION_BLOCKCHAIN_ERRORS;
     case ErrorCategory.DATABASE:
       return MetricNames.SYSTEM_DATABASE_ERRORS;
+    case ErrorCategory.AUTHORIZATION:
+      return MetricNames.USER_AUTHORIZATION_ERRORS;
     case ErrorCategory.AUTH:
       return MetricNames.SYSTEM_AUTH_ERRORS;
     case ErrorCategory.INFRASTRUCTURE:

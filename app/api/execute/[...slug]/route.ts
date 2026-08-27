@@ -358,7 +358,12 @@ export async function POST(
     );
   }
 
-  const scopeError = requireScope(apiKeyCtx.scope, SCOPE_MCP_WRITE);
+  const scopeError = requireScope(apiKeyCtx.scope, SCOPE_MCP_WRITE, {
+    organizationId: apiKeyCtx.organizationId,
+    credentialId: apiKeyCtx.apiKeyId,
+    credentialType: apiKeyCtx.credentialType,
+    endpoint: `/api/execute/${actionType}`,
+  });
   if (scopeError) {
     return scopeError;
   }

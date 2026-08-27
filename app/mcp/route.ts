@@ -6,6 +6,7 @@ import { type ApiKeyAuthResult, authenticateApiKey } from "@/lib/api-key-auth";
 import { McpEventStore } from "@/lib/mcp/event-store";
 import { getInternalApiBaseUrl } from "@/lib/mcp/internal-url";
 import { logMcpEvent } from "@/lib/mcp/logging";
+import { normalizeToolCallArguments } from "@/lib/mcp/normalize-tool-call-arguments";
 import { authenticateOAuthToken } from "@/lib/mcp/oauth-auth";
 import { checkMcpRateLimit, type RateLimitResult } from "@/lib/mcp/rate-limit";
 import { createMcpServer } from "@/lib/mcp/server";
@@ -23,6 +24,7 @@ import {
   startCleanupInterval,
   touchSession,
 } from "@/lib/mcp/sessions";
+import type { AuthMethod } from "@/lib/middleware/auth-helpers";
 import {
   applyRateLimitHeaders,
   rateLimitHeaders,
@@ -184,6 +186,17 @@ type BuiltSession = {
   entry: SessionEntry;
 };
 
+/**
+ * The session token carries the credential id but not which family issued it,
+ * and a reconstructed session has nothing else to go on. authenticate() builds
+ * `oauth:<userId>` for OAuth and uses the key row id for kh_ keys, so the
+ * prefix is the one signal that survives. Derived here only, so the convention
+ * has a single reader rather than being re-tested wherever it is needed.
+ */
+function credentialFamily(apiKeyId: string): AuthMethod {
+  return apiKeyId.startsWith("oauth:") ? "oauth" : "api-key";
+}
+
 function buildSession(
   sessionId: string,
   organizationId: string,
@@ -209,7 +222,12 @@ function buildSession(
     enableJsonResponse: true,
   });
 
-  const server = createMcpServer(internalApiBaseUrl, authHeader, scope);
+  const server = createMcpServer(
+    internalApiBaseUrl,
+    authHeader,
+    scope,
+    credentialFamily(apiKeyId)
+  );
 
   const entry: SessionEntry = {
     transport,
@@ -369,7 +387,7 @@ export async function POST(request: Request): Promise<Response> {
   let body: unknown;
   let bodyParsed = false;
   try {
-    body = await request.json();
+    body = normalizeToolCallArguments(await request.json());
     bodyParsed = true;
   } catch {
     // Leave bodyParsed = false; handled below after auth check.
@@ -430,7 +448,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const organizationId = auth.organizationId ?? "";
 
-  const rateLimit = checkMcpRateLimit(organizationId);
+  const rateLimit = await checkMcpRateLimit(organizationId);
   if (!rateLimit.allowed) {
     logMcpEvent("mcp.rate.limited", { orgId: organizationId });
     return rateLimitResponse(rateLimit);

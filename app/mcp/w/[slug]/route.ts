@@ -7,6 +7,7 @@ import { McpEventStore } from "@/lib/mcp/event-store";
 import { getInternalApiBaseUrl } from "@/lib/mcp/internal-url";
 import { getWorkflowListing } from "@/lib/mcp/listing";
 import { logMcpEvent } from "@/lib/mcp/logging";
+import { normalizeToolCallArguments } from "@/lib/mcp/normalize-tool-call-arguments";
 import { authenticateOAuthToken } from "@/lib/mcp/oauth-auth";
 import { checkMcpRateLimit, type RateLimitResult } from "@/lib/mcp/rate-limit";
 import { buildSessionErrorResponse } from "@/lib/mcp/session-error";
@@ -62,12 +63,13 @@ function ensureMcpAcceptHeader(request: Request): Request {
 
   const headers = new Headers(request.headers);
   headers.set("accept", parts.join(", "));
+  // Rebuild from url+method with NO body: POST parses the body up front and
+  // hands the transport the parsed value via parsedBody, and GET carries no
+  // body at all. Constructing `new Request(request, ...)` from a used Request
+  // would throw.
   return new Request(request.url, {
     method: request.method,
     headers,
-    body: request.body,
-    // @ts-expect-error -- duplex is required for streaming bodies in Node
-    duplex: "half",
   });
 }
 
@@ -376,10 +378,25 @@ export async function POST(
 
   const organizationId = auth.organizationId ?? "";
 
-  const rateLimit = checkMcpRateLimit(organizationId);
+  const rateLimit = await checkMcpRateLimit(organizationId);
   if (!rateLimit.allowed) {
     logMcpEvent("mcp.rate.limited", { orgId: organizationId });
     return rateLimitResponse(rateLimit);
+  }
+
+  // Parsed here rather than in the initialize branch below so the session
+  // path gets it too: that is where every tools/call on this route lands, and
+  // an `arguments: null` handed straight to the SDK surfaces as an opaque
+  // -32603. Consuming request.body means every transport call from here on
+  // must pass parsedBody.
+  let body: unknown;
+  try {
+    body = normalizeToolCallArguments(await request.json());
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: HttpStatus.BAD_REQUEST,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
   }
 
   const sessionId = request.headers.get("mcp-session-id");
@@ -398,22 +415,13 @@ export async function POST(
       });
     }
     const response = await resolved.transport.handleRequest(
-      ensureMcpAcceptHeader(request)
+      ensureMcpAcceptHeader(request),
+      { parsedBody: body }
     );
     return applyRateLimitHeaders(
       withRenewedSessionHeader(response, resolved.renewedSessionId),
       rateLimit
     );
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: HttpStatus.BAD_REQUEST,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
   }
 
   if (!isInitializeRequestBody(body)) {

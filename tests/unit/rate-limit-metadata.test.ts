@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// The MCP limiter prefers Redis; pin it to absent so this file asserts the
+// shared result metadata rather than the store behind it.
+vi.mock("@/lib/redis", () => ({ getRedis: () => null }));
+
 import {
   __resetAiGenerateRateLimitForTests,
   checkAiGenerateRateLimit,
@@ -58,8 +63,8 @@ describe("checkRateLimit (execute)", () => {
 });
 
 describe("checkMcpRateLimit", () => {
-  it("reports the MCP limit and remaining on an allowed request", () => {
-    const result = checkMcpRateLimit("org-meta-1");
+  it("reports the MCP limit and remaining on an allowed request", async () => {
+    const result = await checkMcpRateLimit("org-meta-1");
     expect(result.allowed).toBe(true);
     if (result.allowed) {
       expect(result.limit).toBe(MCP_LIMIT);
@@ -68,18 +73,27 @@ describe("checkMcpRateLimit", () => {
   });
 });
 
+// checkIpRateLimit shares its window bookkeeping with the MCP limiter and
+// backs seven other routes (OAuth token/register, the public MCP surface, the
+// marketplace workflow routes, execution-status polling). These pin the full
+// result shape on both branches so the shared helper cannot drift underneath
+// callers this file does not exercise.
 describe("checkIpRateLimit", () => {
   it("honours the caller-supplied limit in the metadata", () => {
+    const before = Math.floor(Date.now() / 1000);
     const allowed = checkIpRateLimit("ip-meta-1", 3, 60_000);
     expect(allowed.allowed).toBe(true);
     if (allowed.allowed) {
       expect(allowed.limit).toBe(3);
       expect(allowed.remaining).toBe(2);
+      expect(allowed.reset).toBeGreaterThanOrEqual(before + 60);
+      expect(allowed.reset).toBeLessThanOrEqual(before + 61);
     }
   });
 
   it("denies once the limit is reached with remaining 0 and a Retry-After", () => {
     const key = "ip-meta-2";
+    const before = Math.floor(Date.now() / 1000);
     checkIpRateLimit(key, 2, 60_000);
     checkIpRateLimit(key, 2, 60_000);
     const denied = checkIpRateLimit(key, 2, 60_000);
@@ -88,7 +102,19 @@ describe("checkIpRateLimit", () => {
       expect(denied.limit).toBe(2);
       expect(denied.remaining).toBe(0);
       expect(denied.retryAfter).toBeGreaterThanOrEqual(1);
+      expect(denied.retryAfter).toBeLessThanOrEqual(60);
+      // The oldest request in the window is what frees the next slot, so the
+      // denial points at that entry's expiry, not at a fresh window.
+      expect(denied.reset).toBeGreaterThanOrEqual(before + 60);
+      expect(denied.reset).toBeLessThanOrEqual(before + 61);
     }
+  });
+
+  it("keeps counting a key across denials instead of forgetting it", () => {
+    const key = "ip-meta-3";
+    checkIpRateLimit(key, 1, 60_000);
+    expect(checkIpRateLimit(key, 1, 60_000).allowed).toBe(false);
+    expect(checkIpRateLimit(key, 1, 60_000).allowed).toBe(false);
   });
 });
 

@@ -254,6 +254,33 @@ app:
     LOG_LEVEL:
       type: kv
       value: "info"
+    # Organization spending caps. Set here so an operator can widen one that is
+    # binding a live integrator by editing this file and cutting a release,
+    # rather than changing code. Both the app and the executor enforce them:
+    # direct executions run in the app, workflow steps run in the executor.
+    # Daily EVM native value an organization may move, in wei, when it has
+    # configured no cap of its own. 0.02 ETH. Absent from the environment means
+    # the compiled-in default applies, NOT unlimited.
+    EXECUTE_DEFAULT_DAILY_VALUE_CAP_WEI:
+      type: kv
+      value: "20000000000000000"
+    # Same, for Solana native value, in lamports. 0.5 SOL. Independent of the
+    # wei cap: an unset Solana cap never falls back to the EVM figure.
+    EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS:
+      type: kv
+      value: "500000000"
+    # Ceiling on a single stablecoin outflow, in micro-USD (6 decimals). Per
+    # transaction, not per day. 100 USD.
+    EXECUTE_DEFAULT_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "100000000"
+    # Ceiling on the TOTAL stablecoin outflow of one transaction, in micro-USD.
+    # Applies alongside the per-call figure, not instead of it: a batch payout
+    # packs up to 50 recipients into a single transaction, so the per-call
+    # figure alone would cap a payroll run at 2 USD a head. 2,000 USD.
+    EXECUTE_DEFAULT_BATCH_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "2000000000"
     METRICS_COLLECTOR:
       type: kv
       value: "prometheus"
@@ -957,6 +984,33 @@ executor:
     HEALTH_PORT:
       type: kv
       value: "3080"
+    # Organization spending caps. Set here so an operator can widen one that is
+    # binding a live integrator by editing this file and cutting a release,
+    # rather than changing code. Both the app and the executor enforce them:
+    # direct executions run in the app, workflow steps run in the executor.
+    # Daily EVM native value an organization may move, in wei, when it has
+    # configured no cap of its own. 0.02 ETH. Absent from the environment means
+    # the compiled-in default applies, NOT unlimited.
+    EXECUTE_DEFAULT_DAILY_VALUE_CAP_WEI:
+      type: kv
+      value: "20000000000000000"
+    # Same, for Solana native value, in lamports. 0.5 SOL. Independent of the
+    # wei cap: an unset Solana cap never falls back to the EVM figure.
+    EXECUTE_DEFAULT_DAILY_SOLANA_VALUE_CAP_LAMPORTS:
+      type: kv
+      value: "500000000"
+    # Ceiling on a single stablecoin outflow, in micro-USD (6 decimals). Per
+    # transaction, not per day. 100 USD.
+    EXECUTE_DEFAULT_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "100000000"
+    # Ceiling on the TOTAL stablecoin outflow of one transaction, in micro-USD.
+    # Applies alongside the per-call figure, not instead of it: a batch payout
+    # packs up to 50 recipients into a single transaction, so the per-call
+    # figure alone would cap a payroll run at 2 USD a head. 2,000 USD.
+    EXECUTE_DEFAULT_BATCH_STABLECOIN_CAP_MICRO_USD:
+      type: kv
+      value: "2000000000"
     JOB_TTL_SECONDS:
       type: kv
       value: "300"

@@ -186,6 +186,15 @@ function conditionError(condition: unknown): ExecuteErrorResponse | null {
       details: "condition.value is required and must be a non-empty string",
     };
   }
+  try {
+    BigInt(condition.value);
+  } catch {
+    return {
+      error: "Invalid field value",
+      field: "condition.value",
+      details: "condition.value must be an integer-compatible string",
+    };
+  }
   return null;
 }
 

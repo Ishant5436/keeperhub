@@ -8,6 +8,7 @@ import {
   getNativeSymbol,
   type INSUFFICIENT_BALANCE_CODE,
 } from "@/lib/execute/native-balance";
+import { checkStablecoinContractCall } from "@/lib/execute/stablecoin-cap";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { getRpcProvider, isSolanaChain } from "@/lib/rpc/provider-factory";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
@@ -626,6 +627,28 @@ export async function simulateContractCall(
   }
   const { rpc, chainId } = rpcResolution;
 
+  // The ceiling applies to the broadcast, so a simulation that ignored it
+  // would report a clean dry run for a call that then fails at send. Agents
+  // call simulate to decide whether to send, so the limit has to be visible
+  // here. Placed in this function rather than only in simulateTokenTransfer
+  // because the contract-call route reaches this one directly, and
+  // simulateTokenTransfer delegates here, so one check covers both entrances.
+  //
+  // Reported as a failed simulation rather than thrown: the caller asked what
+  // would happen, and this is what would happen.
+  const stablecoinCap = await checkStablecoinContractCall({
+    organizationId: input.organizationId,
+    chainId,
+    contractAddress: to,
+    functionName: abiFn.name ?? input.functionName,
+    inputTypes: (abiFn.inputs ?? []).map((i) => i.type),
+    args: argsOrError,
+    context: "simulate",
+  });
+  if (stablecoinCap.kind !== "allowed") {
+    return failure(from, to, value, stablecoinCap.error);
+  }
+
   const tx: ethers.TransactionRequest = { from, to, data: encodedData, value };
 
   let gasEstimate: bigint;
@@ -845,6 +868,8 @@ export async function simulateTokenTransfer(
     );
   }
 
+  // No ceiling check here: this delegates to simulateContractCall below,
+  // which applies it once for both entrances.
   return simulateContractCall({
     organizationId: input.organizationId,
     network: input.network,

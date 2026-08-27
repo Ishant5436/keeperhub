@@ -189,6 +189,34 @@ describe("Workflow duplicate API", () => {
     expect(nodeIds).toContain(body.edges[0].target);
   });
 
+  // Pins the invariant the MCP deploy_template annotation rests on. That tool
+  // is annotated destructiveHint: false on the grounds that a cloned workflow
+  // is inert until a separate call arms it, which is true only because this
+  // insert omits `enabled` and the column defaults false in lib/db/schema.ts.
+  // Nothing else couples the two: if this route ever starts arming the clone,
+  // the annotation silently becomes a promise that a deploy_template call is
+  // safe to auto-approve when it can immediately start executing. Breaking
+  // here is the loud version of that.
+  it("creates the clone disabled so deploy_template stays non-destructive", async () => {
+    const { POST } = await import(
+      "@/app/api/workflows/[workflowId]/duplicate/route"
+    );
+    const request = new Request(
+      "http://localhost/api/workflows/source-wf-1/duplicate",
+      { method: "POST" }
+    );
+    const response = await POST(request, {
+      params: Promise.resolve({ workflowId: "source-wf-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // The db mock echoes the inserted values straight back, so an absent key
+    // here means the route never set it and the schema default (false) stands.
+    expect(body.enabled).toBeUndefined();
+  });
+
   it("remaps template references inside arrays in config", async () => {
     mockDbQuery.workflows.findFirst.mockResolvedValue(workflowWithArrayConfig);
 

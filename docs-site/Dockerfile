@@ -10,7 +10,9 @@ WORKDIR /app
 # lockfile, pnpm floats every range fresh on each build, which has caused
 # transparent registry-side dep regressions to break the docs build with
 # Server Components prerender errors.
-COPY docs-site/package.json docs-site/pnpm-lock.yaml ./
+# pnpm-workspace.yaml comes too, so this install reads the same workspace
+# context that produced the lockfile.
+COPY docs-site/package.json docs-site/pnpm-lock.yaml docs-site/pnpm-workspace.yaml ./
 RUN corepack enable pnpm && pnpm install --frozen-lockfile
 
 # Rebuild the source code only when needed

@@ -5,6 +5,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { McpEventStore } from "@/lib/mcp/event-store";
 import { getInternalApiBaseUrl } from "@/lib/mcp/internal-url";
 import { logMcpEvent } from "@/lib/mcp/logging";
+import { normalizeToolCallArguments } from "@/lib/mcp/normalize-tool-call-arguments";
 import { SCOPE_MCP_PUBLIC } from "@/lib/mcp/oauth-scopes";
 import { checkIpRateLimit, getClientIp } from "@/lib/mcp/rate-limit";
 import { createMcpServer } from "@/lib/mcp/server";
@@ -182,7 +183,7 @@ export async function POST(request: Request): Promise<Response> {
   let body: unknown;
   let bodyParsed = false;
   try {
-    body = await request.json();
+    body = normalizeToolCallArguments(await request.json());
     bodyParsed = true;
   } catch {
     // handled below

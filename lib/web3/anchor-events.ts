@@ -1,6 +1,7 @@
 import "server-only";
 
 import { BN, BorshEventCoder, type Idl } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
 import { ErrorCategory, logUserError } from "@/lib/logging";
 
 // Anchor programs emit events as base64 blobs on a `Program data: <base64>`
@@ -24,18 +25,38 @@ export type DecodedAnchorEvent = {
 };
 
 /**
- * Recursively converts bn.js BN instances (produced by the Borsh layout for
- * u64/i64/u128/i128 IDL fields) to decimal strings. Without this,
- * JSON.stringify would invoke BN's own toJSON and silently produce a hex
- * string instead of the decimal amount a workflow author expects.
+ * Recursively converts the class instances Anchor's Borsh layout produces
+ * into JSON-safe primitives, matching read-solana-program-core's
+ * serializeAnchorValue: PublicKey -> base58, BN -> decimal string, byte
+ * arrays -> base64.
+ *
+ * Every branch here exists because the instance would otherwise reach a
+ * workflow author as an internal representation:
+ * - BN (u64/i64/u128/i128 fields) has its own toJSON that emits a hex
+ *   string, not the decimal amount expected.
+ * - PublicKey (pubkey fields) survives JSON.stringify intact via toBase58,
+ *   which hides the leak, but a structured-clone boundary deep-walks the
+ *   instance into an opaque {"_bn":{"words":[...]}} object.
+ * - Buffer/Uint8Array (bytes fields) serializes to {"type":"Buffer",
+ *   "data":[...]} rather than usable bytes.
  */
 function normalizeEventData(value: unknown): unknown {
+  if (value instanceof PublicKey) {
+    return value.toBase58();
+  }
   if (BN.isBN(value)) {
     return (value as InstanceType<typeof BN>).toString(10);
+  }
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return Buffer.from(value).toString("base64");
   }
   if (Array.isArray(value)) {
     return value.map(normalizeEventData);
   }
+  // Anchor resolves defined/option/vec types into plain objects, arrays and
+  // nulls, so recursing into plain objects reaches every nested field - but
+  // the instance branches above must come first, since a class instance is
+  // also typeof "object" and would otherwise be walked into its internals.
   if (
     value !== null &&
     typeof value === "object" &&

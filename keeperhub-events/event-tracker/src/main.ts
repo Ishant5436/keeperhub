@@ -1,6 +1,7 @@
 import type { NetworksMap, RawWorkflow } from "../lib/types";
 import { fetchActiveWorkflows } from "../lib/utils/fetch-utils";
 import { logger } from "../lib/utils/logger";
+import { chainProviderManager } from "./chains/provider-manager";
 import { createRegistry } from "./listener/factory";
 import type { ListenerRegistry } from "./listener/registry";
 import { buildRegistration } from "./listener/workflow-mapper";
@@ -18,14 +19,21 @@ function getRegistry(): ListenerRegistry {
 }
 
 /**
- * Stops every listener if the registry was constructed. Kept separate from
- * `getRegistry` so shutdown does not lazily construct a registry just to
- * tear it down - that would open a Redis connection for no reason.
+ * Stops every listener if the registry was constructed, then tears down the
+ * shared provider manager. Kept separate from `getRegistry` so shutdown does
+ * not lazily construct a registry just to tear it down - that would open a
+ * Redis connection for no reason.
+ *
+ * `stopAll` unsubscribes every listener, which detaches block listeners and
+ * heartbeats, but the manager also owns providers and a manager-wide stats
+ * interval that only `destroy` clears. Without this call nothing in `src`
+ * ever invoked it, so those outlived the listeners they existed for.
  */
 async function shutdownRegistry(): Promise<void> {
   if (registry) {
     await registry.stopAll();
   }
+  await chainProviderManager.destroy();
 }
 
 async function reconcile(
