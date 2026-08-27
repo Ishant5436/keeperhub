@@ -313,7 +313,7 @@ describe.skipIf(shouldSkip)("policy enforcement, end to end", () => {
       workflowId,
     });
     expect(verdict.blocked).toBe(true);
-    expect(verdict.decision.reason).toBe(PolicyDecisionReason.FACT_UNRESOLVED);
+    expect(verdict.decision.reason).toBe(PolicyDecisionReason.NOT_GRANTED);
   });
 
   it("records governed decisions and skips unmanaged ones", async () => {
