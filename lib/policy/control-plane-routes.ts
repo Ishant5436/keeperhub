@@ -156,7 +156,9 @@ export const CONTROL_PLANE_ROUTES: Readonly<
   "/api/agentic-wallet/approval-request": {
     POST: unmapped("raising a wallet request has no capability yet"),
   },
-  "/api/agentic-wallet/feedback": { POST: ungoverned(READ_ONLY) },
+  // Signs a transaction to the reputation registry, so it is governed where
+  // it signs rather than here.
+  "/api/agentic-wallet/feedback": { POST: ungoverned(AT_SIGNER) },
   "/api/agentic-wallet/link": { POST: governed(Capability.WALLET_UPDATE) },
   "/api/agentic-wallet/provision": {
     POST: creates(Capability.WALLET_CREATE, ArnSegment.WALLET),

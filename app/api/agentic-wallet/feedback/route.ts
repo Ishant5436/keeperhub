@@ -67,6 +67,7 @@ import {
   workflows,
 } from "@/lib/db/schema";
 import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { assertSigningAllowed } from "@/lib/policy/signing-guard";
 import { getRpcUrlByChainId } from "@/lib/rpc/rpc-config";
 
 export const dynamic = "force-dynamic";
@@ -397,6 +398,26 @@ async function buildAndSignTx(args: {
     maxFeePerGas: fees.maxFeePerGas,
     maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
   });
+
+  // This route signs a real transaction, so the organization's rules apply to
+  // it exactly as they do to any other write. The wallet carries the
+  // organization answerable for it; one nobody has linked carries none, and
+  // nothing can govern that.
+  const [owner] = await db
+    .select({ organizationId: agenticWallets.organizationId })
+    .from(agenticWallets)
+    .where(eq(agenticWallets.subOrgId, args.subOrgId))
+    .limit(1);
+  if (owner?.organizationId) {
+    await assertSigningAllowed(
+      { organizationId: owner.organizationId, chainId: args.agentChainId },
+      {
+        to: ERC_8004_REPUTATION_REGISTRY_ADDRESS,
+        data: calldata,
+        value: BigInt(0),
+      }
+    );
+  }
 
   const { signedTransaction } = await signEthereumTransaction({
     subOrgId: args.subOrgId,
