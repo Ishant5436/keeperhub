@@ -1058,6 +1058,13 @@
       "when": 1787512208362,
       "tag": "0150_policy_limit_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1787598608362,
+      "tag": "0151_agentic_wallet_organization",
+      "breakpoints": true
     }
   ]
 }
