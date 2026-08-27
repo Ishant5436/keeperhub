@@ -108,7 +108,7 @@ export async function organizationHasWallet(
   return wallet.length > 0;
 }
 
-export function buildSolanaSignerFromWallet(
+function buildSolanaSignerFromWallet(
   wallet: OrganizationWallet
 ): SolanaTransactionSigner {
   if (!wallet.turnkeySubOrgId) {
@@ -128,11 +128,19 @@ export function buildSolanaSignerFromWallet(
 
 /**
  * Resolves an organization's Solana signer and its provisioned address in one
- * fetch. Throws if the wallet is missing or has no Solana account; callers wrap
- * this in their own error shape. Shared by the Solana transfer paths.
+ * fetch, with policy already wrapped around the signer. Throws if the wallet is
+ * missing or has no Solana account; callers wrap this in their own error shape.
+ *
+ * The guard lives here rather than in a separate helper because the separate
+ * helper is what failed: it existed, it was correct, and nothing called it, so
+ * every Solana write took the unguarded signer instead. The EVM and Solana
+ * paths share no code below the signer, so each has to be guarded where it is
+ * built, and a rule that holds on one chain family and not the other is not a
+ * rule.
  */
 export async function initializeSolanaWallet(
-  organizationId: string
+  organizationId: string,
+  chainId: number = SUPPORTED_CHAIN_IDS.SOLANA_MAINNET
 ): Promise<{ signer: SolanaTransactionSigner; address: string }> {
   let wallet = await getOrganizationWallet(organizationId);
   if (!wallet.solanaAddress && isSolanaWalletProvisioningEnabled()) {
@@ -140,20 +148,8 @@ export async function initializeSolanaWallet(
     wallet = { ...wallet, solanaAddress };
   }
   const signer = buildSolanaSignerFromWallet(wallet);
-  return { signer, address: wallet.solanaAddress as string };
-}
-
-/**
- * The organization's Solana signer, wrapped so policy is unavoidable.
- *
- * The EVM and Solana paths share no code below the signer, so each is guarded
- * where it is built. A rule that holds on one chain family and not the other is
- * not a rule.
- */
-export async function initializeSolanaWalletSigner(
-  organizationId: string,
-  chainId: number = SUPPORTED_CHAIN_IDS.SOLANA_MAINNET
-): Promise<SolanaTransactionSigner> {
-  const { signer } = await initializeSolanaWallet(organizationId);
-  return guardSolanaSigner(signer, { organizationId, chainId });
+  return {
+    signer: guardSolanaSigner(signer, { organizationId, chainId }),
+    address: wallet.solanaAddress as string,
+  };
 }
