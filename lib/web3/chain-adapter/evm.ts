@@ -3,7 +3,10 @@ import { logWarn } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { sleep } from "@/lib/sleep";
 import { getErrorMessage } from "@/lib/utils";
-import { OnChainRevertError } from "@/lib/web3/onchain-revert";
+import {
+  OnChainPendingError,
+  OnChainRevertError,
+} from "@/lib/web3/onchain-revert";
 import { submitSignedTransactionWithFailover } from "@/lib/web3/submit-signed";
 import type { AdaptiveGasStrategy, GasConfig } from "../gas-strategy";
 import type { NonceManager, NonceSession } from "../nonce-manager";
@@ -339,9 +342,15 @@ export class EvmChainAdapter implements ChainAdapter {
       }
       await sleep(TEMPO_RECEIPT_POLL_INTERVAL_MS);
     }
-    throw new Error(
-      `Timed out waiting for Tempo transaction receipt (${tx.hash})`
-    );
+    // The poll ran out of time, but the transaction is on the network: the
+    // same unknown-not-failed case as an empty receipt in confirmTransaction
+    // below. The hash rides on the error rather than living only in the
+    // message text, so the finalizer can settle the row as `unconfirmed` and
+    // hand it to the reconciler.
+    throw new OnChainPendingError({
+      message: `Timed out waiting for Tempo transaction receipt (${tx.hash})`,
+      transactionHash: tx.hash,
+    });
   }
 
   private async confirmTransaction(
@@ -363,7 +372,17 @@ export class EvmChainAdapter implements ChainAdapter {
       ? await this.waitForReceiptByHash(tx, options)
       : await tx.wait();
     if (!receipt) {
-      throw new Error("Transaction sent but receipt not available");
+      // The transaction is on the network -- the nonce manager was handed its
+      // hash a few lines above -- we simply could not read its outcome. That is
+      // unknown, not failed, so the hash rides on the error: the finalizer
+      // re-verifies it, settles the row as `unconfirmed`, and the reconciler
+      // keeps watching until the chain answers. Throwing a bare Error here
+      // dropped the hash and stamped a terminal failure for a transaction that
+      // existed on-chain and nowhere in our data.
+      throw new OnChainPendingError({
+        message: "Transaction sent but receipt not available",
+        transactionHash: tx.hash,
+      });
     }
     // ethers v6 wait() throws CALL_EXCEPTION on reverts it can detect, but
     // that detection is provider-dependent; a tx that passed the staticCall

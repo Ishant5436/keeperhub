@@ -1685,20 +1685,14 @@ export function identifyLoopBody(
 }
 
 /**
- * Pick the edge map a nested For Each's body scan must run against.
+ * Pick the edge map a nested For Each's body scan must run against: always
+ * the workflow-global map, never the outer loop's `bodyEdgesBySource`. Why
+ * the outer map is wrong is recorded at the `identifyLoopBody` call inside
+ * `handleForEachExecution`, where the executor makes that choice inline.
  *
- * The outer loop's `bodyEdgesBySource` only holds edges its own BFS walked,
- * and that BFS stops at a handle-aware nested For Each - it resumes at the
- * inner loop's `done` chain and never descends into the inner `loop` branch.
- * So the outer map has no entry for any edge living purely inside the inner
- * body. Forwarding it to the nested scan leaves every inner body node
- * dangling at the seed, which is issue #2049: the inner Condition never ran.
- *
- * The nested scan therefore runs against the workflow-global map. The outer
- * map is taken as an argument rather than ignored at the call site so this
- * function is the single place the choice is made, and so a test can pin it:
- * return `outerBodyEdgesBySource` here and the nested-handoff regression
- * tests fail.
+ * Nothing in the executor calls this function, so it is off that path. It
+ * still takes both maps so the tests can state the choice explicitly,
+ * naming the map that is rejected rather than asserting its absence.
  */
 export function resolveNestedForEachEdgeMap(maps: {
   globalEdgesBySource: Map<string, string[]>;
@@ -2224,10 +2218,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
           currentOutputs: scopedOutputs,
           currentResults: bodyResults,
           currentVisited: bodyVisited,
-          currentEdgesBySource: resolveNestedForEachEdgeMap({
-            globalEdgesBySource: edgesBySource,
-            outerBodyEdgesBySource: bodyEdgesBySource,
-          }),
           continueAfterCollect: async (collectId) => {
             const nextNodes = bodyEdgesBySource.get(collectId) ?? [];
             for (const next of nextNodes) {
@@ -2273,7 +2263,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     currentOutputs: NodeOutputs;
     currentResults: Record<string, ExecutionResult>;
     currentVisited: Set<string>;
-    currentEdgesBySource: Map<string, string[]>;
     /**
      * Dispatch downstream of a Collect node once iterations finish. Used for
      * both the canonical `done`-handle Collect and legacy in-body Collect.
@@ -2302,7 +2291,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
       currentOutputs,
       currentResults,
       currentVisited,
-      currentEdgesBySource,
       continueAfterCollect,
       continueWithDoneTargets,
     } = params;
@@ -2317,6 +2305,13 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     const itemsToProcess = resolvedArray.slice(0, maxIterations);
 
     // 2. Identify body subgraph
+    //
+    // An outer loop's BFS stops at a handle-aware nested For Each and never
+    // descends into the inner `loop` branch, so an outer `bodyEdgesBySource`
+    // has no entry for edges living purely inside the inner body; passing one
+    // here leaves every inner body node dangling at its seed, which is issue
+    // #2049: the inner Condition never ran. The nested scan therefore runs
+    // against the workflow-global `edgesBySource`.
     const {
       bodyNodeIds,
       collectNodeId,
@@ -2326,7 +2321,7 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
       bodyEdgesBySourceHandle,
     } = identifyLoopBody(
       forEachNodeId,
-      currentEdgesBySource,
+      edgesBySource,
       nodeMap,
       edgesBySourceHandle
     );
@@ -3014,7 +3009,6 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
             currentOutputs: outputs,
             currentResults: results,
             currentVisited: visited,
-            currentEdgesBySource: edgesBySource,
             continueAfterCollect: async (collectId) => {
               const nextNodes = edgesBySource.get(collectId) ?? [];
               await executeReadyDownstream(collectId, nextNodes, visited);

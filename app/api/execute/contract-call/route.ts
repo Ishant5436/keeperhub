@@ -227,9 +227,10 @@ async function handleWriteCall(
   }
 
   // The hash is returned whenever one exists, not only when the write
-  // succeeded. A call that broadcast and then reverted comes back with
-  // success: false and a hash (write-contract-core.ts sets it from
-  // revertedTransactionHash), and that is exactly the case where the caller
+  // succeeded. A call that broadcast and then reverted -- or broadcast and
+  // then could not be read back -- comes back with success: false and a hash
+  // (write-contract-core.ts sets it from
+  // broadcastTransactionHash), and that is exactly the case where the caller
   // needs it -- to look up what the chain said about a write it has already
   // paid for. The failure branch above already reads that hash and records it
   // against the execution, so withholding it from the response leaves the
