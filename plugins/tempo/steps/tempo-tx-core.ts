@@ -33,7 +33,8 @@ import { encodeFunctionData, type Hex, toFunctionSelector } from "viem";
 import { Abis } from "viem/tempo";
 import { toChecksumAddress } from "@/lib/address-utils";
 import { checkStablecoinCalldataBatch } from "@/lib/execute/stablecoin-cap";
-import { ErrorCategory, logSystemError } from "@/lib/logging";
+import { isFundingShortfall } from "@/lib/errors/funding-shortfall";
+import { ErrorCategory, logSystemError, logUserError } from "@/lib/logging";
 import type { RpcProviderManager } from "@/lib/rpc/providers";
 import { getRpcProvider } from "@/lib/rpc/provider-factory";
 import { resolveSignerMode, SIGNER_MODE } from "@/lib/safe/signer-resolver";
@@ -555,7 +556,11 @@ export async function broadcastStoredTempoTx(
       provider.send("eth_sendRawTransaction", [serialized])
     );
   } catch (error) {
-    logSystemError(
+    // A node that refuses the envelope because the payer cannot cover it is
+    // answering about this wallet, not reporting that Tempo is unreachable.
+    const message = error instanceof Error ? error.message : String(error);
+    const log = isFundingShortfall(message) ? logUserError : logSystemError;
+    log(
       ErrorCategory.TRANSACTION,
       "[Tempo] Failed to broadcast transaction",
       error,

@@ -3,6 +3,7 @@ import {
   type ErrorCode,
 } from "@/lib/errors/error-codes";
 import { ExecutionErrorType } from "@/lib/errors/execution-error-type";
+import { FUNDING_SHORTFALL_PATTERNS } from "@/lib/errors/funding-shortfall";
 import { ErrorCategory } from "@/lib/logging";
 
 export { ExecutionErrorType } from "@/lib/errors/execution-error-type";
@@ -20,11 +21,14 @@ export { ExecutionErrorType } from "@/lib/errors/execution-error-type";
  *                    transport failures such as timeouts, connection resets, DNS
  *                    failures) where neither the customer's config nor KeeperHub
  *                    is at fault. RPC endpoints are KeeperHub-managed, so an
- *                    `RPC failed ...` message stays "system" here; the one
- *                    exception is the private-mempool relay a node opted into,
- *                    which we point at but do not operate. The RPC layer tags
- *                    that at the failure site and the step forwards it as an
- *                    errorClass hint.
+ *                    `RPC failed ...` message stays "system" here. Two things
+ *                    override that. The private-mempool relay a node opted
+ *                    into is one we point at but do not operate: the RPC layer
+ *                    tags it at the failure site and the step forwards it as
+ *                    an errorClass hint. And an exhaustion whose quoted answer
+ *                    is a funding shortfall is not an endpoint failure at all:
+ *                    every endpoint reads the same balance, so it stays with
+ *                    the wallet that could not pay.
  *   - code:          a `PREFIX-NNNN` system error code for system failures, or
  *                    null for user and external failures (which surface their
  *                    raw message).
@@ -268,6 +272,18 @@ const RULES: readonly Rule[] = [
     errorType: ExecutionErrorType.USER,
     code: null,
   },
+
+  // The chain refused the transaction because the paying wallet is short, and
+  // it read the same balance on every endpoint we asked. Unanchored, and above
+  // the RPC rules below, so the shortfall keeps its fault domain even when it
+  // arrives quoted inside a failover exhaustion message, which otherwise reads
+  // as a platform outage.
+  ...FUNDING_SHORTFALL_PATTERNS.map((pattern) => ({
+    pattern,
+    errorCategory: ErrorCategory.TRANSACTION,
+    errorType: ExecutionErrorType.USER,
+    code: null,
+  })),
 
   // System: RPC endpoints are KeeperHub-managed infrastructure, so a failover
   // exhaustion is a platform fault, not a third-party dependency failure.

@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
-import { ErrorCategory, logSystemError, logSystemWarn } from "@/lib/logging";
+import { ErrorCategory, logSystemError } from "@/lib/logging";
 import { SCOPE_MCP_WRITE } from "@/lib/mcp/oauth-scopes";
 import { authFailureResponse, getDualAuthContext } from "@/lib/middleware/auth-helpers";
 import { requireScope } from "@/lib/middleware/require-scope";
@@ -21,7 +21,7 @@ import {
 import { IntervalTooSmallError } from "@/lib/cron-utils";
 import {
   extractScheduleConfig,
-  syncWorkflowSchedule,
+  syncPersistedWorkflowSchedule,
 } from "@/lib/schedule-service";
 import { sanitizeDescription } from "@/lib/sanitize-description";
 import { buildAuditMetadata, recordAuditEvent } from "@/lib/security/audit-log";
@@ -316,7 +316,8 @@ async function validateWorkflowAccess(
 
 async function handlePostUpdateSideEffects(
   workflowId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  persistedNodes: unknown
 ): Promise<void> {
   // Tags are Hub-discovery only; clear them on any demote off of "public",
   // including demote-to-unlisted (link-only) and demote-to-private.
@@ -337,19 +338,16 @@ async function handlePostUpdateSideEffects(
     revalidateTag("marketplace", "max");
   }
 
-  if (body.nodes !== undefined) {
-    const syncResult = await syncWorkflowSchedule(
+  // Enabling rebuilds the registration as well, not just a definition save. A
+  // workflow that reached its first enable through /create, duplicate or import
+  // has no schedule row yet, and an UPDATE that matches no row is a silent
+  // no-op, so the toggle alone would leave it unregistered.
+  if (body.nodes !== undefined || body.enabled === true) {
+    await syncPersistedWorkflowSchedule(
       workflowId,
-      body.nodes as Parameters<typeof syncWorkflowSchedule>[1]
+      persistedNodes as Parameters<typeof syncPersistedWorkflowSchedule>[1],
+      "/api/workflows/[workflowId]"
     );
-    if (!syncResult.synced) {
-      logSystemWarn(
-        ErrorCategory.WORKFLOW_ENGINE,
-        "[Workflow] Schedule sync failed",
-        syncResult.error,
-        { workflow_id: workflowId }
-      );
-    }
   }
 }
 
@@ -400,6 +398,8 @@ export async function PATCH(
       );
     }
 
+    const updateData = buildUpdateData(body);
+
     if (Array.isArray(body.nodes)) {
       // KEEP-468: parse every `{{...}}` token at save time so grammar typos
       // (the n8n-style `{{$trigger.input.ts}}`-shaped errors that produced
@@ -420,12 +420,13 @@ export async function PATCH(
 
       // KEEP-581: schedule interval pre-check. Runs before the DB update so
       // a rejected sub-60s value never lands as persisted nodes paired with
-      // an unsynced schedule. extractScheduleConfig is the only thing that
-      // throws here; bad timezones/cron strings still take the warn-and-
+      // an unsynced schedule. It reads the sanitized nodes, the same shape
+      // the post-update sync reads. extractScheduleConfig is the only thing
+      // that throws here; bad timezones/cron strings still take the warn-and-
       // continue path in handlePostUpdateSideEffects.
       try {
         extractScheduleConfig(
-          body.nodes as Parameters<typeof extractScheduleConfig>[0]
+          updateData.nodes as Parameters<typeof extractScheduleConfig>[0]
         );
       } catch (error) {
         if (error instanceof IntervalTooSmallError) {
@@ -519,8 +520,6 @@ export async function PATCH(
         { status: 400 }
       );
     }
-
-    const updateData = buildUpdateData(body);
 
     if (Array.isArray(updateData.nodes)) {
       // What these two gates do NOT do: prove the workflow will run.
@@ -811,7 +810,7 @@ export async function PATCH(
       throw dbError;
     }
 
-    await handlePostUpdateSideEffects(workflowId, body);
+    await handlePostUpdateSideEffects(workflowId, body, updatedWorkflow.nodes);
 
     // Resolve project/tag names so a move/tagging shows "Project: A -> B" in
     // the activity feed rather than opaque ids.

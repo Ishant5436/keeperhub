@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { runGasDisplay } from "@/components/analytics/runs-table";
 import type { UnifiedRun } from "@/lib/analytics/types";
+import { createChainDisplay } from "@/lib/hooks/use-chain-display";
 
 const BASE = "8453"; // ETH
 const POLYGON = "137"; // POL
+const AVALANCHE = "43114"; // AVAX, outside the sponsorship table
 
 const ONE_TENTH = "100000000000000000"; // 0.1e18
 
@@ -117,5 +119,23 @@ describe("runGasDisplay", () => {
         })
       )
     ).toBe("--");
+  });
+
+  it("denominates a run on a chain the sponsorship table does not cover", () => {
+    // Without the chain registry the amount would read as ETH.
+    const chains = createChainDisplay([
+      { chainId: 43_114, name: "Avalanche", symbol: "AVAX" },
+    ]);
+    expect(
+      runGasDisplay(
+        run({
+          networks: [AVALANCHE],
+          gasNetworks: [AVALANCHE],
+          gasUsedWei: ONE_TENTH,
+          network: AVALANCHE,
+        }),
+        chains
+      )
+    ).toBe("0.10 AVAX");
   });
 });

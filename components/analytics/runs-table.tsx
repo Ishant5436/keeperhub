@@ -21,6 +21,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  normalizeRunsResponse,
+  type WireRunsResponse,
+} from "@/lib/analytics/runs-response";
 import type {
   NormalizedStatus,
   StepLog,
@@ -35,8 +39,13 @@ import {
   analyticsStatusFilterAtom,
 } from "@/lib/atoms/analytics";
 import { getCustomerRunErrorMessage } from "@/lib/errors/customer-message";
+import type { ChainDisplay } from "@/lib/hooks/use-chain-display";
+import {
+  ChainDisplayProvider,
+  FALLBACK_CHAIN_DISPLAY,
+  useChainDisplay,
+} from "@/lib/hooks/use-chain-display";
 import { cn } from "@/lib/utils";
-import { SPONSORSHIP_CHAINS } from "@/lib/web3/sponsorship-chains-meta";
 import { ProjectDrawer } from "./project-drawer";
 
 const WHITESPACE_RE = /\s+/;
@@ -44,39 +53,24 @@ const LEADING_ZEROS_RE = /^0+(?=\d)/;
 const TRAILING_ZEROS_RE = /0+$/;
 const NON_DIGIT_RE = /\D/;
 
-const CHAIN_NAME_BY_ID = new Map(
-  SPONSORSHIP_CHAINS.map((c) => [String(c.chainId), c.name])
-);
-
-function networkName(network: string): string {
-  return CHAIN_NAME_BY_ID.get(network) ?? network;
-}
-
-function formatNetworks(networks: string[]): string {
+function formatNetworks(networks: string[], chains: ChainDisplay): string {
   if (networks.length === 0) {
     return "--";
   }
-  const names = networks.map(networkName);
+  const names = networks.map(chains.name);
   if (names.length <= 2) {
     return names.join(", ");
   }
   return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
 }
 
-const CHAIN_SYMBOL_BY_ID = new Map(
-  SPONSORSHIP_CHAINS.map((c) => [String(c.chainId), c.symbol])
-);
-
-function chainSymbol(network: string | null): string {
-  if (!network) {
-    return "";
-  }
-  return CHAIN_SYMBOL_BY_ID.get(network) ?? "ETH";
-}
-
 // Summary amount for the collapsed run row: up to 6 decimals (trailing zeros
 // trimmed). The exact value is shown per step when the row is expanded.
-function formatGasNative(wei: string | null, network: string | null): string {
+function formatGasNative(
+  wei: string | null,
+  network: string | null,
+  chains: ChainDisplay
+): string {
   const value = Number(wei);
   if (!wei || Number.isNaN(value) || value === 0) {
     return "--";
@@ -85,7 +79,7 @@ function formatGasNative(wei: string | null, network: string | null): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(value / 1e18);
-  return `${amount} ${chainSymbol(network)}`;
+  return `${amount} ${chains.gasSymbol(network)}`.trimEnd();
 }
 
 // Exact native amount from the wei integer string (no float rounding), for the
@@ -99,12 +93,13 @@ function formatWeiToDecimal(wei: string): string {
 
 function formatGasNativeExact(
   wei: string | null,
-  network: string | null
+  network: string | null,
+  chains: ChainDisplay
 ): string {
   if (!wei || wei === "0" || NON_DIGIT_RE.test(wei)) {
     return "--";
   }
-  return `${formatWeiToDecimal(wei)} ${chainSymbol(network)}`;
+  return `${formatWeiToDecimal(wei)} ${chains.gasSymbol(network)}`.trimEnd();
 }
 
 function formatDuration(ms: number | null): string {
@@ -152,7 +147,10 @@ function formatGasAsEth(weiString: string | null): string {
 // transaction the run made. A run that starts sponsored and falls back to
 // direct signing has only its sponsored leg in the ledger, so preferring the
 // ledger would drop the rest.
-export function runGasDisplay(run: UnifiedRun): ReactNode {
+export function runGasDisplay(
+  run: UnifiedRun,
+  chains: ChainDisplay = FALLBACK_CHAIN_DISPLAY
+): ReactNode {
   const spentAcrossChains =
     run.gasNetworks.length > 1 ||
     (run.gasNetworks.length === 0 && run.networks.length > 1);
@@ -163,7 +161,8 @@ export function runGasDisplay(run: UnifiedRun): ReactNode {
   if (wei) {
     return formatGasNative(
       wei,
-      run.gasNetworks[0] ?? run.networks[0] ?? run.network
+      run.gasNetworks[0] ?? run.networks[0] ?? run.network,
+      chains
     );
   }
   return formatGasAsEth(run.gasUsedWei);
@@ -340,6 +339,7 @@ type StepLogRowProps = {
 };
 
 function StepLogRow({ step }: StepLogRowProps): ReactNode {
+  const chains = useChainDisplay();
   return (
     <tr className="border-t border-dashed border-muted">
       <td colSpan={4}>
@@ -363,11 +363,11 @@ function StepLogRow({ step }: StepLogRowProps): ReactNode {
         {formatDuration(step.durationMs)}
       </td>
       <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-muted-foreground">
-        {step.network ? networkName(step.network) : "--"}
+        {step.network ? chains.name(step.network) : "--"}
       </td>
       <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
-          {formatGasNativeExact(step.gasCostWei, step.network)}
+          {formatGasNativeExact(step.gasCostWei, step.network, chains)}
           {step.sponsored ? (
             <span className="rounded bg-green-500/10 px-1 py-0.5 text-[10px] text-green-700 dark:text-green-400">
               sponsored
@@ -457,6 +457,7 @@ type ExpandableRunRowProps = {
 };
 
 function ExpandableRunRow({ run }: ExpandableRunRowProps): ReactNode {
+  const chains = useChainDisplay();
   const [expanded, setExpanded] = useState(false);
   const [steps, setSteps] = useState<StepLog[]>([]);
   const [loadingSteps, setLoadingSteps] = useState(false);
@@ -544,12 +545,12 @@ function ExpandableRunRow({ run }: ExpandableRunRowProps): ReactNode {
         </td>
         <td
           className="whitespace-nowrap py-3 pr-3 text-sm text-muted-foreground"
-          title={run.networks.map(networkName).join(", ")}
+          title={run.networks.map(chains.name).join(", ")}
         >
-          {formatNetworks(run.networks)}
+          {formatNetworks(run.networks, chains)}
         </td>
         <td className="whitespace-nowrap py-3 pr-3 text-sm text-muted-foreground">
-          {runGasDisplay(run)}
+          {runGasDisplay(run, chains)}
         </td>
         <td className="whitespace-nowrap py-3 pr-3 text-right text-sm text-muted-foreground">
           {formatTimeAgo(run.startedAt)}
@@ -712,14 +713,8 @@ export function RunsTable(): ReactNode {
           `/api/analytics/runs?${params.toString()}`
         );
         if (response.ok) {
-          const data = (await response.json()) as {
-            runs: UnifiedRun[];
-            nextCursor: string | null;
-            total: number;
-            page: number;
-            pageSize: number;
-          };
-          setRunsData(data);
+          const data = (await response.json()) as WireRunsResponse;
+          setRunsData(normalizeRunsResponse(data));
         } else {
           toast.error("Failed to load runs");
         }
@@ -767,38 +762,40 @@ export function RunsTable(): ReactNode {
   const isReady = !(loading && isEmpty);
 
   return (
-    <div
-      className="flex gap-0 overflow-hidden rounded-xl border"
-      data-ready={String(isReady)}
-      data-testid="runs-table"
-    >
-      <ProjectDrawer />
-      <Card className="flex-1 rounded-none border-0">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Workflow Runs</span>
-            <Pagination
-              loading={pageLoading}
-              onPageChange={(p) => {
-                handlePageChange(p).catch(() => {
-                  /* noop - errors handled with toast in handlePageChange */
-                });
-              }}
-              page={currentPage}
-              pageSize={pageSize}
-              total={runsData?.total ?? 0}
+    <ChainDisplayProvider>
+      <div
+        className="flex gap-0 overflow-hidden rounded-xl border"
+        data-ready={String(isReady)}
+        data-testid="runs-table"
+      >
+        <ProjectDrawer />
+        <Card className="flex-1 rounded-none border-0">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Workflow Runs</span>
+              <Pagination
+                loading={pageLoading}
+                onPageChange={(p) => {
+                  handlePageChange(p).catch(() => {
+                    /* noop - errors handled with toast in handlePageChange */
+                  });
+                }}
+                page={currentPage}
+                pageSize={pageSize}
+                total={runsData?.total ?? 0}
+              />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RunsTableContent
+              isEmpty={isEmpty}
+              loading={loading}
+              pageLoading={pageLoading}
+              runs={runs}
             />
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <RunsTableContent
-            isEmpty={isEmpty}
-            loading={loading}
-            pageLoading={pageLoading}
-            runs={runs}
-          />
-        </CardContent>
-      </Card>
-    </div>
+          </CardContent>
+        </Card>
+      </div>
+    </ChainDisplayProvider>
   );
 }

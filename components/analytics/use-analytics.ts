@@ -2,10 +2,13 @@
 
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useRef } from "react";
+import {
+  normalizeRunsResponse,
+  type WireRunsResponse,
+} from "@/lib/analytics/runs-response";
 import type {
   AnalyticsSummary,
   NetworkBreakdown,
-  RunsResponse,
   TimeSeriesBucket,
 } from "@/lib/analytics/types";
 import {
@@ -208,8 +211,8 @@ export function useAnalytics(): UseAnalyticsReturn {
         )
       ),
       wrapSection(
-        processSection<RunsResponse>(runsPromise, "Runs", ctx, (data) => {
-          setRuns(data);
+        processSection<WireRunsResponse>(runsPromise, "Runs", ctx, (data) => {
+          setRuns(normalizeRunsResponse(data));
         })
       ),
     ]);

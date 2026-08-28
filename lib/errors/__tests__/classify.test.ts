@@ -285,6 +285,48 @@ describe("classifyExecutionError", () => {
     });
   });
 
+  describe("user: a wallet that cannot pay, however it is wrapped", () => {
+    it.each([
+      "RPC failed on both endpoints. Primary: insufficient funds for intrinsic transaction cost. Fallback: insufficient funds for intrinsic transaction cost",
+      "Token transfer failed: insufficient funds for gas * price + value",
+      "insufficient funds for intrinsic transaction cost (transaction={}, code=INSUFFICIENT_FUNDS, version=6.13.4)",
+    ])("attributes an unfunded sender to the wallet, not the RPC: %s", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.TRANSACTION);
+      expect(r.errorType).toBe("user");
+      expect(r.code).toBeNull();
+    });
+
+    it.each([
+      '[SolanaChainAdapter] Simulation failed: {"InsufficientFundsForRent":{"account_index":1}}',
+      "Solana RPC failed on both endpoints. Primary: Attempt to debit an account but found no record of a prior credit",
+    ])("attributes a Solana fee payer that cannot pay to the wallet: %s", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.TRANSACTION);
+      expect(r.errorType).toBe("user");
+      expect(r.code).toBeNull();
+    });
+
+    it.each([
+      "Safe deploy failed: the deployer wallet has no native balance to pay gas. Top up and retry.",
+      "Safe deploy failed: Not enough gas to execute Safe transaction (Safe error GS010). Top up the wallet's native balance and retry.",
+    ])("attributes a Safe that cannot pay for its own deploy to the wallet: %s", (input) => {
+      const r = classifyExecutionError(input);
+      expect(r.errorCategory).toBe(ErrorCategory.TRANSACTION);
+      expect(r.errorType).toBe("user");
+      expect(r.code).toBeNull();
+    });
+
+    it("still pages when an endpoint could not be reached at all", () => {
+      const r = classifyExecutionError(
+        "Solana RPC failed on both endpoints. Primary: request timeout. Fallback: request timeout"
+      );
+      expect(r.errorCategory).toBe(ErrorCategory.NETWORK_RPC);
+      expect(r.errorType).toBe("system");
+      expect(r.code).toBe("N-0001");
+    });
+  });
+
   describe("system: KeeperHub-managed RPC failures", () => {
     it("RPC failed on both endpoints: network_rpc + system", () => {
       const r = classifyExecutionError(
