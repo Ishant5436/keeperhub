@@ -29,8 +29,7 @@ function htmlResponse(status: number) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: () =>
-      Promise.reject(new SyntaxError("Unexpected token < in JSON")),
+    json: () => Promise.reject(new SyntaxError("Unexpected token < in JSON")),
   };
 }
 

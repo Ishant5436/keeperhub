@@ -45,7 +45,7 @@ export function toHmacCredentials(
 }
 
 export async function hmacSignedRequest(
-  credentials: HmacCredentials,
+  signer: HmacCredentials,
   method: "GET" | "POST",
   pathname: string,
   body?: unknown
@@ -53,10 +53,10 @@ export async function hmacSignedRequest(
   const bodyStr = body === undefined ? "" : JSON.stringify(body);
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = computeSignature(
-    credentials.hmacSecret,
+    signer.hmacSecret,
     method,
     pathname,
-    credentials.subOrgId,
+    signer.subOrgId,
     bodyStr,
     timestamp
   );
@@ -66,7 +66,7 @@ export async function hmacSignedRequest(
     plugin: "agent-gateway",
     headers: {
       "Content-Type": "application/json",
-      "X-KH-Sub-Org": credentials.subOrgId,
+      "X-KH-Sub-Org": signer.subOrgId,
       "X-KH-Timestamp": timestamp,
       "X-KH-Signature": signature,
     },
