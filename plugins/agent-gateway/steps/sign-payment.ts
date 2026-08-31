@@ -1,5 +1,6 @@
 import "server-only";
 
+import { fetchCredentials } from "@/lib/credential-fetcher";
 import {
   runPluginStep,
   type StepInput,
@@ -10,9 +11,12 @@ import type {
 } from "./sign-payment-core";
 import { signPaymentCore } from "./sign-payment-core";
 
-export type { SignPaymentResult } from "./sign-payment-core";
+export type { SignPaymentResult };
 
-export type SignPaymentInput = StepInput & SignPaymentCoreInput;
+export type SignPaymentInput = StepInput &
+  SignPaymentCoreInput & {
+    integrationId?: string;
+  };
 
 /**
  * Sign Payment Challenge Step
@@ -25,10 +29,16 @@ export async function signPaymentStep(
 ): Promise<SignPaymentResult> {
   "use step";
 
+  const credentials = input.integrationId
+    ? await fetchCredentials(input.integrationId, {
+        organizationId: input._context?.organizationId ?? null,
+      })
+    : {};
+
   return runPluginStep(
     { pluginName: "agent-gateway", actionName: "sign-payment" },
     input,
-    signPaymentCore
+    (stepInput) => signPaymentCore(stepInput, credentials)
   );
 }
 

@@ -1,6 +1,6 @@
 /**
- * Core check-credit-balance logic shared between the agent-gateway step and
- * its integration test.
+ * Core check-credit-balance logic, kept out of the step file so the shared
+ * HMAC signer can be imported by both agent-gateway steps.
  *
  * IMPORTANT: This file must NOT contain "use step" or be a step file.
  *
@@ -9,30 +9,33 @@
  */
 import "server-only";
 
-import type { HmacCredentials } from "./hmac-request-core";
-import { hmacSignedRequest } from "./hmac-request-core";
-
-export type CheckCreditCoreInput = HmacCredentials;
+import type { AgentGatewayCredentials } from "../credentials";
+import {
+  hmacSignedRequest,
+  MISSING_CREDENTIALS_ERROR,
+  toHmacCredentials,
+} from "./hmac-request-core";
 
 export type CheckCreditResult =
   | { success: true; amount: string; currency: string; subOrgId: string }
   | { success: false; error: string; code?: string };
 
+/**
+ * The action has no config fields - the sub-org being read is the one the
+ * selected connection's credentials authenticate as, never a node parameter.
+ */
 export async function checkCreditCore(
-  input: CheckCreditCoreInput
+  credentials: AgentGatewayCredentials
 ): Promise<CheckCreditResult> {
-  if (!(input.subOrgId && input.hmacSecret)) {
-    return {
-      success: false,
-      error:
-        "Missing agent-gateway credentials (subOrgId / hmacSecret). Provision a wallet via POST /api/agentic-wallet/provision and configure this connection with the returned subOrgId and hmacSecret.",
-    };
+  const hmac = toHmacCredentials(credentials);
+  if (!hmac) {
+    return { success: false, error: MISSING_CREDENTIALS_ERROR };
   }
 
   let response: Response;
   try {
     response = await hmacSignedRequest(
-      { subOrgId: input.subOrgId, hmacSecret: input.hmacSecret },
+      hmac,
       "GET",
       "/api/agentic-wallet/credit"
     );
@@ -43,7 +46,7 @@ export async function checkCreditCore(
     };
   }
 
-  const data = (await response.json().catch(() => ({}))) as Record<
+  const data = ((await response.json().catch(() => null)) ?? {}) as Record<
     string,
     unknown
   >;
@@ -59,10 +62,22 @@ export async function checkCreditCore(
     };
   }
 
-  return {
-    success: true,
-    amount: String(data.amount),
-    currency: String(data.currency),
-    subOrgId: String(data.subOrgId),
-  };
+  // A 200 that does not carry the documented balance envelope is an error,
+  // not a zero balance. An environment behind an access proxy answers 200
+  // with an HTML interstitial, and reporting success there would hand a
+  // downstream Condition a balance that was never read.
+  const { amount, currency, subOrgId } = data;
+  if (
+    !(typeof amount === "string" || typeof amount === "number") ||
+    typeof currency !== "string" ||
+    typeof subOrgId !== "string"
+  ) {
+    return {
+      success: false,
+      error:
+        "Unexpected response from /api/agentic-wallet/credit: the body did not carry amount, currency and subOrgId.",
+    };
+  }
+
+  return { success: true, amount: String(amount), currency, subOrgId };
 }

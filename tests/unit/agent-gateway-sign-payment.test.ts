@@ -10,6 +10,11 @@ vi.mock("@/lib/metrics/instrumentation/plugin", async () =>
   (await import("../mocks/step-mocks")).pluginMetricsPassthrough()
 );
 
+const mockFetchCredentials = vi.fn();
+vi.mock("@/lib/credential-fetcher", () => ({
+  fetchCredentials: (...args: unknown[]) => mockFetchCredentials(...args),
+}));
+
 const { safeFetch } = vi.hoisted(() => ({ safeFetch: vi.fn() }));
 vi.mock("@/lib/safe-fetch", () => ({ safeFetch }));
 
@@ -19,16 +24,34 @@ function jsonResponse(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+const CHALLENGE = { payTo: "0xabc", amount: "500000", nonce: "0x01" };
+
 const baseInput = {
-  subOrgId: "su-1",
-  hmacSecret: "test-secret",
+  integrationId: "int-1",
+  _context: {
+    nodeId: "node-1",
+    nodeName: "Sign Payment",
+    nodeType: "agent-gateway/sign-payment",
+    organizationId: "org-1",
+  },
   chain: "base" as const,
-  paymentChallenge: { payTo: "0xabc", amount: "500000", nonce: "0x01" },
+  workflowSlug: "my-workflow",
+  paymentChallenge: CHALLENGE,
 };
+
+function sentBody() {
+  const [, options] = safeFetch.mock.calls[0] as [string, { body?: string }];
+  return JSON.parse(options.body ?? "{}") as Record<string, unknown>;
+}
 
 describe("agent-gateway sign-payment step", () => {
   beforeEach(() => {
     safeFetch.mockReset();
+    mockFetchCredentials.mockReset();
+    mockFetchCredentials.mockResolvedValue({
+      AGENT_GATEWAY_SUB_ORG_ID: "su-1",
+      AGENT_GATEWAY_HMAC_SECRET: "test-secret",
+    });
   });
 
   it("does not auto-retry", () => {
@@ -46,11 +69,16 @@ describe("agent-gateway sign-payment step", () => {
       signature: "0xdeadbeef",
     });
 
+    expect(mockFetchCredentials).toHaveBeenCalledWith("int-1", {
+      organizationId: "org-1",
+    });
+
     const [, options] = safeFetch.mock.calls[0] as [
       string,
-      { method?: string },
+      { method?: string; headers?: Record<string, string> },
     ];
     expect(options.method).toBe("POST");
+    expect(options.headers?.["X-KH-Sub-Org"]).toBe("su-1");
   });
 
   it("returns status=pending_approval on a 202", async () => {
@@ -87,11 +115,101 @@ describe("agent-gateway sign-payment step", () => {
 
   it("rejects a missing paymentChallenge before ever calling out", async () => {
     const result = await signPaymentStep({
-      subOrgId: "su-1",
-      hmacSecret: "test-secret",
-      chain: "base",
+      ...baseInput,
       paymentChallenge: undefined,
     });
+
+    expect(result.success).toBe(false);
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses to call out when no integration is selected", async () => {
+    const result = await signPaymentStep({
+      ...baseInput,
+      integrationId: undefined,
+    });
+
+    expect(result.success).toBe(false);
+    expect(mockFetchCredentials).not.toHaveBeenCalled();
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  // The endpoint answers 400 WORKFLOW_SLUG_REQUIRED without one, so the round
+  // trip is guaranteed to fail; fail fast with a message that names the field.
+  it("rejects a blank workflowSlug before ever calling out", async () => {
+    const result = await signPaymentStep({ ...baseInput, workflowSlug: "" });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: "error",
+      code: "WORKFLOW_SLUG_REQUIRED",
+    });
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  // The json-editor config field hands the step a JSON string. Forwarding it
+  // verbatim makes the endpoint answer 400 "paymentChallenge required".
+  it("parses a paymentChallenge that arrives as a JSON string", async () => {
+    safeFetch.mockResolvedValue(jsonResponse(200, { signature: "0xdeadbeef" }));
+
+    const result = await signPaymentStep({
+      ...baseInput,
+      paymentChallenge: JSON.stringify(CHALLENGE),
+    });
+
+    expect(result).toEqual({
+      success: true,
+      status: "signed",
+      signature: "0xdeadbeef",
+    });
+    expect(sentBody().paymentChallenge).toEqual(CHALLENGE);
+  });
+
+  it("forwards workflowSlug on every request", async () => {
+    safeFetch.mockResolvedValue(jsonResponse(200, { signature: "0xdeadbeef" }));
+
+    await signPaymentStep(baseInput);
+
+    expect(sentBody()).toMatchObject({
+      chain: "base",
+      workflowSlug: "my-workflow",
+    });
+  });
+
+  it("rejects malformed JSON in paymentChallenge with a parse error", async () => {
+    const result = await signPaymentStep({
+      ...baseInput,
+      paymentChallenge: "{ not json",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: "error",
+      error: expect.stringContaining("paymentChallenge is not valid JSON"),
+    });
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a paymentChallenge that is not an object", async () => {
+    const result = await signPaymentStep({
+      ...baseInput,
+      paymentChallenge: JSON.stringify(["not", "an", "object"]),
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      status: "error",
+      error: "paymentChallenge must be a JSON object",
+    });
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses to call out when the connection holds only half the pair", async () => {
+    mockFetchCredentials.mockResolvedValue({
+      AGENT_GATEWAY_HMAC_SECRET: "test-secret",
+    });
+
+    const result = await signPaymentStep(baseInput);
 
     expect(result.success).toBe(false);
     expect(safeFetch).not.toHaveBeenCalled();

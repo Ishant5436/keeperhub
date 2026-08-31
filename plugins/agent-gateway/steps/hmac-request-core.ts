@@ -12,14 +12,37 @@ import "server-only";
 
 import { computeSignature } from "@/lib/agentic-wallet/hmac";
 import { safeFetch } from "@/lib/safe-fetch";
+import type { AgentGatewayCredentials } from "../credentials";
 
 const KEEPERHUB_APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com";
+
+export const MISSING_CREDENTIALS_ERROR =
+  "Missing agent-gateway credentials (Sub-Org ID / HMAC Secret). Provision a wallet via POST /api/agentic-wallet/provision, then select an Agent Gateway connection holding the returned subOrgId and hmacSecret on this node.";
 
 export type HmacCredentials = {
   subOrgId: string;
   hmacSecret: string;
 };
+
+/**
+ * Narrow the connection's credential record - keyed by the formFields' envVar
+ * names, which is what fetchCredentials returns - to the pair the signer
+ * needs. Returns null when either half is absent so each core can surface its
+ * own missing-credentials result instead of signing with a partial identity.
+ */
+export function toHmacCredentials(
+  credentials: AgentGatewayCredentials
+): HmacCredentials | null {
+  const subOrgId = credentials.AGENT_GATEWAY_SUB_ORG_ID;
+  const hmacSecret = credentials.AGENT_GATEWAY_HMAC_SECRET;
+
+  if (!(subOrgId && hmacSecret)) {
+    return null;
+  }
+
+  return { subOrgId, hmacSecret };
+}
 
 export async function hmacSignedRequest(
   credentials: HmacCredentials,

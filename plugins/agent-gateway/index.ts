@@ -18,6 +18,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       type: "text",
       placeholder: "e.g. su-...",
       configKey: "subOrgId",
+      envVar: "AGENT_GATEWAY_SUB_ORG_ID",
       helpText:
         "Obtained once from POST /api/agentic-wallet/provision. There is no in-app provisioning step - provision out-of-band and paste the returned subOrgId and hmacSecret here.",
     },
@@ -26,6 +27,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       label: "HMAC Secret",
       type: "password",
       configKey: "hmacSecret",
+      envVar: "AGENT_GATEWAY_HMAC_SECRET",
       helpText:
         "The hmacSecret returned alongside subOrgId by POST /api/agentic-wallet/provision. Never re-displayed by that endpoint - store it here when you provision.",
     },
@@ -51,6 +53,10 @@ const agentGatewayPlugin: IntegrationPlugin = {
         { field: "success", description: "Whether the read succeeded" },
         { field: "amount", description: "Credit balance as a USD decimal string" },
         { field: "currency", description: "Currency of the balance (USD)" },
+        {
+          field: "subOrgId",
+          description: "The sub-org the balance was read for",
+        },
       ],
       configFields: [],
     },
@@ -91,7 +97,9 @@ const agentGatewayPlugin: IntegrationPlugin = {
           key: "workflowSlug",
           label: "Workflow Slug",
           type: "template-input",
-          required: false,
+          required: true,
+          helpTip:
+            "The slug of the KeeperHub marketplace workflow being paid for. Required: /api/agentic-wallet/sign derives the payee and amount from the workflows registry by slug.",
         },
       ],
     },
