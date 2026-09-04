@@ -66,8 +66,8 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
 * **Outputs:**
   * `success`: Boolean indicating whether the signing operation succeeded.
   * `status`: Current state (`"signed"`, `"pending_approval"`, `"blocked"`, or `"error"`).
-  * `signature`: 65-byte hex-encoded payment authorization signature (redacted from plaintext observability logs).
   * `approvalRequestId`: Present when human-in-the-loop review is required by sub-org risk policy.
+  *(Note: To eliminate bearer payment authorization exposure, raw signatures are omitted from public workflow outputFields and retained exclusively in internal execution step state).*
 
 ---
 

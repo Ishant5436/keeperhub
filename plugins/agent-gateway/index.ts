@@ -71,7 +71,6 @@ const agentGatewayPlugin: IntegrationPlugin = {
       outputFields: [
         { field: "success", description: "Whether a signature was produced" },
         { field: "status", description: "\"signed\" | \"pending_approval\" | \"blocked\" | \"error\"" },
-        { field: "signature", description: "The 65-byte signature, present when status is \"signed\"" },
         { field: "approvalRequestId", description: "Present when status is \"pending_approval\"" },
       ],
       configFields: [
