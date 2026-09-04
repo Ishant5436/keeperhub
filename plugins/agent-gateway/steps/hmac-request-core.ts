@@ -10,12 +10,23 @@
  */
 import "server-only";
 
-import { computeSignature } from "@/lib/agentic-wallet/hmac";
+import { createHash, createHmac } from "node:crypto";
 import { safeFetch } from "@/lib/safe-fetch";
+import { appUrl } from "@/lib/site/identity";
 import type { AgentGatewayCredentials } from "../credentials";
 
-const KEEPERHUB_APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com";
+function computeSignature(
+  secret: string,
+  method: string,
+  path: string,
+  subOrgId: string,
+  body: string,
+  timestamp: string
+): string {
+  const bodyDigest = createHash("sha256").update(body).digest("hex");
+  const signingString = `${method}\n${path}\n${subOrgId}\n${bodyDigest}\n${timestamp}`;
+  return createHmac("sha256", secret).update(signingString).digest("hex");
+}
 
 export const MISSING_CREDENTIALS_ERROR =
   "Missing agent-gateway credentials (Sub-Org ID / HMAC Secret). Provision a wallet via POST /api/agentic-wallet/provision, then select an Agent Gateway connection holding the returned subOrgId and hmacSecret on this node.";
@@ -61,7 +72,7 @@ export async function hmacSignedRequest(
     timestamp
   );
 
-  return safeFetch(`${KEEPERHUB_APP_URL}${pathname}`, {
+  return safeFetch(`${appUrl()}${pathname}`, {
     method,
     plugin: "agent-gateway",
     headers: {

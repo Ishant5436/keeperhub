@@ -12,8 +12,9 @@
  * Raw `fetch` is used for the same reason - see the exception documented in
  * plugins/AGENTS.md and the "Forbid raw network egress in plugins" CI check.
  */
-const KEEPERHUB_APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com";
+const KEEPERHUB_APP_URL = (
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com"
+).replace(/\/+$/, "");
 
 const CREDIT_PATH = "/api/agentic-wallet/credit";
 

@@ -64,7 +64,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       slug: "sign-payment",
       label: "Sign Payment Challenge",
       description:
-        "Request a Turnkey-backed signature for an x402 (Base) or MPP (Tempo) payment challenge. May return a pending-approval result instead of a signature depending on the sub-org's risk policy.",
+        "Request a Turnkey-backed signature for an x402 (Base) or MPP (Tempo) payment challenge for a KeeperHub marketplace workflow. Payee and amount are derived from the workflow registry by slug. May return a pending-approval result instead of a signature depending on the sub-org's risk policy.",
       category: "Agent Gateway",
       stepFunction: "signPaymentStep",
       stepImportPath: "sign-payment",
@@ -91,7 +91,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
           type: "json-editor",
           required: true,
           helpTip:
-            "The 402/WWW-Authenticate challenge payload to sign, forwarded verbatim to the facilitator's schema.",
+            "The 402/WWW-Authenticate payment challenge payload. Must belong to a KeeperHub marketplace workflow; payTo and amount are verified against the workflow registry.",
         },
         {
           key: "workflowSlug",

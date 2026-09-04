@@ -27,6 +27,7 @@ const SENSITIVE_KEYS = new Set([
   "refresh_token",
   "privateKey",
   "private_key",
+  "signature",
 
   // Database
   "databaseUrl",
