@@ -17,7 +17,7 @@ import { safeFetch } from "@/lib/safe-fetch";
 import { appUrl } from "@/lib/site/identity";
 import type { AgentGatewayCredentials } from "../credentials";
 
-function computeSignature(
+export function computeSignature(
   secret: string,
   method: string,
   path: string,

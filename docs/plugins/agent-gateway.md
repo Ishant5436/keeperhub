@@ -75,5 +75,5 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
 
 1. **Zero Private Key Custody:** Workflow steps never hold, inspect, or pass private keys. All cryptographic signing occurs inside hardware-isolated Turnkey enclaves.
 2. **Workflow-Bound Payment Gating:** Payment challenges must match registered marketplace workflows by slug; arbitrary third-party payees or unbounded amounts are rejected at the route handler level with `403 Forbidden`.
-3. **Replay & Timestamp Protection:** HMAC request signatures are valid within a strict symmetric 300-second window.
-4. **Sensitive Data Redaction:** Signatures and authorization tokens are automatically filtered by KeeperHub's redaction pipeline before rendering in workflow execution panels.
+3. **Timestamp Window & Double-Spend Prevention:** HMAC request signatures are valid within a symmetric 300-second window to bound replay exposure, while underlying x402/MPP protocol nonces enforce single-use execution at the settlement layer.
+4. **Sensitive Data Redaction:** Authorization tokens, secrets, and private credentials are automatically filtered by KeeperHub's redaction pipeline before rendering in workflow execution panels.
