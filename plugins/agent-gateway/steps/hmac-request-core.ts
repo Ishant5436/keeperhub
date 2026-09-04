@@ -5,8 +5,10 @@
  *
  * IMPORTANT: This file must NOT contain "use step" or be a step file.
  *
- * Uses the canonical HMAC signing primitive from lib/agentic-wallet/hmac.ts
- * ensuring exact 1:1 parity with server-side request verification.
+ * Mirrors the canonical HMAC signing primitive from lib/agentic-wallet/hmac.ts
+ * using pure node:crypto to prevent pulling transitive KMS/DB/schema dependencies
+ * into workflow step bundles, maintaining exact 1:1 algorithmic parity with
+ * server-side request verification.
  */
 import "server-only";
 
