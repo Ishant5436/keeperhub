@@ -107,8 +107,51 @@ type ProtocolEntry = {
  * Load protocol definitions from discovered files
  * Each file must have a default export that is a ProtocolDefinition
  */
-async function loadProtocolDefinitions(): Promise<ProtocolEntry[]> {
-  const filePaths = discoverProtocols();
+/** A protocol file that could not become a registry entry, and why. */
+export type ProtocolFailure = { filePath: string; reason: string };
+
+/**
+ * Raised when at least one protocol file could not be loaded.
+ *
+ * Thrown rather than logged because the generated `protocols/index.ts` and
+ * `lib/types/integration.ts` are tracked files, not build artefacts: writing a
+ * registry that silently omits a protocol produces a plausible-looking diff
+ * under a "DO NOT EDIT MANUALLY" header, which is how a deletion gets
+ * committed. `lib/step-registry.ts` is gitignored and carries no such risk.
+ */
+export class ProtocolDiscoveryError extends Error {
+  readonly failures: readonly ProtocolFailure[];
+
+  constructor(failures: ProtocolFailure[]) {
+    super(
+      [
+        `${failures.length} protocol file(s) could not be loaded.`,
+        "protocols/index.ts and lib/types/integration.ts were left untouched.",
+        ...failures.map((f) => `  - ${f.filePath}: ${f.reason}`),
+      ].join("\n")
+    );
+    this.name = "ProtocolDiscoveryError";
+    this.failures = failures;
+  }
+}
+
+/** Seams for tests. Production passes nothing and gets the real filesystem. */
+export type ProtocolLoadDeps = {
+  discover?: () => string[];
+  importProtocol?: (filePath: string) => Promise<unknown>;
+};
+
+export async function loadProtocolDefinitions(
+  deps: ProtocolLoadDeps = {}
+): Promise<ProtocolEntry[]> {
+  const discover = deps.discover ?? discoverProtocols;
+  const importProtocol =
+    deps.importProtocol ??
+    // Windows: a bare absolute path ("C:\\...") is not a valid ESM
+    // specifier -- Node's loader rejects it with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+    ((filePath: string) => import(pathToFileURL(filePath).href));
+
+  const filePaths = discover();
 
   if (filePaths.length === 0) {
     console.log("   No protocol definitions found in protocols/");
@@ -116,19 +159,23 @@ async function loadProtocolDefinitions(): Promise<ProtocolEntry[]> {
   }
 
   const results: ProtocolEntry[] = [];
+  // Collected rather than thrown on the first one: a run that names only the
+  // first broken file costs one round trip per broken file to get through.
+  const failures: ProtocolFailure[] = [];
 
   for (const filePath of filePaths) {
     try {
-      // Windows: a bare absolute path ("C:\...") is not a valid ESM
-      // specifier -- Node's loader rejects it with ERR_UNSUPPORTED_ESM_URL_SCHEME.
-      const mod = await import(pathToFileURL(filePath).href);
+      const mod = (await importProtocol(filePath)) as {
+        default?: import("@/lib/protocol-registry").ProtocolDefinition;
+      };
       const definition =
-        mod.default as import("@/lib/protocol-registry").ProtocolDefinition;
+        mod?.default as import("@/lib/protocol-registry").ProtocolDefinition;
 
       if (!definition?.slug) {
-        console.warn(
-          `   Warning: ${filePath} has no default export with a slug, skipping`
-        );
+        failures.push({
+          filePath,
+          reason: "no default export with a slug",
+        });
         continue;
       }
 
@@ -139,11 +186,15 @@ async function loadProtocolDefinitions(): Promise<ProtocolEntry[]> {
       );
       results.push({ slug: definition.slug, fileStem, definition });
     } catch (error) {
-      console.warn(
-        `   Warning: Failed to import protocol from ${filePath}:`,
-        error
-      );
+      failures.push({
+        filePath,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
+  }
+
+  if (failures.length > 0) {
+    throw new ProtocolDiscoveryError(failures);
   }
 
   return results;
@@ -1294,7 +1345,8 @@ async function main(): Promise<void> {
   console.log("Done! Plugin registry updated.\n");
 }
 
-// Only when run directly, so a test can import loadPluginAllowlist without
+// Only when run directly, so a test can import loadPluginAllowlist or
+// loadProtocolDefinitions without regenerating the tree.
 // regenerating the tree. `require.main === module` rather than a
 // `process.argv[1]` suffix test - scripts/check-api-docs-routes.ts records why
 // identity beats comparing path spellings.
