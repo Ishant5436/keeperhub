@@ -8,7 +8,7 @@
  * the current list of available actions.
  *
  * Plugin Allowlist (Optional):
- * - Create config/plugin-allowlist.json to control which plugins are enabled
+ * - Create plugins/plugin-allowlist.json to control which plugins are enabled
  * - If the file doesn't exist, all discovered plugins are enabled
  * - This prevents disabled plugins from being registered while keeping them in the codebase
  *
@@ -261,22 +261,108 @@ async function formatCode(code: string): Promise<string> {
 }
 
 /**
- * Load plugin allowlist from config file
- * Returns null if config doesn't exist (meaning all plugins enabled)
+ * Raised when the allowlist file exists but its content cannot be trusted:
+ * unparsable JSON, or a document that does not match
+ * plugins/plugin-allowlist.schema.json (missing "plugins", or "plugins" not
+ * an array of unique strings).
+ *
+ * An absent file is not an error - it means no restriction was declared, and
+ * every plugin stays enabled. A present-but-broken file means the operator's
+ * intent is known and unreadable, which is exactly when guessing is worst:
+ * silently falling back to "all plugins enabled" discards a stated
+ * restriction, and silently falling back to "[]" disables everything the
+ * operator meant to keep. Neither is a value the caller asked for, so the
+ * script exits non-zero instead of guessing.
  */
-function loadPluginAllowlist(): string[] | null {
-  if (!existsSync(PLUGIN_ALLOWLIST_FILE)) {
+export class PluginAllowlistError extends Error {
+  constructor(
+    readonly filePath: string,
+    reason: string
+  ) {
+    super(`Invalid plugin allowlist at ${filePath}: ${reason}`);
+    this.name = "PluginAllowlistError";
+  }
+}
+
+/** Seams for tests. Production passes nothing and gets the real filesystem. */
+export type PluginAllowlistDeps = {
+  exists?: () => boolean;
+  readFile?: () => string;
+};
+
+/**
+ * Check the parsed document against the shape declared by
+ * plugins/plugin-allowlist.schema.json ("required": ["plugins"], "plugins"
+ * typed as an array of unique strings) by hand, rather than pulling in a
+ * JSON-schema library for one file. `"plugins": []` is a valid document -
+ * it means the operator deliberately wants nothing enabled - so only a
+ * missing/malformed "plugins" key is rejected, not an empty one.
+ */
+function assertValidAllowlist(
+  config: unknown,
+  filePath: string
+): asserts config is { plugins: string[] } {
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new PluginAllowlistError(filePath, "document must be a JSON object");
+  }
+
+  if (!("plugins" in config)) {
+    throw new PluginAllowlistError(
+      filePath,
+      'missing required property "plugins"'
+    );
+  }
+
+  const { plugins } = config as { plugins: unknown };
+
+  if (!Array.isArray(plugins)) {
+    throw new PluginAllowlistError(filePath, '"plugins" must be an array');
+  }
+
+  if (!plugins.every((entry): entry is string => typeof entry === "string")) {
+    throw new PluginAllowlistError(
+      filePath,
+      '"plugins" must be an array of strings'
+    );
+  }
+
+  if (new Set(plugins).size !== plugins.length) {
+    throw new PluginAllowlistError(
+      filePath,
+      '"plugins" must not contain duplicate entries'
+    );
+  }
+}
+
+/**
+ * Load plugin allowlist from config file.
+ * Returns null if the file doesn't exist (meaning all plugins enabled).
+ * Throws PluginAllowlistError if the file exists but cannot be parsed, or
+ * does not match plugins/plugin-allowlist.schema.json.
+ */
+export function loadPluginAllowlist(
+  deps: PluginAllowlistDeps = {}
+): string[] | null {
+  const exists = deps.exists ?? (() => existsSync(PLUGIN_ALLOWLIST_FILE));
+  const readFile =
+    deps.readFile ?? (() => readFileSync(PLUGIN_ALLOWLIST_FILE, "utf-8"));
+
+  if (!exists()) {
     return null; // No allowlist = all plugins enabled
   }
 
+  let config: unknown;
   try {
-    const content = readFileSync(PLUGIN_ALLOWLIST_FILE, "utf-8");
-    const config = JSON.parse(content);
-    return config.plugins || [];
+    config = JSON.parse(readFile());
   } catch (error) {
-    console.warn(`   Warning: Failed to load plugin allowlist: ${error}`);
-    return null; // Fallback to all plugins on error
+    throw new PluginAllowlistError(
+      PLUGIN_ALLOWLIST_FILE,
+      error instanceof Error ? error.message : String(error)
+    );
   }
+
+  assertValidAllowlist(config, PLUGIN_ALLOWLIST_FILE);
+  return config.plugins;
 }
 
 // Track generated codegen templates
@@ -1205,7 +1291,13 @@ async function main(): Promise<void> {
   console.log("Done! Plugin registry updated.\n");
 }
 
-main().catch((error) => {
-  console.error("Error:", error);
-  process.exit(1);
-});
+// Only when run directly, so a test can import loadPluginAllowlist without
+// regenerating the tree. `require.main === module` rather than a
+// `process.argv[1]` suffix test - scripts/check-api-docs-routes.ts records why
+// identity beats comparing path spellings.
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("Error:", error);
+    process.exit(1);
+  });
+}
