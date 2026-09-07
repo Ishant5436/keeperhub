@@ -26,11 +26,6 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/step-registry", () => ({
-  getActionLabel: (actionType: string) => actionType,
-  getStepImporter: () => undefined,
-}));
-
 import { buildEdgesBySourceHandle } from "@/lib/workflow/editor/edge-handle-utils";
 import { buildEdgesBySource } from "@/lib/workflow/executor/convergence-barrier";
 import { identifyLoopBody } from "@/lib/workflow/executor/executor.workflow";

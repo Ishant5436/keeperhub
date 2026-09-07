@@ -2053,13 +2053,24 @@ export type ForEachIterationSummary = {
 /**
  * Prefer a nested For Each summary's firstFailureNodeId over the bodyResults
  * key. Insertion order records the nested loop id before routeAfterSuccess
- * overwrites the entry with data: summary.
+ * overwrites the entry with data: summary. Guard on `failedIterations` so a
+ * failed result with unrelated `data` is not treated as a summary.
  */
 export function resolveBodyFailureNodeId(
   bodyFailure: [string, { success: boolean; error?: string; data?: unknown }]
 ): string {
-  const summary = bodyFailure[1].data as ForEachIterationSummary | undefined;
-  return summary?.firstFailureNodeId ?? bodyFailure[0];
+  const data = bodyFailure[1].data;
+  if (
+    data !== null &&
+    typeof data === "object" &&
+    "failedIterations" in data &&
+    typeof (data as ForEachIterationSummary).failedIterations === "number"
+  ) {
+    return (
+      (data as ForEachIterationSummary).firstFailureNodeId ?? bodyFailure[0]
+    );
+  }
+  return bodyFailure[0];
 }
 
 /**
@@ -2086,6 +2097,7 @@ export function markCollectSkippedOnForEachFailure(params: {
   aggregateCollectNodeId: string;
   collectNodeId: string | undefined;
   doneCollectNodeId: string | undefined;
+  collectLabel: string;
   error: string;
   iterationResults: unknown[];
   currentVisited: Set<string>;
@@ -2093,6 +2105,7 @@ export function markCollectSkippedOnForEachFailure(params: {
     string,
     { success: boolean; error?: string; data?: unknown }
   >;
+  currentOutputs: NodeOutputs;
   attemptedNodes: Set<string>;
 }): void {
   const skipData = {
@@ -2104,11 +2117,19 @@ export function markCollectSkippedOnForEachFailure(params: {
     count: params.iterationResults.length,
     skipped: true as const,
   };
+  const sanitizedCollectId = params.aggregateCollectNodeId.replace(
+    /[^a-zA-Z0-9]/g,
+    "_"
+  );
   params.currentVisited.add(params.aggregateCollectNodeId);
   params.attemptedNodes.add(params.aggregateCollectNodeId);
   params.currentResults[params.aggregateCollectNodeId] = {
     success: false,
     error: params.error,
+    data: skipData,
+  };
+  params.currentOutputs[sanitizedCollectId] = {
+    label: params.collectLabel,
     data: skipData,
   };
 
@@ -2165,12 +2186,14 @@ export async function settleForEachPostLoop(params: {
   onDoneTargets: (targets: string[]) => Promise<void>;
   collectNodeId: string | undefined;
   doneCollectNodeId: string | undefined;
+  collectLabel: string;
   iterationResults: unknown[];
   currentVisited: Set<string>;
   currentResults: Record<
     string,
     { success: boolean; error?: string; data?: unknown }
   >;
+  currentOutputs: NodeOutputs;
   attemptedNodes: Set<string>;
 }): Promise<ForEachPostLoopResult> {
   const postLoopResult = await dispatchForEachPostLoopIfNeeded({
@@ -2188,10 +2211,12 @@ export async function settleForEachPostLoop(params: {
       aggregateCollectNodeId: params.continuation.collectNodeId,
       collectNodeId: params.collectNodeId,
       doneCollectNodeId: params.doneCollectNodeId,
+      collectLabel: params.collectLabel,
       error: params.firstIterationFailure.error,
       iterationResults: params.iterationResults,
       currentVisited: params.currentVisited,
       currentResults: params.currentResults,
+      currentOutputs: params.currentOutputs,
       attemptedNodes: params.attemptedNodes,
     });
   }
@@ -2984,6 +3009,17 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     //                      (no aggregation injection).
     //   none:              fire-and-forget loop, nothing to do here.
     // Any failed iteration skips this block entirely (no Collect / downstream).
+    const skipCollectNodeId =
+      continuation.kind === "aggregate-collect"
+        ? continuation.collectNodeId
+        : undefined;
+    const skipCollectNode = skipCollectNodeId
+      ? nodeMap.get(skipCollectNodeId)
+      : undefined;
+    const skipCollectLabel = skipCollectNode
+      ? getNodeName(skipCollectNode)
+      : "Collect";
+
     await settleForEachPostLoop({
       firstIterationFailure,
       continuation,
@@ -3049,9 +3085,11 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
       },
       collectNodeId,
       doneCollectNodeId,
+      collectLabel: skipCollectLabel,
       iterationResults,
       currentVisited,
       currentResults,
+      currentOutputs,
       attemptedNodes,
     });
 

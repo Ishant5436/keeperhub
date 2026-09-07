@@ -6,11 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/lib/step-registry", () => ({
-  getActionLabel: (actionType: string) => actionType,
-  getStepImporter: () => undefined,
-}));
-
 import {
   countIterationFailures,
   findFirstIterationFailure,
@@ -29,6 +24,20 @@ const markedFailure = {
 };
 
 const mappedFailure = { error: "boom", nodeId: "step-a" };
+
+type TestOutputs = Record<string, { label: string; data: unknown }>;
+
+const emptyVisited = (): {
+  visited: Set<string>;
+  attempted: Set<string>;
+  results: Record<string, { success: boolean; error?: string; data?: unknown }>;
+  outputs: TestOutputs;
+} => ({
+  visited: new Set<string>(),
+  attempted: new Set<string>(),
+  results: {},
+  outputs: {},
+});
 
 describe("findFirstIterationFailure", () => {
   it("returns undefined when all iterations succeeded", () => {
@@ -105,22 +114,24 @@ describe("isForEachBodyFailureResult", () => {
 
 describe("markCollectSkippedOnForEachFailure", () => {
   it("marks aggregate Collect visited and records explicit failure with data", () => {
-    const visited = new Set<string>();
-    const attempted = new Set<string>();
-    const results: Record<
-      string,
-      { success: boolean; error?: string; data?: unknown }
-    > = {};
+    const { visited, attempted, results, outputs } = emptyVisited();
     const iterationResults = [markedFailure, { ok: 2 }];
+    const skipData = {
+      results: [mappedFailure, { ok: 2 }],
+      count: 2,
+      skipped: true as const,
+    };
 
     markCollectSkippedOnForEachFailure({
       aggregateCollectNodeId: "done-collect",
       collectNodeId: "legacy-collect",
       doneCollectNodeId: "done-collect",
+      collectLabel: "Done Collect",
       error: "body failed",
       iterationResults,
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -131,40 +142,42 @@ describe("markCollectSkippedOnForEachFailure", () => {
     expect(results["done-collect"]).toEqual({
       success: false,
       error: "body failed",
-      data: {
-        results: [mappedFailure, { ok: 2 }],
-        count: 2,
-        skipped: true,
-      },
+      data: skipData,
+    });
+    expect(outputs.done_collect).toEqual({
+      label: "Done Collect",
+      data: skipData,
     });
   });
 
   it("does not mark legacy in-body Collect when it is the done Collect", () => {
-    const visited = new Set<string>();
-    const attempted = new Set<string>();
-    const results: Record<
-      string,
-      { success: boolean; error?: string; data?: unknown }
-    > = {};
+    const { visited, attempted, results, outputs } = emptyVisited();
+    const skipData = {
+      results: [mappedFailure],
+      count: 1,
+      skipped: true as const,
+    };
 
     markCollectSkippedOnForEachFailure({
       aggregateCollectNodeId: "collect-1",
       collectNodeId: "collect-1",
       doneCollectNodeId: "collect-1",
+      collectLabel: "Collect",
       error: "body failed",
       iterationResults: [markedFailure],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
     expect([...visited]).toEqual(["collect-1"]);
     expect([...attempted]).toEqual(["collect-1"]);
     expect(results["collect-1"]?.success).toBe(false);
-    expect(results["collect-1"]?.data).toEqual({
-      results: [mappedFailure],
-      count: 1,
-      skipped: true,
+    expect(results["collect-1"]?.data).toEqual(skipData);
+    expect(outputs.collect_1).toEqual({
+      label: "Collect",
+      data: skipData,
     });
   });
 });
@@ -191,22 +204,26 @@ describe("resolveBodyFailureNodeId", () => {
       resolveBodyFailureNodeId(["step-a", { success: false, error: "boom" }])
     ).toBe("step-a");
   });
+
+  it("falls back when data has firstFailureNodeId but no failedIterations", () => {
+    expect(
+      resolveBodyFailureNodeId([
+        "inner-fe",
+        {
+          success: false,
+          error: "boom",
+          data: { firstFailureNodeId: "should-not-win" },
+        },
+      ])
+    ).toBe("inner-fe");
+  });
 });
 
 describe("settleForEachPostLoop", () => {
-  const emptyVisited = () => ({
-    visited: new Set<string>(),
-    attempted: new Set<string>(),
-    results: {} as Record<
-      string,
-      { success: boolean; error?: string; data?: unknown }
-    >,
-  });
-
   it("skips Collect and done-targets when an iteration failed", async () => {
     const onAggregateCollect = vi.fn();
     const onDoneTargets = vi.fn();
-    const { visited, attempted, results } = emptyVisited();
+    const { visited, attempted, results, outputs } = emptyVisited();
 
     const result = await settleForEachPostLoop({
       firstIterationFailure: markedFailure,
@@ -215,9 +232,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: "collect-1",
       doneCollectNodeId: "collect-1",
+      collectLabel: "Collect",
       iterationResults: [markedFailure],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -229,12 +248,20 @@ describe("settleForEachPostLoop", () => {
       count: 1,
       skipped: true,
     });
+    expect(outputs.collect_1).toEqual({
+      label: "Collect",
+      data: {
+        results: [mappedFailure],
+        count: 1,
+        skipped: true,
+      },
+    });
   });
 
   it("skips done-targets continuation when an iteration failed", async () => {
     const onAggregateCollect = vi.fn();
     const onDoneTargets = vi.fn();
-    const { visited, attempted, results } = emptyVisited();
+    const { visited, attempted, results, outputs } = emptyVisited();
 
     const result = await settleForEachPostLoop({
       firstIterationFailure: markedFailure,
@@ -243,9 +270,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: undefined,
       doneCollectNodeId: undefined,
+      collectLabel: "Collect",
       iterationResults: [markedFailure],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -256,7 +285,7 @@ describe("settleForEachPostLoop", () => {
   it("runs aggregate-collect when all iterations succeeded", async () => {
     const onAggregateCollect = vi.fn().mockResolvedValue(undefined);
     const onDoneTargets = vi.fn();
-    const { visited, attempted, results } = emptyVisited();
+    const { visited, attempted, results, outputs } = emptyVisited();
 
     const result = await settleForEachPostLoop({
       firstIterationFailure: undefined,
@@ -265,9 +294,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: "collect-1",
       doneCollectNodeId: "collect-1",
+      collectLabel: "Collect",
       iterationResults: [{ ok: true }],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -279,7 +310,7 @@ describe("settleForEachPostLoop", () => {
   it("runs done-targets when all iterations succeeded", async () => {
     const onAggregateCollect = vi.fn();
     const onDoneTargets = vi.fn().mockResolvedValue(undefined);
-    const { visited, attempted, results } = emptyVisited();
+    const { visited, attempted, results, outputs } = emptyVisited();
 
     const result = await settleForEachPostLoop({
       firstIterationFailure: undefined,
@@ -288,9 +319,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: undefined,
       doneCollectNodeId: undefined,
+      collectLabel: "Collect",
       iterationResults: [{ ok: true }],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -302,7 +335,7 @@ describe("settleForEachPostLoop", () => {
   it("returns none when there is no post-loop continuation", async () => {
     const onAggregateCollect = vi.fn();
     const onDoneTargets = vi.fn();
-    const { visited, attempted, results } = emptyVisited();
+    const { visited, attempted, results, outputs } = emptyVisited();
 
     const result = await settleForEachPostLoop({
       firstIterationFailure: undefined,
@@ -311,9 +344,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: undefined,
       doneCollectNodeId: undefined,
+      collectLabel: "Collect",
       iterationResults: [{ ok: true }],
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -333,7 +368,13 @@ describe("settleForEachPostLoop", () => {
     > = {
       "for-each": { success: false, error: "body failed" },
     };
+    const outputs: TestOutputs = {};
     const iterationResults = [markedFailure];
+    const skipData = {
+      results: [mappedFailure],
+      count: 1,
+      skipped: true as const,
+    };
 
     const outcome = await settleForEachPostLoop({
       firstIterationFailure: markedFailure,
@@ -342,9 +383,11 @@ describe("settleForEachPostLoop", () => {
       onDoneTargets,
       collectNodeId: "collect-1",
       doneCollectNodeId: "collect-1",
+      collectLabel: "Collect",
       iterationResults,
       currentVisited: visited,
       currentResults: results,
+      currentOutputs: outputs,
       attemptedNodes: attempted,
     });
 
@@ -352,15 +395,11 @@ describe("settleForEachPostLoop", () => {
     expect(onAggregateCollect).not.toHaveBeenCalled();
     expect(visited.has("collect-1")).toBe(true);
     expect(attempted.has("collect-1")).toBe(true);
-    expect(results["collect-1"]?.data).toEqual({
-      results: [mappedFailure],
-      count: 1,
-      skipped: true,
+    expect(results["collect-1"]?.data).toEqual(skipData);
+    expect(outputs.collect_1).toEqual({
+      label: "Collect",
+      data: skipData,
     });
-    expect(Object.values(results).at(-1)?.data).toEqual({
-      results: [mappedFailure],
-      count: 1,
-      skipped: true,
-    });
+    expect(Object.values(results).at(-1)?.data).toEqual(skipData);
   });
 });
