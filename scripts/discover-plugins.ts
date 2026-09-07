@@ -29,6 +29,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 const PLUGINS_DIR = join(process.cwd(), "plugins");
@@ -118,7 +119,9 @@ async function loadProtocolDefinitions(): Promise<ProtocolEntry[]> {
 
   for (const filePath of filePaths) {
     try {
-      const mod = await import(filePath);
+      // Windows: a bare absolute path ("C:\...") is not a valid ESM
+      // specifier -- Node's loader rejects it with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+      const mod = await import(pathToFileURL(filePath).href);
       const definition =
         mod.default as import("@/lib/protocol-registry").ProtocolDefinition;
 
