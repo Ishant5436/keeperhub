@@ -259,7 +259,7 @@ The identifiers in this flow are not interchangeable:
 | Term | Where it comes from | What it identifies |
 |---|---|---|
 | Execution ID (`executionId`) | `POST /api/execute/transfer` (or any direct-execution route) | One attempt to run something: an opaque 21-character nanoid with no distinguishing prefix. Polled via `GET /api/execute/{executionId}/status`. |
-| `transactionHash` | The status response once a broadcast lands | The onchain transaction this execution sent. A direct execution that broadcasts has exactly one: the status response carries it in `transactionHash`, and `receipts` holds its verification result (status, block, gas) once the chain has answered. An execution that never broadcasts leaves `receipts` as an empty array. |
+| `transactionHash` | The status response once it is broadcast | The onchain transaction this execution sent. A direct execution that broadcasts has exactly one: the status response carries it in `transactionHash`, and `receipts` holds its verification result (status, block, gas) as of settle time - the chain may not have answered yet, in which case the entry records `timeout` or `not_found` and the execution stays non-terminal. An execution that never broadcasts leaves `receipts` as an empty array. |
 | `transactionLink` | The same status response | A block-explorer URL for that `transactionHash` - a convenience, not a separate identifier. |
 
 The rule that keeps them straight: an execution is **one attempt**, and a
