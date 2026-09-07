@@ -165,7 +165,6 @@ type StreamMessage = {
 
 type StreamState = {
   buffer: string;
-  complete: boolean;
   currentData: WorkflowData;
 };
 
@@ -312,8 +311,6 @@ function processStreamLine(
   } else if (message.type === "error") {
     console.error("[API Client] Error:", message.error);
     throw new Error(message.error || "Failed to generate workflow");
-  } else if (message.type === "complete") {
-    state.complete = true;
   }
 }
 
@@ -376,7 +373,6 @@ export const aiApi = {
     const decoder = new TextDecoder();
     const state: StreamState = {
       buffer: "",
-      complete: false,
       currentData: existingWorkflow
         ? {
             nodes: existingWorkflow.nodes || [],
@@ -397,12 +393,14 @@ export const aiApi = {
         processStreamChunk(value, decoder, onUpdate, state);
       }
 
-      processStreamLine(state.buffer + decoder.decode(), onUpdate, state);
-      if (!state.complete) {
-        throw new Error("Workflow generation stream ended before completion");
-      }
-
       return state.currentData;
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        // Preserve the original stream or callback error if cleanup fails.
+      }
+      throw error;
     } finally {
       reader.releaseLock();
     }
