@@ -466,7 +466,8 @@ for each action are defined in the protocol registry.
 Contract](#call-smart-contract) writes, protocol writes may include `rejection`
 and `errorClass` on a failed write, and they include `transactionLink` whenever
 the write step produced one (including on revert). Call Smart Contract writes
-omit `rejection`/`errorClass` and omit the link on a reverted call.
+omit `rejection`/`errorClass`; they still include `transactionLink` whenever
+the write step produced one (including on revert).
 
 ```json
 {

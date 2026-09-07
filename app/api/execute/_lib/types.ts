@@ -22,10 +22,11 @@ export type ExecuteResponse = {
   status: ExecutionStatus;
   transactionHash?: string | null;
   transactionLink?: string | null;
-  // Present only when status is "failed". Includes the on-chain
-  // reconciliation failure message (e.g. reverted, receipt not found) when
-  // that's what failed the execution, not just a self-reported broadcast error.
-  // Omitted for `unconfirmed`: that status is non-terminal and poll-only.
+  // When present, includes the on-chain reconciliation failure message
+  // (e.g. reverted, receipt not found) or a self-reported broadcast error.
+  // Protocol write responses omit `error` when `status` is `unconfirmed`
+  // (non-terminal, poll-only). Other execute routes may still include
+  // `error` whenever the outcome set one, including alongside `unconfirmed`.
   // Callers must not treat a missing or present `error` as a signal to retry.
   error?: string;
   // Typed revert classification from the write step, when available.
