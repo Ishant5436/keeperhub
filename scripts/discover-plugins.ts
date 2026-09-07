@@ -69,15 +69,22 @@ const LEADING_WHITESPACE_PATTERN = /^\s*/;
  * Discover protocol definition files in protocols/
  * Returns absolute file paths for all .ts files (excludes .d.ts, index.ts, _-prefixed, .-prefixed)
  */
-function discoverProtocols(): string[] {
+export function discoverProtocols(): string[] {
   if (!existsSync(PROTOCOLS_DIR)) {
     return [];
   }
 
-  const files = readdirSync(PROTOCOLS_DIR);
+  const entries = readdirSync(PROTOCOLS_DIR);
+
+  // A directory nobody has put a protocol in yet is a legitimate zero:
+  // someone with no protocols must still be able to run the generator.
+  if (entries.length === 0) {
+    return [];
+  }
+
   const result: string[] = [];
 
-  for (const file of files) {
+  for (const file of entries) {
     if (
       file.endsWith(".d.ts") ||
       file === "index.ts" ||
@@ -92,6 +99,19 @@ function discoverProtocols(): string[] {
     }
 
     result.push(join(PROTOCOLS_DIR, file));
+  }
+
+  // The directory has entries but none of them survived the filter above --
+  // the directory moved, got renamed, or the filter itself broke. Silently
+  // returning zero here is how a generator writes an empty registry over 24
+  // real protocols and exits 0; that is exactly the failure mode this
+  // module exists to close off.
+  if (result.length === 0) {
+    throw new Error(
+      `protocols/ has ${entries.length} entr${entries.length === 1 ? "y" : "ies"} but none of them is a protocol definition file ` +
+        "(a .ts file other than index.ts, a .d.ts file, or an underscore/dot-prefixed name). " +
+        "Check the directory contents before re-running."
+    );
   }
 
   return result;
@@ -158,57 +178,76 @@ export async function loadProtocolDefinitions(
     return [];
   }
 
-  const results: ProtocolEntry[] = [];
-  // Collected rather than thrown on the first one: a run that names only the
-  // first broken file costs one round trip per broken file to get through.
-  const failures: ProtocolFailure[] = [];
-
-  for (const filePath of filePaths) {
-    try {
+  // One rejection path for both ways a file can fail to become a registry
+  // entry -- the import throwing, or a default export with no slug. Runs
+  // concurrently: protocol modules have no import-time side effects
+  // (registerProtocol runs later, from the returned array), so concurrency
+  // does not change registration order, and Promise.allSettled preserves
+  // the input order of filePaths in its results regardless of resolution
+  // order.
+  const settled = await Promise.allSettled(
+    filePaths.map(async (filePath) => {
       const mod = (await importProtocol(filePath)) as {
         default?: import("@/lib/protocol-registry").ProtocolDefinition;
       };
-      const definition =
-        mod?.default as import("@/lib/protocol-registry").ProtocolDefinition;
+      const definition = mod?.default;
 
       if (!definition?.slug) {
-        failures.push({
-          filePath,
-          reason: "no default export with a slug",
-        });
-        continue;
+        throw new Error("no default export with a slug");
       }
 
-      const fileStem = basename(filePath, ".ts");
+      return {
+        slug: definition.slug,
+        fileStem: toFileStem(filePath),
+        definition,
+      };
+    })
+  );
 
-      console.log(
-        `   Discovered protocol: ${definition.slug} (${definition.name})`
-      );
-      results.push({ slug: definition.slug, fileStem, definition });
-    } catch (error) {
-      failures.push({
-        filePath,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  const failures: ProtocolFailure[] = settled.flatMap((result, index) =>
+    result.status === "rejected"
+      ? [{ filePath: filePaths[index], reason: reasonOf(result.reason) }]
+      : []
+  );
 
   if (failures.length > 0) {
     throw new ProtocolDiscoveryError(failures);
   }
 
+  const results: ProtocolEntry[] = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      console.log(
+        `   Discovered protocol: ${result.value.slug} (${result.value.definition.name})`
+      );
+      results.push(result.value);
+    }
+  }
+
   return results;
+}
+
+/** Basename without the `.ts` extension, used as the barrel import specifier. */
+function toFileStem(filePath: string): string {
+  return basename(filePath, ".ts");
+}
+
+/** Normalise a Promise.allSettled rejection reason to a message string. */
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
  * Register all discovered protocols as IntegrationPlugins
  * Populates registeredProtocolSlugs and registeredProtocolEntries for use by other functions
  */
-async function registerProtocolPlugins(): Promise<string[]> {
+async function registerProtocolPlugins(
+  deps: ProtocolLoadDeps = {}
+): Promise<string[]> {
   const { protocolToPlugin, registerProtocol } = await import("@/lib/protocol-registry");
   const { registerIntegration } = await import("../plugins/registry-core");
 
-  const definitions = await loadProtocolDefinitions();
+  const definitions = await loadProtocolDefinitions(deps);
   const slugs: string[] = [];
 
   for (const entry of definitions) {
@@ -1288,7 +1327,7 @@ export function getOutputDisplayConfig(actionType: string): OutputDisplayConfig 
 /**
  * Main execution
  */
-async function main(): Promise<void> {
+export async function main(deps: ProtocolLoadDeps = {}): Promise<void> {
   console.log("Discovering plugins...");
 
   const plugins = discoverPlugins();
@@ -1308,15 +1347,21 @@ async function main(): Promise<void> {
     }
   }
 
+  // Protocols are loaded and registered before anything is written to disk.
+  // A failed load throws ProtocolDiscoveryError here, ahead of
+  // generateIndexFile()'s write to plugins/index.ts, so a bad protocol file
+  // leaves the whole tree untouched instead of half-regenerated. This also
+  // keeps protocols registered before plugins/index.ts is imported (in
+  // updateReadme() and generateStepRegistry() below), so that plugins which
+  // inject actions into protocol integrations (e.g. safe plugin -> safe
+  // protocol) can find the integration in the registry at import time --
+  // running the load first satisfies both constraints at once.
+  console.log("Registering protocol plugins...");
+  const protocolSlugs = await registerProtocolPlugins(deps);
+  console.log(`Registered ${protocolSlugs.length} protocol(s)`);
+
   console.log("Generating plugins/index.ts...");
   generateIndexFile(plugins.enabled);
-
-  // Register protocols BEFORE importing plugins so that plugins that inject
-  // actions into protocol integrations (e.g. safe plugin -> safe protocol)
-  // can find the integration in the registry at import time.
-  console.log("Registering protocol plugins...");
-  const protocolSlugs = await registerProtocolPlugins();
-  console.log(`Registered ${protocolSlugs.length} protocol(s)`);
 
   console.log("Generating protocols/index.ts...");
   generateProtocolsIndexFile();

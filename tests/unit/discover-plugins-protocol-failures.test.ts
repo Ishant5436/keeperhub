@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   loadProtocolDefinitions,
@@ -102,5 +103,55 @@ describe("loadProtocolDefinitions", () => {
     ).resolves.toEqual([]);
 
     log.mockRestore();
+  });
+
+  it("collects an import failure and a missing-slug failure through the same path", async () => {
+    // A rejected import and a resolved-but-slugless module used to be two
+    // different failure mechanisms (a catch, and a push+continue beside it).
+    // Both now become a rejection inside the same Promise.allSettled map, so
+    // this asserts they land in one failures array together, in file order.
+    const error = await failureFrom({
+      discover: () => [AAVE, LIDO, SAFE],
+      importProtocol: (path) => {
+        if (path === AAVE) {
+          return Promise.reject(new Error("boom"));
+        }
+        if (path === LIDO) {
+          return Promise.resolve({ default: { name: "no slug" } });
+        }
+        return Promise.resolve(definition("safe"));
+      },
+    });
+
+    expect(error.failures.map((f) => f.filePath)).toEqual([AAVE, LIDO]);
+    expect(error.failures[0]?.reason).toBe("boom");
+    expect(error.failures[1]?.reason).toContain("slug");
+  });
+
+  it("imports a real file by absolute path with no importProtocol override", async () => {
+    // Exercises the default importProtocol end-to-end against a real file,
+    // rather than a stand-in. This is NOT a regression test for
+    // ERR_UNSUPPORTED_ESM_URL_SCHEME: Vitest's module runner resolves a
+    // project-relative specifier itself and does not go through Node's
+    // native ESM loader the way `tsx scripts/discover-plugins.ts` does, so a
+    // bare path here does not reproduce the Windows failure and this test
+    // does not flip if pathToFileURL is removed. That fix was verified with
+    // a raw `tsx` run importing this same fixture by a bare Windows path:
+    // ERR_UNSUPPORTED_ESM_URL_SCHEME without pathToFileURL, success with it.
+    const fixture = fileURLToPath(
+      new URL("./fixtures/protocol-fixture.ts", import.meta.url)
+    );
+
+    const entries = await loadProtocolDefinitions({
+      discover: () => [fixture],
+    });
+
+    expect(entries).toEqual([
+      {
+        slug: "protocol-fixture",
+        fileStem: "protocol-fixture",
+        definition: expect.objectContaining({ slug: "protocol-fixture" }),
+      },
+    ]);
   });
 });
