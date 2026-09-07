@@ -1392,7 +1392,7 @@ export async function main(deps: ProtocolLoadDeps = {}): Promise<void> {
 
 // Only when run directly, so a test can import loadPluginAllowlist or
 // loadProtocolDefinitions without regenerating the tree.
-// regenerating the tree. `require.main === module` rather than a
+// `require.main === module` rather than a
 // `process.argv[1]` suffix test - scripts/check-api-docs-routes.ts records why
 // identity beats comparing path spellings.
 if (require.main === module) {
