@@ -5,6 +5,7 @@ import {
   type IdempotencyOutcome,
   safeRecordIdempotentResponse,
 } from "@/lib/idempotency";
+import { ErrorCategory, logSystemError } from "@/lib/logging";
 import {
   extractMppPayerAddress,
   hashMppCredential,
@@ -253,11 +254,6 @@ type HandlerFactory = (
 
 export type GatePaymentOptions = {
   /**
-   * Outcome reserved before the gate. The marketplace call route reserves
-   * inside the verified handler instead; prefer `getIdem` there.
-   */
-  idem?: IdempotencyOutcome | null;
-  /**
    * Lazy read of an outcome reserved inside the verified handler. MPP
    * finalizes after `withReceipt` via this so the stored body keeps
    * `Payment-Receipt`.
@@ -268,7 +264,13 @@ export type GatePaymentOptions = {
 function resolveGateIdem(
   options?: GatePaymentOptions
 ): IdempotencyOutcome | null | undefined {
-  return options?.getIdem?.() ?? options?.idem;
+  // Prefer getIdem when supplied (even if it returns null) so a legitimate
+  // "no reservation" is not confused with falling through to a removed eager
+  // `idem` option.
+  if (options && "getIdem" in options && options.getIdem) {
+    return options.getIdem() ?? null;
+  }
+  return undefined;
 }
 
 async function finalizeGateExit(
@@ -308,8 +310,13 @@ async function finalizeAfterMppReceipt(
     completionStatus = undefined;
   }
   if (completionStatus === "running") {
-    return await finalizeGateExit(idem, wrapped, "release");
+    // Execution already started (e.g. wait timeout). Finalize so the same key
+    // replays this executionId instead of releasing and double-charging.
+    return await finalizeGateExit(idem, wrapped, "success");
   }
+  // Invariant: no reserved MPP handler path returns >=400 today. If one is
+  // added later, "failed" keeps the row (24h replay) behind the (id,
+  // lockVersion) fence so a deleted-row finalize cannot clobber a live record.
   if (wrapped.status >= 400) {
     return await finalizeGateExit(idem, wrapped, "failed");
   }
@@ -429,6 +436,12 @@ async function handleX402(
     // Always 503 when verification threw before the handler ran, even with
     // no idempotency record: the caller should retry the same key.
     if (!handlerInvoked) {
+      logSystemError(
+        ErrorCategory.BILLING,
+        "[payments/router] x402 payment gate failed before handler",
+        gateErr,
+        { protocol: "x402" }
+      );
       return await finalizeGateExit(
         resolveGateIdem(options),
         paymentVerificationFailedResponse(),
@@ -523,6 +536,12 @@ async function handleMpp(
     return await finalizeAfterMppReceipt(resolveGateIdem(options), wrapped);
   } catch (gateErr) {
     if (!settled) {
+      logSystemError(
+        ErrorCategory.BILLING,
+        "[payments/router] MPP payment gate failed before settlement",
+        gateErr,
+        { protocol: "mpp" }
+      );
       return await finalizeGateExit(
         resolveGateIdem(options),
         paymentVerificationFailedResponse(),

@@ -96,6 +96,15 @@ async function beginCallIdempotency(
   if (!key) {
     return { kind: "proceed", idem: null };
   }
+  if (key.length > 255) {
+    return {
+      kind: "early",
+      response: NextResponse.json(
+        { error: "Idempotency-Key must be at most 255 characters" },
+        { status: HttpStatus.BAD_REQUEST, headers: corsHeaders }
+      ),
+    };
+  }
   if (!workflow.organizationId) {
     return { kind: "proceed", idem: null };
   }
@@ -131,10 +140,13 @@ async function beginCallIdempotency(
   return { kind: "proceed", idem };
 }
 
-function completionIdempotencyDisposition(body: {
+function completionIdempotencyDisposition(_body: {
   status?: string;
 }): "success" | "release" {
-  return body.status === "running" ? "release" : "success";
+  // `running` means execution already started (e.g. 25s wait timeout). Releasing
+  // the reservation lets the same Idempotency-Key start a second paid run.
+  // Finalize as success so retries replay the same executionId.
+  return "success";
 }
 
 async function recordCompletionResponse(

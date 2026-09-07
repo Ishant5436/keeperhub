@@ -338,6 +338,8 @@ export async function withIdempotencyHeartbeat<T>(
   }
 }
 
+export const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
+
 // Convenience: reads the `Idempotency-Key` header and reserves a slot, or
 // returns null when the client did not opt in to idempotency.
 export async function beginIdempotentFromRequest(args: {
@@ -349,6 +351,11 @@ export async function beginIdempotentFromRequest(args: {
   const key = args.request.headers.get("Idempotency-Key")?.trim();
   if (!key) {
     return null;
+  }
+  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    throw new RangeError(
+      `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`
+    );
   }
   return await beginIdempotent({
     organizationId: args.organizationId,

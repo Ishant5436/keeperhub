@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/logging", () => ({
+  ErrorCategory: { BILLING: "billing", VALIDATION: "validation" },
+  logSystemError: vi.fn(),
+  logSystemWarn: vi.fn(),
+  logUserError: vi.fn(),
+}));
 vi.mock("@/lib/idempotency", () => ({
   safeRecordIdempotentResponse: vi.fn(
     async (_outcome: unknown, response: Response) => response
@@ -397,7 +403,7 @@ describe("gatePayment reservation release", () => {
       MINIMAL_WORKFLOW,
       "0xCreator",
       () => inner,
-      { idem }
+      { getIdem: () => idem }
     );
 
     expect(response.status).toBe(503);
@@ -434,7 +440,7 @@ describe("gatePayment reservation release", () => {
       MINIMAL_WORKFLOW,
       "0xCreator",
       () => inner,
-      { idem }
+      { getIdem: () => idem }
     );
 
     expect(response.status).toBe(503);
@@ -481,7 +487,7 @@ describe("gatePayment reservation release", () => {
       "0xCreator",
       () => async () =>
         NextResponse.json({ executionId: "exec-1", status: "success" }),
-      { idem }
+      { getIdem: () => idem }
     );
 
     expect(response.headers.get("Payment-Receipt")).toBe("receipt-1");

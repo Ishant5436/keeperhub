@@ -289,7 +289,7 @@ function makePassThroughGatePayment(
           const body = (await response.clone().json()) as { status?: string };
           let disposition: "success" | "release" | "failed" = "success";
           if (body.status === "running") {
-            disposition = "release";
+            disposition = "success";
           } else if (response.status >= 400) {
             disposition = "failed";
           }
@@ -415,7 +415,7 @@ describe("marketplace call route HTTP idempotency", () => {
     expect(mockGatePayment).toHaveBeenCalled();
   });
 
-  it("releases the reservation when the completion body is still running", async () => {
+  it("finalizes the reservation when the completion body is still running", async () => {
     setupDbSelectWorkflow(PAID_WORKFLOW);
     setupDbInsertExecution("exec-running");
     mockDetectProtocol.mockReturnValue("x402");
@@ -440,7 +440,7 @@ describe("marketplace call route HTTP idempotency", () => {
     expect(mockSafeRecordIdempotentResponse).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Response),
-      "release",
+      "success",
       expect.stringContaining("paid execution start")
     );
   });
@@ -649,7 +649,7 @@ describe("marketplace call route HTTP idempotency", () => {
     );
   });
 
-  it("releases MPP reservation when completion body is still running", async () => {
+  it("finalizes MPP reservation when completion body is still running", async () => {
     setupDbSelectWorkflow(PAID_WORKFLOW);
     setupDbInsertExecution("exec-mpp-running");
     mockDetectProtocol.mockReturnValue("mpp");
@@ -674,7 +674,7 @@ describe("marketplace call route HTTP idempotency", () => {
     expect(mockSafeRecordIdempotentResponse).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Response),
-      "release",
+      "success",
       expect.stringContaining("gate exit")
     );
   });
