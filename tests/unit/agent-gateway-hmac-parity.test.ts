@@ -4,9 +4,10 @@ vi.mock("server-only", () => ({}));
 
 import { computeSignature as canonicalComputeSignature } from "@/lib/agentic-wallet/hmac";
 import { computeSignature as pluginComputeSignature } from "@/plugins/agent-gateway/steps/hmac-request-core";
+import { computeSignature as webCryptoComputeSignature } from "@/plugins/agent-gateway/test";
 
 describe("agent-gateway HMAC signature parity", () => {
-  it("matches the canonical computeSignature for a fixed test vector", () => {
+  it("matches the canonical computeSignature for a fixed test vector", async () => {
     const secret = "test-secret-key-12345";
     const method = "POST";
     const path = "/api/agentic-wallet/sign";
@@ -33,13 +34,23 @@ describe("agent-gateway HMAC signature parity", () => {
       body,
       timestamp
     );
+    const webCryptoSig = await webCryptoComputeSignature(
+      secret,
+      method,
+      path,
+      subOrgId,
+      body,
+      timestamp
+    );
 
     expect(canonicalSig).toBe(expectedSig);
     expect(pluginSig).toBe(expectedSig);
+    expect(webCryptoSig).toBe(expectedSig);
     expect(pluginSig).toBe(canonicalSig);
+    expect(webCryptoSig).toBe(canonicalSig);
   });
 
-  it("maintains exact parity across diverse methods, paths, and payloads", () => {
+  it("maintains exact parity across diverse methods, paths, and payloads", async () => {
     const testCases = [
       {
         secret: "sec-alpha-1",
@@ -54,7 +65,10 @@ describe("agent-gateway HMAC signature parity", () => {
         method: "POST",
         path: "/api/agentic-wallet/sign",
         subOrgId: "sub-123456",
-        body: JSON.stringify({ amount: "100.50", payTo: "0x1234567890123456789012345678901234567890" }),
+        body: JSON.stringify({
+          amount: "100.50",
+          payTo: "0x1234567890123456789012345678901234567890",
+        }),
         timestamp: "1725450456",
       },
       {
@@ -70,7 +84,7 @@ describe("agent-gateway HMAC signature parity", () => {
         method: "POST",
         path: "/api/agentic-wallet/sign",
         subOrgId: "sub-unicode",
-        body: '{"challenge":"payment-non-ascii-char-test-challenge"}',
+        body: '{"challenge":"payment-auth-¥1000-€50-⚡-日本語テスト-äöü","nonce":884422}',
         timestamp: "1725450999",
       },
     ];
@@ -92,7 +106,16 @@ describe("agent-gateway HMAC signature parity", () => {
         tc.body,
         tc.timestamp
       );
+      const webCrypto = await webCryptoComputeSignature(
+        tc.secret,
+        tc.method,
+        tc.path,
+        tc.subOrgId,
+        tc.body,
+        tc.timestamp
+      );
       expect(plugin).toBe(canonical);
+      expect(webCrypto).toBe(canonical);
     }
   });
 });

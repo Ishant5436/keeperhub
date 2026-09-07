@@ -24,7 +24,7 @@ function toHex(buffer: ArrayBuffer): string {
     .join("");
 }
 
-async function computeSignature(
+export async function computeSignature(
   secret: string,
   method: string,
   path: string,

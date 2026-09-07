@@ -67,7 +67,8 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
   * `success`: Boolean indicating whether the signing operation succeeded.
   * `status`: Current state (`"signed"`, `"pending_approval"`, `"blocked"`, or `"error"`).
   * `approvalRequestId`: Present when human-in-the-loop review is required by sub-org risk policy.
-  *(Note: To eliminate bearer payment authorization exposure, raw signatures are omitted from public workflow outputFields and retained exclusively in internal execution step state).*
+
+> Note: Raw signatures are omitted from public workflow `outputFields` to prevent inadvertent bearer authorization exposure in workflow visual builders.
 
 ---
 
