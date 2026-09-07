@@ -25,6 +25,20 @@ export type EncodeTransformKind = "padAddressToBytes" | "weiToEther";
 type TransformEntry = {
   kind: EncodeTransformKind;
   transform: EncodeTransform;
+  protocolSlug: string;
+  actionSlug: string;
+  inputName: string;
+};
+
+/** One registered transform, flattened for callers that need to audit the
+ *  whole registry rather than look one up. Used by the invariant test that
+ *  keeps weiToEther off declared ABI inputs; see the note on the kind in
+ *  lib/workflow/codegen/protocol-synthesiser.ts. */
+export type RegisteredEncodeTransform = {
+  protocolSlug: string;
+  actionSlug: string;
+  inputName: string;
+  kind: EncodeTransformKind;
 };
 
 type TransformKey = string;
@@ -49,7 +63,21 @@ export function registerEncodeTransform(
   transforms.set(makeKey(protocolSlug, actionSlug, inputName), {
     kind,
     transform,
+    protocolSlug,
+    actionSlug,
+    inputName,
   });
+}
+
+export function listEncodeTransforms(): RegisteredEncodeTransform[] {
+  return [...transforms.values()].map(
+    ({ protocolSlug, actionSlug, inputName, kind }) => ({
+      protocolSlug,
+      actionSlug,
+      inputName,
+      kind,
+    })
+  );
 }
 
 export function getEncodeTransform(

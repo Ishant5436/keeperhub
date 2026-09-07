@@ -214,8 +214,19 @@ function applyEncodeTransform(
     // Intended for the virtual ethValue field, which is not an ABI input and
     // never reaches this args builder. Registering this kind on a real ABI
     // input would make the runtime convert the value while the emitted SDK
-    // does not, so it must not be registered there. The exported SDK's
-    // payable value path is a separate, tracked change.
+    // does not, so it must not be registered there; the invariant is pinned
+    // in tests/unit/protocol-encode-transform-invariants.test.ts.
+    //
+    // On the payable path the divergence runs the other way, and it is worth
+    // stating precisely because the obvious reading is backwards. The
+    // emitted SDK already treats ethValue as wei (buildWriteParts emits
+    // `BigInt(input.ethValue)`), while the runtime treats it as ether
+    // (write-contract-core.ts calls parseEther). Registering weiToEther on
+    // an action therefore makes the runtime *agree* with the SDK for that
+    // action; every action without the transform stays divergent. So this is
+    // not "the SDK is behind and will catch up" - reconciling the field to
+    // one unit everywhere is a separate change, and it would move the SDK
+    // and the runtime together rather than only the SDK.
     return expr;
   }
   // Exhaustive over EncodeTransformKind, enforced at compile time: adding a
