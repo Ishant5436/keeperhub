@@ -165,6 +165,7 @@ type StreamMessage = {
 
 type StreamState = {
   buffer: string;
+  complete: boolean;
   currentData: WorkflowData;
 };
 
@@ -293,18 +294,26 @@ function processStreamLine(
     return;
   }
 
+  let message: StreamMessage;
   try {
-    const message = JSON.parse(line) as StreamMessage;
-
-    if (message.type === "operation" && message.operation) {
-      applyOperation(message.operation, state);
-      onUpdate({ ...state.currentData });
-    } else if (message.type === "error") {
-      console.error("[API Client] Error:", message.error);
-      throw new Error(message.error);
-    }
+    message = JSON.parse(line) as StreamMessage;
   } catch (error) {
     console.error("[API Client] Failed to parse JSONL line:", error);
+    return;
+  }
+
+  if (!message || typeof message !== "object") {
+    return;
+  }
+
+  if (message.type === "operation" && message.operation) {
+    applyOperation(message.operation, state);
+    onUpdate({ ...state.currentData });
+  } else if (message.type === "error") {
+    console.error("[API Client] Error:", message.error);
+    throw new Error(message.error || "Failed to generate workflow");
+  } else if (message.type === "complete") {
+    state.complete = true;
   }
 }
 
@@ -367,6 +376,7 @@ export const aiApi = {
     const decoder = new TextDecoder();
     const state: StreamState = {
       buffer: "",
+      complete: false,
       currentData: existingWorkflow
         ? {
             nodes: existingWorkflow.nodes || [],
@@ -385,6 +395,11 @@ export const aiApi = {
         }
 
         processStreamChunk(value, decoder, onUpdate, state);
+      }
+
+      processStreamLine(state.buffer + decoder.decode(), onUpdate, state);
+      if (!state.complete) {
+        throw new Error("Workflow generation stream ended before completion");
       }
 
       return state.currentData;
