@@ -96,10 +96,12 @@ Confirm, in order:
 ## 6. Simulate
 
 Three direct-execution tools take a `simulate` flag: `execute_transfer`,
-`execute_contract_call`, and `execute_check_and_execute`. Simulating estimates gas and
-catches reverts without signing or broadcasting. `execute_protocol_action` has no dry run:
-it executes the action when called and silently ignores a `simulate` flag if
-one is passed (it does not stop the broadcast). A protocol read action
+`execute_contract_call`, and `execute_check_and_execute`, and so do their HTTP routes
+(`POST /api/execute/transfer`, `/contract-call`, and `/check-and-execute`). Simulating
+estimates gas and catches reverts without signing or broadcasting. `execute_protocol_action`
+has no dry run: it executes the action when called and silently ignores a `simulate` flag if
+one is passed (it does not stop the broadcast) - the same is true of its HTTP route,
+`POST /api/execute/{protocol}/{action}`. A protocol read action
 (for example a `chronicle/eth-usd-read` actionType) returns current state but cannot predict
 whether a particular write will revert. For example:
 

@@ -93,7 +93,10 @@ Always preflight the three simulate-capable tools:
 5. Keep `transactionLink` from the terminal response as the onchain proof.
 
 `execute_protocol_action` is not in that loop: it has no simulate step, so call it once with
-an `idempotency_key` and poll step 4 onward.
+an `idempotency_key` and treat its response as the terminal result. For a write action the
+call returns the outcome directly - `transactionHash` and `transactionLink` on success, the
+error on failure - and there is no `executionId` to poll afterwards. (A read actionType
+returns the read value instead, as above.)
 
 **Simulation is EVM-only.** On Solana mainnet (`101`) and devnet (`103`), a `simulate: true` call
 resolves with `isError: true` rather than throwing. Parse the JSON in `content[0].text` and stop
