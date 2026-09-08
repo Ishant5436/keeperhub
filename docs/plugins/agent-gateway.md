@@ -68,7 +68,7 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
   * `status`: Current state (`"signed"`, `"pending_approval"`, `"blocked"`, or `"error"`).
   * `approvalRequestId`: Present when human-in-the-loop review is required by sub-org risk policy.
 
-> Note: Raw signatures are omitted from public workflow `outputFields` to prevent inadvertent bearer authorization exposure in workflow visual builders.
+> Note: Raw signatures are omitted from the action's declared output schema (`outputFields`). Runtime step-boundary exposure and execution-level redaction remain subject to platform execution handling.
 
 ---
 
