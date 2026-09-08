@@ -39,7 +39,8 @@ export type IdempotencyOutcome =
     }
   | { kind: "replay"; responseStatus: number; responseBody: unknown }
   | { kind: "conflict"; originalResourceId: string | null }
-  | { kind: "in_progress" };
+  | { kind: "in_progress" }
+  | { kind: "invalid_key"; message: string };
 
 // Deterministic JSON so two logically-equal request bodies hash identically
 // regardless of key order.
@@ -353,9 +354,10 @@ export async function beginIdempotentFromRequest(args: {
     return null;
   }
   if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-    throw new RangeError(
-      `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`
-    );
+    return {
+      kind: "invalid_key",
+      message: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
+    };
   }
   return await beginIdempotent({
     organizationId: args.organizationId,
@@ -454,6 +456,11 @@ export function idempotencyEarlyResponse(
           code: "idempotency_in_progress",
           retryable: true,
         },
+      };
+    case "invalid_key":
+      return {
+        status: 400,
+        body: { error: outcome.message },
       };
     default:
       return null;

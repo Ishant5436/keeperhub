@@ -144,6 +144,7 @@ vi.mock("@/lib/errors/finalize-error", () => ({
 }));
 
 vi.mock("@/lib/idempotency", () => ({
+  MAX_IDEMPOTENCY_KEY_LENGTH: 255,
   beginIdempotentFromRequest: (...args: unknown[]) =>
     mockBeginIdempotentFromRequest(...args),
   idempotencyEarlyResponse: (...args: unknown[]) =>
@@ -351,6 +352,28 @@ beforeEach(() => {
 });
 
 describe("marketplace call route HTTP idempotency", () => {
+  it("returns 400 for an over-long Idempotency-Key before the paid handler", async () => {
+    setupDbSelectWorkflow(PAID_WORKFLOW);
+    mockDetectProtocol.mockReturnValue("x402");
+    makePassThroughGatePayment();
+
+    const { POST } = await import("@/app/api/mcp/workflows/[slug]/call/route");
+    const response = await POST(
+      makeRequest("paid-workflow", {
+        idempotencyKey: "x".repeat(256),
+        paymentSignature: "sig-too-long",
+      }),
+      { params: Promise.resolve({ slug: "paid-workflow" }) }
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toMatch(/at most 255 characters/);
+    expect(mockGatePayment).not.toHaveBeenCalled();
+    expect(mockBeginIdempotentFromRequest).not.toHaveBeenCalled();
+    expect(mockStart).not.toHaveBeenCalled();
+  });
+
   it("does not begin idempotency on a free read with a key", async () => {
     setupDbSelectWorkflow(FREE_WORKFLOW);
     setupDbInsertExecution("exec-1");

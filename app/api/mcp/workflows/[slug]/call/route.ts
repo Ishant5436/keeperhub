@@ -23,6 +23,7 @@ import {
   beginIdempotentFromRequest,
   type IdempotencyOutcome,
   idempotencyEarlyResponse,
+  MAX_IDEMPOTENCY_KEY_LENGTH,
   safeRecordIdempotentResponse,
   withIdempotencyHeartbeat,
 } from "@/lib/idempotency";
@@ -96,15 +97,6 @@ async function beginCallIdempotency(
   if (!key) {
     return { kind: "proceed", idem: null };
   }
-  if (key.length > 255) {
-    return {
-      kind: "early",
-      response: NextResponse.json(
-        { error: "Idempotency-Key must be at most 255 characters" },
-        { status: HttpStatus.BAD_REQUEST, headers: corsHeaders }
-      ),
-    };
-  }
   if (!workflow.organizationId) {
     return { kind: "proceed", idem: null };
   }
@@ -140,15 +132,6 @@ async function beginCallIdempotency(
   return { kind: "proceed", idem };
 }
 
-function completionIdempotencyDisposition(_body: {
-  status?: string;
-}): "success" | "release" {
-  // `running` means execution already started (e.g. 25s wait timeout). Releasing
-  // the reservation lets the same Idempotency-Key start a second paid run.
-  // Finalize as success so retries replay the same executionId.
-  return "success";
-}
-
 async function recordCompletionResponse(
   idem: IdempotencyOutcome | null,
   body: { status?: string },
@@ -156,16 +139,14 @@ async function recordCompletionResponse(
   skipSuccessFinalize = false
 ): Promise<NextResponse> {
   const response = NextResponse.json(body, { headers: corsHeaders });
-  const disposition = completionIdempotencyDisposition(body);
-  if (skipSuccessFinalize && disposition === "success") {
+  // Always finalize as success (including `running` after the wait timeout).
+  // A finalized `running` body is pinned for the 24h TTL; callers must poll
+  // `executionId` rather than retrying the same Idempotency-Key to start a
+  // second paid run.
+  if (skipSuccessFinalize) {
     return response;
   }
-  return await safeRecordIdempotentResponse(
-    idem,
-    response,
-    disposition,
-    context
-  );
+  return await safeRecordIdempotentResponse(idem, response, "success", context);
 }
 
 /**
@@ -926,6 +907,18 @@ export async function POST(
           message: "The workflow owner has disabled this workflow.",
         },
         { status: HttpStatus.SERVICE_UNAVAILABLE, headers: corsHeaders }
+      );
+    }
+
+    // Reject over-long keys before paid handlers so a 400 never follows MPP
+    // settlement. Length is not validated again inside beginCallIdempotency.
+    const idempotencyKey = request.headers.get("Idempotency-Key")?.trim();
+    if (idempotencyKey && idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      return NextResponse.json(
+        {
+          error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
+        },
+        { status: HttpStatus.BAD_REQUEST, headers: corsHeaders }
       );
     }
 
