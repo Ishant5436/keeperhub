@@ -93,9 +93,12 @@ Always preflight the three simulate-capable tools:
 5. Keep `transactionLink` from the terminal response as the onchain proof.
 
 `execute_protocol_action` is not in that loop: it has no simulate step, so call it once with
-an `idempotency_key` and treat its response as the terminal result. For a write action the
-call returns the outcome directly - `transactionHash` and `transactionLink` on success, the
-error on failure - and there is no `executionId` to poll afterwards. (A read actionType
+an `idempotency_key`. A write action answers `202` with an envelope carrying `executionId`
+and a `status` of `completed`, `failed`, or `unconfirmed` (plus `transactionHash` and
+`transactionLink` when the write produced one). Only `completed` and `failed` are terminal:
+when the status is `unconfirmed` the transaction is broadcast but not yet confirmed, so poll
+`get_direct_execution_status` with the returned `executionId` until it is terminal - never
+re-send an `unconfirmed` execution, the transaction may still land. (A read actionType
 returns the read value instead, as above.)
 
 **Simulation is EVM-only.** On Solana mainnet (`101`) and devnet (`103`), a `simulate: true` call
