@@ -87,10 +87,10 @@ Turnkey wallet, not your own. Discover its address over REST with `GET /api/user
 (`walletAddress` for EVM, `solanaAddress` for Solana) or `GET /api/integrations` (canonical
 EIP-55 checksummed `address`, preferred when an address must match exactly). Over MCP, call
 `list_integrations` to find the web3 integration, then `get_wallet_integration` with that
-integration's id - it returns the address as `walletAddress`. A direct execution spends the
-wallet's own balance, so fund that address on the target network before a first write.
-(A step configured against a Safe spends the Safe's balance instead - the funding rule does
-not apply to it.) See [User API](/api/user) and [Integrations](/api/integrations).
+integration's id - it returns the address as `walletAddress`. What a direct execution debits
+from the wallet is the value a write moves, not the gas: on sponsored chains a relayer pays
+the network fee. (A step configured against a Safe spends the Safe's balance instead.) See
+[User API](/api/user) and [Integrations](/api/integrations).
 
 Always preflight the three simulate-capable tools:
 
