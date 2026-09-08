@@ -41,6 +41,21 @@ function failingExecutor(failIndices: Set<number>): IterationExecutor<number> {
   };
 }
 
+/** Executor that rejects with a stamped body nodeId on the thrown error. */
+function failingExecutorWithNodeId(
+  failIndices: Set<number>,
+  nodeId: string
+): IterationExecutor<number> {
+  return (item: number, index: number): Promise<number> => {
+    if (failIndices.has(index)) {
+      return Promise.reject(
+        Object.assign(new Error(`Iteration ${index} failed`), { nodeId })
+      );
+    }
+    return Promise.resolve(item * 10);
+  };
+}
+
 /** Executor that tracks concurrency via an active counter. */
 function concurrencyTrackingExecutor(
   peakTracker: { peak: number; active: number },
@@ -149,6 +164,22 @@ describe("runIterations - sequential", () => {
         error: "Iteration 0 failed",
       },
     ]);
+  });
+
+  it("carries nodeId from a stamped thrown error", async () => {
+    const results = await runIterations(
+      [1, 2],
+      failingExecutorWithNodeId(new Set([0]), "step-a"),
+      simpleErrorHandler,
+      "sequential"
+    );
+    expect(results[0]).toEqual({
+      __forEachBodyFailure: true,
+      success: false,
+      error: "Iteration 0 failed",
+      nodeId: "step-a",
+    });
+    expect(results[1]).toBe(20);
   });
 
   it("handles all iterations failing", async () => {
@@ -335,6 +366,23 @@ describe("runIterations - parallel", () => {
     );
     expect(errorHandler).toHaveBeenCalledOnce();
   });
+
+  it("carries nodeId from a stamped thrown error", async () => {
+    const results = await runIterations(
+      [1],
+      failingExecutorWithNodeId(new Set([0]), "step-a"),
+      simpleErrorHandler,
+      "parallel"
+    );
+    expect(results).toEqual([
+      {
+        __forEachBodyFailure: true,
+        success: false,
+        error: "Iteration 0 failed",
+        nodeId: "step-a",
+      },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -435,6 +483,23 @@ describe("runIterations - custom", () => {
       },
       60,
     ]);
+  });
+
+  it("carries nodeId from a stamped thrown error", async () => {
+    const results = await runIterations(
+      [1, 2],
+      failingExecutorWithNodeId(new Set([1]), "step-a"),
+      simpleErrorHandler,
+      "custom",
+      2
+    );
+    expect(results[0]).toBe(10);
+    expect(results[1]).toEqual({
+      __forEachBodyFailure: true,
+      success: false,
+      error: "Iteration 1 failed",
+      nodeId: "step-a",
+    });
   });
 
   it("handles all iterations failing", async () => {

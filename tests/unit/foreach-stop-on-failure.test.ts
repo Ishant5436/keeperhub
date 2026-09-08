@@ -144,7 +144,16 @@ describe("markCollectSkippedOnForEachFailure", () => {
       error: "body failed",
       data: skipData,
     });
+    expect(results["legacy-collect"]).toEqual({
+      success: false,
+      error: "body failed",
+      data: skipData,
+    });
     expect(outputs.done_collect).toEqual({
+      label: "Done Collect",
+      data: skipData,
+    });
+    expect(outputs.legacy_collect).toEqual({
       label: "Done Collect",
       data: skipData,
     });

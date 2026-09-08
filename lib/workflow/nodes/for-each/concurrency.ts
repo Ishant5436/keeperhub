@@ -7,6 +7,7 @@
 import {
   FOR_EACH_BODY_FAILURE_MARKER,
   type ForEachIterationFailure,
+  nodeIdFromThrown,
 } from "@/lib/workflow/nodes/for-each/iteration-failure";
 
 export type ConcurrencyMode = "sequential" | "parallel" | "custom";
@@ -64,6 +65,7 @@ async function runSequential<T>(
         [FOR_EACH_BODY_FAILURE_MARKER]: true,
         success: false,
         error: errorMessage,
+        nodeId: nodeIdFromThrown(error),
       } satisfies ForEachIterationFailure);
     }
   }
@@ -88,6 +90,7 @@ async function runParallel<T>(
         [FOR_EACH_BODY_FAILURE_MARKER]: true,
         success: false,
         error: errorMessage,
+        nodeId: nodeIdFromThrown(entry.reason),
       } satisfies ForEachIterationFailure);
     }
   }
@@ -114,6 +117,7 @@ async function runWorkerPool<T>(
           [FOR_EACH_BODY_FAILURE_MARKER]: true,
           success: false,
           error: errorMessage,
+          nodeId: nodeIdFromThrown(error),
         } satisfies ForEachIterationFailure;
       }
     }

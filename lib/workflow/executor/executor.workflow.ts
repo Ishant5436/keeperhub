@@ -2138,8 +2138,19 @@ export function markCollectSkippedOnForEachFailure(params: {
     params.collectNodeId &&
     params.collectNodeId !== params.doneCollectNodeId
   ) {
-    params.currentVisited.add(params.collectNodeId);
-    params.attemptedNodes.add(params.collectNodeId);
+    const legacyCollectNodeId = params.collectNodeId;
+    const sanitizedLegacyId = legacyCollectNodeId.replace(/[^a-zA-Z0-9]/g, "_");
+    params.currentVisited.add(legacyCollectNodeId);
+    params.attemptedNodes.add(legacyCollectNodeId);
+    params.currentResults[legacyCollectNodeId] = {
+      success: false,
+      error: params.error,
+      data: skipData,
+    };
+    params.currentOutputs[sanitizedLegacyId] = {
+      label: params.collectLabel,
+      data: skipData,
+    };
   }
 }
 
@@ -3032,8 +3043,7 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
           /[^a-zA-Z0-9]/g,
           "_"
         );
-        const collectNode = nodeMap.get(aggregateCollectNodeId);
-        const collectLabel = collectNode ? getNodeName(collectNode) : "Collect";
+        const collectLabel = skipCollectLabel;
 
         const collectAction = SYSTEM_ACTIONS.Collect;
         if (collectAction) {

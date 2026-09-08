@@ -26,3 +26,16 @@ export function isForEachBodyFailureResult(
     (result as Record<string, unknown>)[FOR_EACH_BODY_FAILURE_MARKER] === true
   );
 }
+
+/** Pull `nodeId` off a thrown error when the thrower stamped one. */
+export function nodeIdFromThrown(error: unknown): string | undefined {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "nodeId" in error &&
+    typeof (error as { nodeId: unknown }).nodeId === "string"
+  ) {
+    return (error as { nodeId: string }).nodeId;
+  }
+  return undefined;
+}
