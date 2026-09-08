@@ -163,6 +163,52 @@ describe.skipIf(SKIP)("org circuit breaker (db-backed)", () => {
     expect(await haltMetaOf(orgA)).toEqual({ reason: "first", by: "wf_1" });
   });
 
+  it("re-engages without throwing after a reset (org exists, currently not halted)", async () => {
+    await tripOrgCircuitBreaker({ organizationId: orgA });
+    await resetOrgCircuitBreaker({
+      organizationId: orgA,
+      requestedByUserId: userAdmin,
+    });
+
+    const again = await tripOrgCircuitBreaker({
+      organizationId: orgA,
+      reason: "second incident",
+    });
+
+    expect(again.tripped).toBe(true);
+    expect(await isOrgHalted(db, orgA)).toBe(true);
+    expect(await haltMetaOf(orgA)).toEqual({
+      reason: "second incident",
+      by: null,
+    });
+  });
+
+  it("serializes concurrent trips under a row lock: no throw, halted exactly once", async () => {
+    const [a, b] = await Promise.all([
+      tripOrgCircuitBreaker({
+        organizationId: orgA,
+        reason: "a",
+        byWorkflowId: "wf_a",
+      }),
+      tripOrgCircuitBreaker({
+        organizationId: orgA,
+        reason: "b",
+        byWorkflowId: "wf_b",
+      }),
+    ]);
+
+    // Exactly one call engaged the breaker; the other saw it already halted.
+    expect([a.tripped, b.tripped].sort()).toEqual([false, true]);
+    expect(a.haltedAt.getTime()).toBe(b.haltedAt.getTime());
+    expect(await isOrgHalted(db, orgA)).toBe(true);
+  });
+
+  it("throws only for a genuinely missing organization", async () => {
+    await expect(
+      tripOrgCircuitBreaker({ organizationId: `${PREFIX}nonexistent` })
+    ).rejects.toThrow("Organization not found");
+  });
+
   it("refuses a reset from a non-admin member and leaves the breaker engaged", async () => {
     await tripOrgCircuitBreaker({ organizationId: orgA });
 

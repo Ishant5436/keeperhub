@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { member, organization } from "@/lib/db/schema";
 
@@ -58,46 +58,51 @@ export type TripResult = {
 };
 
 /**
- * Engage the org's circuit breaker. Idempotent: a guarded UPDATE (WHERE
- * halted_at IS NULL) means a second trip does not overwrite the original
- * reason/actor or move the timestamp, and reports `tripped: false`.
+ * Engage the org's circuit breaker. Idempotent: an org already halted keeps its
+ * original reason/actor and timestamp and reports `tripped: false`.
+ *
+ * Runs under a `SELECT ... FOR UPDATE` so a concurrent reset cannot commit
+ * between the read and the write: the decision to trip and the write are one
+ * atomic step, so there is no window where an org that exists reads back as
+ * "not found". A genuinely missing org (no row) is the only case that throws.
+ *
+ * Deliberately not role-gated: tripping only PAUSES value movement, is fully
+ * reversible, and an org admin/owner can always recover via the admin reset
+ * endpoint even while halted. Erring toward letting any workflow stop the
+ * bleeding is the fail-safe choice; `haltedBy` records which workflow tripped it
+ * for attribution.
  */
 export async function tripOrgCircuitBreaker(params: {
   organizationId: string;
   reason?: string | null;
   byWorkflowId?: string | null;
 }): Promise<TripResult> {
-  const now = new Date();
+  return await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ haltedAt: organization.haltedAt })
+      .from(organization)
+      .where(eq(organization.id, params.organizationId))
+      .for("update")
+      .limit(1);
 
-  const [engaged] = await db
-    .update(organization)
-    .set({
-      haltedAt: now,
-      haltedReason: params.reason ?? null,
-      haltedBy: params.byWorkflowId ?? null,
-    })
-    .where(
-      and(
-        eq(organization.id, params.organizationId),
-        isNull(organization.haltedAt)
-      )
-    )
-    .returning({ haltedAt: organization.haltedAt });
+    if (!row) {
+      throw new Error("Organization not found");
+    }
+    if (row.haltedAt) {
+      return { tripped: false, haltedAt: row.haltedAt };
+    }
 
-  if (engaged?.haltedAt) {
-    return { tripped: true, haltedAt: engaged.haltedAt };
-  }
-
-  const [existing] = await db
-    .select({ haltedAt: organization.haltedAt })
-    .from(organization)
-    .where(eq(organization.id, params.organizationId))
-    .limit(1);
-
-  if (!existing?.haltedAt) {
-    throw new Error("Organization not found");
-  }
-  return { tripped: false, haltedAt: existing.haltedAt };
+    const now = new Date();
+    await tx
+      .update(organization)
+      .set({
+        haltedAt: now,
+        haltedReason: params.reason ?? null,
+        haltedBy: params.byWorkflowId ?? null,
+      })
+      .where(eq(organization.id, params.organizationId));
+    return { tripped: true, haltedAt: now };
+  });
 }
 
 export type ResetResult =
