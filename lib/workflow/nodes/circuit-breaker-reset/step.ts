@@ -55,7 +55,8 @@ async function runReset(
   return { reset: true, wasHalted: result.wasHalted };
 }
 
-export function circuitBreakerResetStep(
+// biome-ignore lint/suspicious/useAwait: workflow "use step" requires async
+export async function circuitBreakerResetStep(
   input: CircuitBreakerResetInput
 ): Promise<CircuitBreakerResetResult | CircuitBreakerErrorResult> {
   "use step";
