@@ -6,7 +6,6 @@ import {
   parseIntervalSeconds,
   validateCronExpression,
 } from "@/lib/cron-utils";
-import { MAX_IDEMPOTENCY_KEY_LENGTH } from "@/lib/idempotency";
 import type { AuthMethod } from "@/lib/middleware/auth-helpers";
 import { getChainIdFromNetwork } from "@/lib/rpc/network-utils";
 import { SUPPORTED_CHAIN_IDS } from "@/lib/rpc/types";
@@ -2551,7 +2550,10 @@ export function registerMetaTools(
         .describe("Input fields as declared in the workflow's inputSchema"),
       idempotency_key: z
         .string()
-        .max(MAX_IDEMPOTENCY_KEY_LENGTH)
+        // Keep in sync with MAX_IDEMPOTENCY_KEY_LENGTH in lib/idempotency.ts.
+        // Do not import that module here: it is server-only and breaks Vitest
+        // collection for tools importers that do not mock server-only.
+        .max(255)
         .optional()
         .describe(
           "Optional Idempotency-Key for paid listings after payment verification. Scoped to the verified payer and protocol so a retry with the same key does not start a second execution (within 24h once finalized, including `running`). Free listings ignore this field. This tool does not attach payment credentials — pay a 402 challenge externally, then retry. A new PAYMENT-SIGNATURE can still settle. Two 409s are possible: `idempotency_in_progress` (retryable true) means retry shortly with the same key; `idempotency_conflict` (retryable false) means this body is not the body the key was bound to — rotate only for genuinely different work."

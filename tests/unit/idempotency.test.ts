@@ -521,11 +521,13 @@ describe("beginIdempotentFromRequest", () => {
       scope: "execute:transfer",
       requestBody: { a: 1 },
     });
-    expect(outcome).toEqual({
-      kind: "invalid_key",
-      message: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
-    });
-    expect(idempotencyEarlyResponse(outcome!)).toEqual({
+    if (outcome?.kind !== "invalid_key") {
+      throw new Error(`expected invalid_key, got ${JSON.stringify(outcome)}`);
+    }
+    expect(outcome.message).toBe(
+      `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`
+    );
+    expect(idempotencyEarlyResponse(outcome)).toEqual({
       status: 400,
       body: {
         error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`,
