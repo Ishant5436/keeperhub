@@ -26,7 +26,10 @@ describe("workflow-save plan-gate ordering", () => {
       const gate = src.indexOf("enforceWorkflowFeatures(");
       const config = src.indexOf("validateWorkflowActionConfigs(");
 
-      expect(gate, `${route}: enforceWorkflowFeatures( call not found`).toBeGreaterThan(-1);
+      expect(
+        gate,
+        `${route}: enforceWorkflowFeatures( call not found`
+      ).toBeGreaterThan(-1);
       expect(
         config,
         `${route}: validateWorkflowActionConfigs( call not found`
