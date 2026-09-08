@@ -1093,24 +1093,48 @@ describe("ethValue encode transforms", () => {
     );
     expect(mockWriteContractCore).not.toHaveBeenCalled();
     expect(mockWithStepValueCap).not.toHaveBeenCalled();
-  });
-
-  it("still runs an unresolvable action that sends no value", async () => {
-    arrange();
-    // The guard is scoped to the payable path. An action the registry cannot
-    // resolve is a pre-existing condition for the args builder, which returns
-    // undefined args; only a value at risk of being misread by 10^18 is worth
-    // refusing over.
-    mockResolveProtocolMeta.mockReturnValue({
-      ...COMPOUND_SUPPLY_META,
-      functionName: "supplyRenamedUpstream",
+    // The log is the half that makes affected nodes findable rather than
+    // only visible when a user reports a failure, so it is asserted rather
+    // than left to the implementation.
+    expect(mockLogUserError).toHaveBeenCalledTimes(1);
+    const [category, message, , labels] = (mockLogUserError as Mock).mock
+      .calls[0];
+    expect(category).toBe("configuration");
+    expect(message).toContain("Refused a payable value");
+    expect(labels).toMatchObject({
+      plugin_name: "protocol",
+      action_name: "protocol-write",
+      protocol_slug: "compound",
+      function_name: "supplyRenamedUpstream",
+      contract_key: "comet",
     });
-
-    const result = await protocolWriteStep(makeInput({ ethValue: "" }));
-
-    expect(result.success).toBe(true);
-    expect(mockWriteContractCore).toHaveBeenCalled();
   });
+
+  it.each([
+    ["an empty ethValue", ""],
+    ["no ethValue at all", undefined],
+  ])(
+    "still runs an unresolvable action with %s, short-circuiting before the lookup",
+    async (_label, ethValue) => {
+      arrange();
+      // Both cases return at the typeof/trim check above findProtocolAction,
+      // so neither reaches the lookup - which is the whole scoping claim:
+      // a step that sends nothing cannot be misread by 10^18, so it is not
+      // worth refusing over, and an unresolvable action without a value is
+      // exactly the pre-existing behaviour of the args builder. There is no
+      // third case: any value that does reach the lookup is non-empty and
+      // is covered by the refusal test above.
+      mockResolveProtocolMeta.mockReturnValue({
+        ...COMPOUND_SUPPLY_META,
+        functionName: "supplyRenamedUpstream",
+      });
+
+      const result = await protocolWriteStep(makeInput({ ethValue }));
+
+      expect(result.success).toBe(true);
+      expect(mockWriteContractCore).toHaveBeenCalled();
+    }
+  );
 
   it("reserves nothing against the cap when the transform throws", async () => {
     arrange();

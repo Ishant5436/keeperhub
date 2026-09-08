@@ -53,6 +53,109 @@ function makeKey(
 
 const transforms = new Map<TransformKey, TransformEntry>();
 
+/**
+ * Minimal view of a protocol the invariant check needs. Kept structural so
+ * this module never imports the registry at runtime: `lib/protocol-registry`
+ * injects its own lookup below, which keeps the dependency one-way and the
+ * two modules free of an import cycle.
+ */
+type ActionInputsLookup = (
+  protocolSlug: string,
+  actionSlug: string
+) => readonly { name: string }[] | undefined;
+
+let lookupActionInputs: ActionInputsLookup | undefined;
+
+/** Called once by lib/protocol-registry at module load. */
+export function setActionInputsLookup(lookup: ActionInputsLookup): void {
+  lookupActionInputs = lookup;
+}
+
+/**
+ * weiToEther exists for the virtual `ethValue` field. Registered on a
+ * declared ABI input it would make the runtime convert the value while the
+ * emitted SDK does not (see the weiToEther branch in
+ * lib/workflow/codegen/protocol-synthesiser.ts), so the two would disagree
+ * for that action with nothing at runtime to say so.
+ *
+ * Returns an error message when the registration is illegal, undefined
+ * otherwise. Unknown protocol or action returns undefined: registration
+ * order is not guaranteed, and the registry-side check below covers the
+ * case where the protocol lands afterwards.
+ */
+function weiToEtherOnAbiInput(
+  protocolSlug: string,
+  actionSlug: string,
+  inputName: string,
+  kind: EncodeTransformKind
+): string | undefined {
+  if (kind !== "weiToEther" || !lookupActionInputs) {
+    return undefined;
+  }
+  const inputs = lookupActionInputs(protocolSlug, actionSlug);
+  if (!inputs?.some((i) => i.name === inputName)) {
+    return undefined;
+  }
+  return illegalWeiToEtherMessage(protocolSlug, actionSlug, inputName);
+}
+
+function illegalWeiToEtherMessage(
+  protocolSlug: string,
+  actionSlug: string,
+  inputName: string
+): string {
+  return `Cannot register the weiToEther transform on "${protocolSlug}/${actionSlug}/${inputName}": that is a declared ABI input, and the emitted SDK does not apply this conversion to ABI args, so the runtime and the generated code would disagree by 10^18. weiToEther is for the virtual ethValue field only.`;
+}
+
+/**
+ * Re-check every transform already registered for a protocol that is about
+ * to be registered. Covers the ordering the check inside
+ * registerEncodeTransform cannot: a transform registered eagerly at module
+ * load, before its protocol reaches the registry.
+ *
+ * Takes the definition's own actions rather than reading them back out of
+ * the registry, so the caller can run this BEFORE inserting the protocol.
+ * That ordering matters: if the protocol were inserted first and this threw
+ * afterwards, a caller that catches the throw would be left holding exactly
+ * the illegal pairing the guard exists to prevent.
+ */
+export function assertEncodeTransformsLegalFor(
+  protocolSlug: string,
+  actions: readonly { slug: string; inputs: readonly { name: string }[] }[]
+): void {
+  for (const t of transforms.values()) {
+    if (t.protocolSlug !== protocolSlug || t.kind !== "weiToEther") {
+      continue;
+    }
+    const inputs = actions.find((a) => a.slug === t.actionSlug)?.inputs;
+    if (inputs?.some((i) => i.name === t.inputName)) {
+      throw new Error(
+        illegalWeiToEtherMessage(t.protocolSlug, t.actionSlug, t.inputName)
+      );
+    }
+  }
+}
+
+/**
+ * Every registered transform should name a protocol and action that exist.
+ * One that does not is silently inert - never applied, and invisible to the
+ * weiToEther guard above, which cannot judge an action it cannot find. A
+ * typo in a slug therefore reads as "the conversion is registered" while the
+ * step goes on parsing a raw wei quote as ether. Returns the offenders so a
+ * test can name them; nothing calls this at runtime, because registration
+ * order means an entry can be legitimately orphaned until its protocol
+ * loads.
+ */
+export function orphanEncodeTransforms(resolve: ActionInputsLookup): string[] {
+  const orphans: string[] = [];
+  for (const t of transforms.values()) {
+    if (!resolve(t.protocolSlug, t.actionSlug)) {
+      orphans.push(`${t.protocolSlug}/${t.actionSlug}/${t.inputName}`);
+    }
+  }
+  return orphans;
+}
+
 export function registerEncodeTransform(
   protocolSlug: string,
   actionSlug: string,
@@ -60,6 +163,15 @@ export function registerEncodeTransform(
   transform: EncodeTransform,
   kind: EncodeTransformKind
 ): void {
+  const problem = weiToEtherOnAbiInput(
+    protocolSlug,
+    actionSlug,
+    inputName,
+    kind
+  );
+  if (problem) {
+    throw new Error(problem);
+  }
   transforms.set(makeKey(protocolSlug, actionSlug, inputName), {
     kind,
     transform,
@@ -78,6 +190,19 @@ export function listEncodeTransforms(): RegisteredEncodeTransform[] {
       kind,
     })
   );
+}
+
+/**
+ * Remove one registration. Exists so a test can undo a deliberate bad
+ * registration without calling clearEncodeTransforms, which would also
+ * wipe the eager production entries for the rest of that file.
+ */
+export function unregisterEncodeTransform(
+  protocolSlug: string,
+  actionSlug: string,
+  inputName: string
+): void {
+  transforms.delete(makeKey(protocolSlug, actionSlug, inputName));
 }
 
 export function getEncodeTransform(

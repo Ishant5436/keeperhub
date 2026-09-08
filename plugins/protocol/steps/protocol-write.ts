@@ -245,6 +245,22 @@ function applyEthValueTransform(
   }
   const protocolAction = findProtocolAction(meta);
   if (!protocolAction) {
+    // Logged as well as returned: this turns a previously-succeeding
+    // execution into a hard failure for a zero-argument payable action
+    // whose _protocolMeta has drifted, and without a log the affected
+    // nodes are only findable when a user reports one.
+    logUserError(
+      ErrorCategory.CONFIGURATION,
+      `[Protocol Write] Refused a payable value: no action matches function '${meta.functionName}' on contract '${meta.contractKey}' in protocol '${meta.protocolSlug}'`,
+      undefined,
+      {
+        plugin_name: "protocol",
+        action_name: "protocol-write",
+        protocol_slug: meta.protocolSlug,
+        function_name: meta.functionName,
+        contract_key: meta.contractKey,
+      }
+    );
     return {
       ok: false,
       error: `Refusing to send a payable value: no action matches function "${meta.functionName}" on contract "${meta.contractKey}" in protocol "${meta.protocolSlug}", so whether the ETH Value field needs a unit conversion cannot be determined. This usually means the step's stored protocol metadata is stale - re-select the action on this node.`,
