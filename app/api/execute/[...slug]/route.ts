@@ -38,37 +38,12 @@ import {
   redactInput,
   withRejectedSignerOverride,
 } from "../_lib/execution-service";
+import { buildProtocolFunctionArgs } from "../_lib/protocol-function-args";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { parseNativeValueWei } from "../_lib/reserved-value";
 import { checkAndReserveExecution } from "../_lib/spending-cap";
+import type { ExecuteResponse } from "../_lib/types";
 import { requireWallet } from "../_lib/wallet-check";
-
-function buildFunctionArgs(
-  input: Record<string, unknown>,
-  protocolSlug: string,
-  contractKey: string,
-  functionName: string
-): string | undefined {
-  const protocol = getProtocol(protocolSlug);
-  if (!protocol) {
-    return undefined;
-  }
-
-  const protocolAction = protocol.actions.find(
-    (a) => a.function === functionName && a.contract === contractKey
-  );
-
-  if (!protocolAction || protocolAction.inputs.length === 0) {
-    return undefined;
-  }
-
-  const args = protocolAction.inputs.map((inp) => {
-    const value = input[inp.name];
-    return value === undefined ? "" : String(value);
-  });
-
-  return JSON.stringify(args);
-}
 
 async function executeProtocolAction(
   actionType: string,
@@ -195,12 +170,29 @@ async function executeProtocolAction(
     );
   }
 
-  const functionArgs = buildFunctionArgs(
+  const argsResult = buildProtocolFunctionArgs(
     body,
     meta.protocolSlug,
     meta.contractKey,
     meta.functionName
   );
+  if (!argsResult.ok) {
+    // Pre-broadcast validation: release so the same key can retry with a
+    // complete body instead of caching a client mistake for 24h.
+    return recordIdempotentResponse(
+      idem,
+      NextResponse.json(
+        {
+          success: false,
+          error: argsResult.error,
+          field: argsResult.field,
+        },
+        { status: HttpStatus.BAD_REQUEST }
+      ),
+      "release"
+    );
+  }
+  const { functionArgs } = argsResult;
 
   if (meta.actionType === "read") {
     const coreInput: ReadContractCoreInput = {
@@ -258,6 +250,7 @@ async function executeProtocolAction(
     network,
     input: redactInput(withRejectedSignerOverride(body, body)),
     reserved: { kind: "evm", valueWei: parsedValue.valueWei },
+    paygOverflow: executionGuard.limitResult?.paygOverflow === true,
   });
   if (!reserve.allowed) {
     return recordIdempotentResponse(
@@ -288,10 +281,7 @@ async function executeProtocolAction(
   // completeExecution independently re-verifies the claimed transaction
   // against the chain (KEEP-966) -- its returned outcome, not result.success,
   // is authoritative for the response and idempotency cache.
-  let outcome: CompleteExecutionOutcome = {
-    status: "failed",
-    error: result.success ? undefined : result.error,
-  };
+  let outcome: CompleteExecutionOutcome;
   if (result.success) {
     outcome = await completeExecution(executionId, {
       transactionHash: result.transactionHash,
@@ -310,20 +300,49 @@ async function executeProtocolAction(
       transactionHash: result.transactionHash,
       chainId: result.chainId,
       sponsored: result.sponsored,
+      transactionLink: result.transactionLink,
+      rejection: result.rejection,
+      errorClass: result.errorClass,
     });
-    outcome = { status: settled.status, error: result.error };
+    outcome = {
+      status: settled.status,
+      ...(settled.status === "failed" ? { error: result.error } : {}),
+    };
   }
 
-  const responseBody =
-    outcome.status === "completed"
-      ? result
-      : { ...result, success: false, error: outcome.error };
+  // Match contract-call / transfer: expose executionId so callers can poll
+  // /api/execute/{executionId}/status and idempotency can bind resourceId.
+  // write-contract-core sets transactionHash and transactionLink whenever a
+  // broadcast hash exists, including on failure, so reverted txs stay
+  // look-up-able in the explorer.
+  // `error` is only on status "failed". `unconfirmed` is poll-only: a caller
+  // that treats any error string as a terminal failure will rotate the key
+  // and double-broadcast a tx that may still land.
+  const responseBody: ExecuteResponse = {
+    executionId,
+    status: outcome.status,
+    ...(result.transactionHash
+      ? { transactionHash: result.transactionHash }
+      : {}),
+    ...(result.transactionLink
+      ? { transactionLink: result.transactionLink }
+      : {}),
+    ...(outcome.status === "failed" && outcome.error
+      ? { error: outcome.error }
+      : {}),
+    ...(!result.success && outcome.status === "failed" && result.rejection
+      ? { rejection: result.rejection }
+      : {}),
+    ...(!result.success && outcome.status === "failed" && result.errorClass
+      ? { errorClass: result.errorClass }
+      : {}),
+  };
 
   // The tx reached the broadcast path, so finalize as success or failed and
   // never release: a retry on the same key must not re-broadcast.
   return recordIdempotentResponse(
     idem,
-    NextResponse.json(responseBody),
+    NextResponse.json(responseBody, { status: HttpStatus.ACCEPTED }),
     outcome.status === "completed" ? "success" : "failed"
   );
 }

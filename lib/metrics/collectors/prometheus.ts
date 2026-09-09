@@ -18,7 +18,12 @@ import type { ExecutionErrorType } from "@/lib/errors/execution-error-type";
 import type { ErrorStatus } from "@/lib/errors/execution-status";
 import { ErrorCategory, logSystemWarn, logWarn } from "@/lib/logging";
 import type { NA_ERROR_TYPE } from "@/lib/metrics/metric-constants";
-import type { ErrorContext, MetricLabels, MetricsCollector } from "../types";
+import {
+  type ErrorContext,
+  type MetricLabels,
+  type MetricsCollector,
+  TRIGGER_TYPES,
+} from "../types";
 
 // Use global singletons to prevent duplicate registration during hot reload
 // This is safe because each pod has its own Node.js process
@@ -185,6 +190,18 @@ const workflowExecutionsFinishedAgeSeconds = getOrCreateGauge(
   "keeperhub_workflow_executions_finished_age_seconds",
   "Seconds since the most recent workflow execution reached a terminal state (success/error/cancelled), across all trigger types and chains",
   []
+);
+
+// Executions parked in `unconfirmed`: broadcast, but the receipt could not be
+// read at finalize time. Only the execution-reconciler CronJob settles them, so
+// a value that climbs and never comes down means the reconciler is not running
+// or cannot reach the chain. DB-sourced (see getUnconfirmedExecutionCountsFromDb)
+// and labeled by which table the rows live in.
+const executionsUnconfirmed = getOrCreateGauge(
+  dbRegistry,
+  "keeperhub_executions_unconfirmed",
+  "Executions currently in the unconfirmed state (transaction broadcast, receipt not yet readable), by kind (workflow or direct)",
+  ["kind"]
 );
 
 // KEEP-545: the previous DB-sourced gauge `keeperhub_workflow_execution_errors_total`
@@ -857,6 +874,17 @@ const workflowExecutionsStartedTotal = getOrCreateCounter(
   ["trigger_type"]
 );
 
+// prom-client only materialises a labelled child series on its first inc(),
+// so a low-volume label like webhook can go its entire lifetime without ever
+// being observed at 0 (it is "born" already at 1 or 2). increase() over any
+// window then reads 0 even though real executions happened, because there
+// is no earlier sample to diff against. Pre-registering every known
+// trigger_type at 0 on module load (every pod, on every start) guarantees
+// Prometheus always has a starting point to compute increase() from.
+for (const triggerType of TRIGGER_TYPES) {
+  workflowExecutionsStartedTotal.inc({ trigger_type: triggerType }, 0);
+}
+
 // KEEP-612 detection signal. lib/safe-fetch.ts increments this every time
 // a SSRF-blocklisted destination (or DNS-resolve-mismatch) is refused. The
 // `shadow` label distinguishes enforce-mode rejects (shadow=false, the
@@ -1058,7 +1086,7 @@ export function recordWorkflowExecutionFinished(labels: {
 const workflowExecutionsSkipped = getOrCreateCounter(
   apiRegistry,
   "keeperhub_workflow_executions_skipped_total",
-  "Workflow executions refused before starting, by org_slug and reason (execution_limit, plan_feature, payg_unpaid). Not failures: these runs never executed.",
+  "Workflow executions skipped before starting, by org_slug and reason: plan refusals (execution_limit, plan_feature, payg_unpaid) and lifecycle skips the executor resolves (not_found, deleted, deactivated, org_deactivated, disabled, schedule_invalid). Not failures: these runs never executed.",
   ["org_slug", "reason"]
 );
 
@@ -1765,6 +1793,7 @@ async function refreshDbMetricsNow(): Promise<void> {
     const {
       getWorkflowStatsFromDb,
       getLastFinishedExecutionAgeSecondsFromDb,
+      getUnconfirmedExecutionCountsFromDb,
       getWorkflowErrorsByWorkflowFromDb,
       getSystemErrorsByCategoryFromDb,
       getStepStatsFromDb,
@@ -1783,6 +1812,7 @@ async function refreshDbMetricsNow(): Promise<void> {
     const [
       workflowStats,
       lastFinishedAgeSeconds,
+      unconfirmedCounts,
       errorsByWorkflow,
       systemErrorsByCategoryRows,
       stepStats,
@@ -1800,6 +1830,7 @@ async function refreshDbMetricsNow(): Promise<void> {
     ] = await Promise.all([
       getWorkflowStatsFromDb(),
       getLastFinishedExecutionAgeSecondsFromDb(),
+      getUnconfirmedExecutionCountsFromDb(),
       getWorkflowErrorsByWorkflowFromDb(),
       getSystemErrorsByCategoryFromDb(),
       getStepStatsFromDb(),
@@ -1836,6 +1867,16 @@ async function refreshDbMetricsNow(): Promise<void> {
     // staleness / the alert's no_data_state governs instead of a misleading 0.
     if (lastFinishedAgeSeconds !== null) {
       workflowExecutionsFinishedAgeSeconds.set(lastFinishedAgeSeconds);
+    }
+
+    // Same null handling: on a query error keep the last real backlog size
+    // rather than reporting an empty one.
+    if (unconfirmedCounts !== null) {
+      executionsUnconfirmed.set(
+        { kind: "workflow" },
+        unconfirmedCounts.workflow
+      );
+      executionsUnconfirmed.set({ kind: "direct" }, unconfirmedCounts.direct);
     }
 
     // KEEP-545: the per-org error gauge that used to live here was removed.

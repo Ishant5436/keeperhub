@@ -94,11 +94,21 @@ import {
   preValidateConditionExpression,
   validateConditionExpression,
 } from "@/lib/workflow/nodes/condition/validator";
+import {
+  FOR_EACH_BODY_FAILURE_MARKER,
+  type ForEachIterationFailure,
+  isForEachBodyFailureResult,
+} from "@/lib/workflow/nodes/for-each/iteration-failure";
 import { ARRAY_SOURCE_RE } from "@/lib/workflow/nodes/for-each/utils";
 import { triggerStep } from "@/lib/workflow/nodes/trigger/step";
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflow/store";
 import { splitTemplateRef } from "@/lib/workflow/template-ref";
 import { LEGACY_ACTION_MAPPINGS } from "@/plugins/legacy-mappings";
+
+export {
+  type ForEachIterationFailure,
+  isForEachBodyFailureResult,
+} from "@/lib/workflow/nodes/for-each/iteration-failure";
 
 // System actions that don't have plugins - maps to module import functions.
 // `satisfies Record<SystemActionType, ...>` makes the dispatch table and the
@@ -135,6 +145,18 @@ const SYSTEM_ACTIONS = {
       // biome-ignore lint/suspicious/noExplicitAny: Dynamic module import matches existing pattern
       import("@/lib/workflow/nodes/collect/step") as Promise<any>,
     stepFunction: "collectStep",
+  },
+  "Trip Circuit Breaker": {
+    importer: () =>
+      // biome-ignore lint/suspicious/noExplicitAny: Dynamic module import matches existing pattern
+      import("@/lib/workflow/nodes/circuit-breaker-trip/step") as Promise<any>,
+    stepFunction: "circuitBreakerTripStep",
+  },
+  "Reset Circuit Breaker": {
+    importer: () =>
+      // biome-ignore lint/suspicious/noExplicitAny: Dynamic module import matches existing pattern
+      import("@/lib/workflow/nodes/circuit-breaker-reset/step") as Promise<any>,
+    stepFunction: "circuitBreakerResetStep",
   },
 } satisfies Record<SystemActionType, StepImporter>;
 
@@ -263,7 +285,7 @@ function describeMissingFieldPath(data: unknown, fieldPath: string): string {
       const [, key, indexStr] = arrayMatch;
       const index = Number.parseInt(indexStr, 10);
       if (!(key in container)) {
-        return `"${fieldPath}": "${key}" does not exist on the data. Available fields: ${Object.keys(container).join(", ") || "(none)"}`;
+        return `"${fieldPath}": "${key}" does not exist on the data. Available fields: ${Object.keys(container).join(", ") || "(none)"}.`;
       }
       const arr = container[key];
       if (!Array.isArray(arr)) {
@@ -277,7 +299,7 @@ function describeMissingFieldPath(data: unknown, fieldPath: string): string {
     }
 
     if (!(segment in container)) {
-      return `"${fieldPath}": "${segment}" does not exist on the data. Available fields: ${Object.keys(container).join(", ") || "(none)"}`;
+      return `"${fieldPath}": "${segment}" does not exist on the data. Available fields: ${Object.keys(container).join(", ") || "(none)"}.`;
     }
     current = container[segment];
   }
@@ -394,6 +416,23 @@ function renderConditionLiteral(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * The chain a Block/Event/Transfer trigger watches, as the text form the
+ * execution log's `network` column holds. That config is the only place an
+ * on-chain trigger names its chain, so without logging it a run whose later
+ * steps name no chain of their own reaches /analytics with no Network at all.
+ * A trigger with no chain (Manual, Schedule, Webhook) yields undefined.
+ */
+// Exported for testing
+export function triggerConfigNetwork(
+  config: Record<string, unknown>
+): string | undefined {
+  const raw = config.network;
+  return typeof raw === "string" || typeof raw === "number"
+    ? String(raw)
+    : undefined;
 }
 
 /**
@@ -1020,7 +1059,13 @@ function computeCommentRanges(code: string): [number, number][] {
       i++;
       continue;
     }
-    if (c === '"' || c === "'" || c === "`") {
+    // "\u0060" is a backtick, written as an escape on purpose. A raw backtick
+    // here is unpaired within this file, and @workflow/builders' directive
+    // detector pairs backticks with a regex that ignores string context. One
+    // unpaired tick desynchronizes it for the rest of the file and blanks the
+    // "use workflow" directive in executeWorkflow below, so the function ships
+    // untransformed and start() rejects it at runtime. See KEEP-1302.
+    if (c === '"' || c === "'" || c === "\u0060") {
       stringDelim = c;
       i++;
       continue;
@@ -1573,6 +1618,218 @@ function nextBodyTargets(
 }
 
 /**
+ * Direct nested For Each node ids reachable inside `forEachNodeId`'s own
+ * body, ignoring Collect nodes entirely. Mirrors `identifyLoopBody`'s BFS
+ * (same seeding, same depth tracking via `computeNextDepth`/
+ * `nextBodyTargets`) so it agrees on what counts as "inside this loop's
+ * body," but never resolves or conflicts on a Collect, so it never throws.
+ * Used to order loops outer-before-inner ahead of the Collect-ownership
+ * check (#2157).
+ */
+function findDirectNestedForEachIds(
+  forEachNodeId: string,
+  edgesBySource: Map<string, string[]>,
+  nodeMap: Map<string, WorkflowNode>,
+  edgesBySourceHandle?: EdgesBySourceHandle
+): string[] {
+  const handleMap = edgesBySourceHandle?.get(forEachNodeId);
+  const loopTargets = handleMap?.get("loop") ?? [];
+  const doneTargets = handleMap?.get("done") ?? [];
+  const isHandleAware = loopTargets.length > 0 || doneTargets.length > 0;
+  const seedTargets = isHandleAware
+    ? loopTargets
+    : (edgesBySource.get(forEachNodeId) ?? []);
+
+  const nestedForEachIds: string[] = [];
+  const visited = new Set<string>();
+  const queue: Array<{ nodeId: string; depth: number }> = seedTargets.map(
+    (id) => ({ nodeId: id, depth: 0 })
+  );
+
+  while (queue.length > 0) {
+    const entry = queue.shift();
+    if (!entry || visited.has(entry.nodeId)) {
+      continue;
+    }
+    visited.add(entry.nodeId);
+
+    const node = nodeMap.get(entry.nodeId);
+    if (!node) {
+      continue;
+    }
+
+    const actionType = node.data.config?.actionType as string | undefined;
+    const isCollect = node.data.type === "action" && actionType === "Collect";
+    const isForEach = node.data.type === "action" && actionType === "For Each";
+
+    if (isCollect && entry.depth === 0) {
+      continue;
+    }
+    if (isForEach) {
+      nestedForEachIds.push(entry.nodeId);
+    }
+
+    const nextDepth = computeNextDepth(isForEach, isCollect, entry.depth);
+    for (const nextId of nextBodyTargets(
+      entry.nodeId,
+      isForEach,
+      edgesBySource,
+      edgesBySourceHandle
+    )) {
+      queue.push({ nodeId: nextId, depth: nextDepth });
+    }
+  }
+
+  return nestedForEachIds;
+}
+
+/**
+ * The single wording for "two For Each loops resolve the same Collect",
+ * shared by `claimCollectOwner` and `identifyLoopBody`'s in-BFS check so one
+ * mis-wire reads the same however it is detected.
+ *
+ * It states only what either site has established: both loops resolve this
+ * Collect. Neither site tests ancestry, so neither may claim one loop
+ * encloses the other - non-nested sibling loops wired to a shared Collect
+ * reach this message too, and which loop is named first only reflects
+ * processing order.
+ */
+function collectOwnershipConflictMessage(
+  collectNodeId: string,
+  forEachId: string,
+  claimedBy: string
+): string {
+  return (
+    `For Each "${forEachId}" resolves Collect "${collectNodeId}", but it ` +
+    `already belongs to For Each "${claimedBy}". Two For Each loops ` +
+    "cannot share the same Collect node."
+  );
+}
+
+/**
+ * Record `forEachId` as the owner of `collectNodeId` in `claimedCollectOwners`,
+ * or throw if it is already claimed by a different loop.
+ *
+ * `identifyLoopBody`'s own ownership check (#2157) only fires while its
+ * depth-0 body BFS is walking -- it never sees a Collect resolved via the
+ * done-handle target loop, since that path doesn't go through the BFS. This
+ * closes that gap: every Collect a loop resolves, in-body or on the done
+ * handle, is claimed through this function, so two loops resolving the same
+ * Collect by any route are still caught, in case the ordering that
+ * `orderForEachNodesOuterFirst` establishes were ever wrong.
+ */
+export function claimCollectOwner(
+  claimedCollectOwners: Map<string, string>,
+  collectNodeId: string,
+  forEachId: string
+): void {
+  const claimedBy = claimedCollectOwners.get(collectNodeId);
+  if (claimedBy && claimedBy !== forEachId) {
+    throw new Error(
+      collectOwnershipConflictMessage(collectNodeId, forEachId, claimedBy)
+    );
+  }
+  claimedCollectOwners.set(collectNodeId, forEachId);
+}
+
+/**
+ * Order For Each node ids so every loop appears before any loop nested
+ * inside it. The Collect-ownership check in `identifyLoopBody` (#2157) only
+ * attributes a conflict to the right loop if an ancestor's Collect is
+ * already claimed by the time a descendant's scan reaches it -- processing
+ * in the wrong order lets a descendant claim an unclaimed ancestor Collect
+ * first, then blames the ancestor when it later tries to claim its own.
+ *
+ * Built from `findDirectNestedForEachIds` via a parent map, then a
+ * breadth-first walk from root loops (no parent among the given ids) down
+ * through children. Any id never reached (should not happen for a valid
+ * workflow DAG - a nesting cycle leaves every loop parented) is appended
+ * after the walk, in its original relative order, so it still gets
+ * validated.
+ *
+ * `findDirectNestedForEachIds` descends transitively in legacy (no
+ * sourceHandle) graphs, so one child can be reported by several enclosing
+ * loops: in `L1 -> L2 -> L3` a grandparent lists its grandchild alongside
+ * the real parent. Taking the first reporter would let the grandparent win
+ * and order `L3` before `L2`, inverting the very invariant this function
+ * exists to establish. So the reporters of a child are walked keeping the
+ * deepest one seen: a candidate that the current best encloses replaces it,
+ * leaving the nearest enclosing loop as the parent.
+ */
+export function orderForEachNodesOuterFirst(
+  forEachNodeIds: string[],
+  edgesBySource: Map<string, string[]>,
+  nodeMap: Map<string, WorkflowNode>,
+  edgesBySourceHandle?: EdgesBySourceHandle
+): string[] {
+  const nestedOf = new Map<string, string[]>();
+  for (const id of forEachNodeIds) {
+    nestedOf.set(
+      id,
+      findDirectNestedForEachIds(
+        id,
+        edgesBySource,
+        nodeMap,
+        edgesBySourceHandle
+      )
+    );
+  }
+
+  const candidateParentsOf = new Map<string, string[]>();
+  for (const id of forEachNodeIds) {
+    for (const childId of nestedOf.get(id) ?? []) {
+      const candidates = candidateParentsOf.get(childId);
+      if (candidates) {
+        candidates.push(id);
+      } else {
+        candidateParentsOf.set(childId, [id]);
+      }
+    }
+  }
+
+  const parentOf = new Map<string, string>();
+  for (const [childId, candidates] of candidateParentsOf) {
+    let nearest = candidates[0];
+    for (const candidate of candidates) {
+      if ((nestedOf.get(nearest) ?? []).includes(candidate)) {
+        nearest = candidate;
+      }
+    }
+    parentOf.set(childId, nearest);
+  }
+
+  const childrenOf = new Map<string, string[]>();
+  for (const [childId, parentId] of parentOf) {
+    if (!childrenOf.has(parentId)) {
+      childrenOf.set(parentId, []);
+    }
+    childrenOf.get(parentId)?.push(childId);
+  }
+
+  const roots = forEachNodeIds.filter((id) => !parentOf.has(id));
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+  const queue: string[] = [...roots];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (!id || visited.has(id)) {
+      continue;
+    }
+    visited.add(id);
+    ordered.push(id);
+    queue.push(...(childrenOf.get(id) ?? []));
+  }
+
+  for (const id of forEachNodeIds) {
+    if (!visited.has(id)) {
+      ordered.push(id);
+    }
+  }
+
+  return ordered;
+}
+
+/**
  * Identify the loop body subgraph between a For Each node and its paired
  * Collect node.
  *
@@ -1591,12 +1848,20 @@ function nextBodyTargets(
  *
  * In both modes the BFS uses depth tracking so nested For Each / Collect
  * pairs are correctly stepped over.
+ *
+ * `claimedCollectOwners`, when supplied, maps a Collect node id to the
+ * forEachNodeId that already resolved it as its own. If this scan's depth-0
+ * Collect is claimed by a *different* loop, it throws immediately naming
+ * both loops (#2157) instead of either colliding with a same-scan double
+ * Collect (below) or silently adopting the other loop's Collect as its own.
+ * Callers that omit the map get today's unqualified behavior unchanged.
  */
 export function identifyLoopBody(
   forEachNodeId: string,
   edgesBySource: Map<string, string[]>,
   nodeMap: Map<string, WorkflowNode>,
-  edgesBySourceHandle?: EdgesBySourceHandle
+  edgesBySourceHandle?: EdgesBySourceHandle,
+  claimedCollectOwners?: Map<string, string>
 ): LoopBodyInfo {
   const bodyNodeIds: string[] = [];
   const bodyEdgesBySource = new Map<string, string[]>();
@@ -1652,6 +1917,12 @@ export function identifyLoopBody(
     // post-iteration time whether to fire the in-body Collect (legacy) or
     // the done-handle Collect (canonical).
     if (isCollect && depth === 0) {
+      const claimedBy = claimedCollectOwners?.get(nodeId);
+      if (claimedBy && claimedBy !== forEachNodeId) {
+        throw new Error(
+          collectOwnershipConflictMessage(nodeId, forEachNodeId, claimedBy)
+        );
+      }
       if (collectNodeId && collectNodeId !== nodeId) {
         throw new Error(
           "For Each node has multiple in-body Collect nodes at the same " +
@@ -1780,6 +2051,199 @@ export function planIterationContinuation(
     return { kind: "done-targets", targets: body.doneEntryNodeIds };
   }
   return { kind: "none" };
+}
+
+export type ForEachIterationSummary = {
+  arrayLength: number;
+  maxIterations: number;
+  iterationsRan: number;
+  failedIterations: number;
+  firstFailureError?: string;
+  firstFailureNodeId?: string;
+};
+
+/**
+ * Prefer a nested For Each summary's firstFailureNodeId over the bodyResults
+ * key. Insertion order records the nested loop id before routeAfterSuccess
+ * overwrites the entry with data: summary. Guard on `failedIterations` so a
+ * failed result with unrelated `data` is not treated as a summary.
+ */
+export function resolveBodyFailureNodeId(
+  bodyFailure: [string, { success: boolean; error?: string; data?: unknown }]
+): string {
+  const data = bodyFailure[1].data;
+  if (
+    data !== null &&
+    typeof data === "object" &&
+    "failedIterations" in data &&
+    typeof (data as ForEachIterationSummary).failedIterations === "number"
+  ) {
+    return (
+      (data as ForEachIterationSummary).firstFailureNodeId ?? bodyFailure[0]
+    );
+  }
+  return bodyFailure[0];
+}
+
+/**
+ * First failed iteration result, if any. Used to flip the For Each log and
+ * to gate post-loop Collect / done-targets continuation.
+ */
+export function findFirstIterationFailure(
+  iterationResults: unknown[]
+): ForEachIterationFailure | undefined {
+  return iterationResults.find(isForEachBodyFailureResult);
+}
+
+/** Count iteration results tagged as genuine body failures. */
+export function countIterationFailures(iterationResults: unknown[]): number {
+  return iterationResults.filter(isForEachBodyFailureResult).length;
+}
+
+/**
+ * When post-loop Collect is skipped due to iteration failure, mark the Collect
+ * node visited and record an explicit failure so the parent DAG dispatcher does
+ * not re-dispatch it via a second incoming edge.
+ */
+export function markCollectSkippedOnForEachFailure(params: {
+  aggregateCollectNodeId: string;
+  collectNodeId: string | undefined;
+  doneCollectNodeId: string | undefined;
+  collectLabel: string;
+  error: string;
+  iterationResults: unknown[];
+  currentVisited: Set<string>;
+  currentResults: Record<
+    string,
+    { success: boolean; error?: string; data?: unknown }
+  >;
+  currentOutputs: NodeOutputs;
+  attemptedNodes: Set<string>;
+}): void {
+  const skipData = {
+    results: params.iterationResults.map((result) =>
+      isForEachBodyFailureResult(result)
+        ? { error: result.error, nodeId: result.nodeId }
+        : result
+    ),
+    count: params.iterationResults.length,
+    skipped: true as const,
+  };
+  const sanitizedCollectId = params.aggregateCollectNodeId.replace(
+    /[^a-zA-Z0-9]/g,
+    "_"
+  );
+  params.currentVisited.add(params.aggregateCollectNodeId);
+  params.attemptedNodes.add(params.aggregateCollectNodeId);
+  params.currentResults[params.aggregateCollectNodeId] = {
+    success: false,
+    error: params.error,
+    data: skipData,
+  };
+  params.currentOutputs[sanitizedCollectId] = {
+    label: params.collectLabel,
+    data: skipData,
+  };
+
+  if (
+    params.doneCollectNodeId &&
+    params.collectNodeId &&
+    params.collectNodeId !== params.doneCollectNodeId
+  ) {
+    const legacyCollectNodeId = params.collectNodeId;
+    const sanitizedLegacyId = legacyCollectNodeId.replace(/[^a-zA-Z0-9]/g, "_");
+    params.currentVisited.add(legacyCollectNodeId);
+    params.attemptedNodes.add(legacyCollectNodeId);
+    params.currentResults[legacyCollectNodeId] = {
+      success: false,
+      error: params.error,
+      data: skipData,
+    };
+    params.currentOutputs[sanitizedLegacyId] = {
+      label: params.collectLabel,
+      data: skipData,
+    };
+  }
+}
+
+export type ForEachPostLoopResult =
+  | "skipped"
+  | "aggregate-collect"
+  | "done-targets"
+  | "none";
+
+/**
+ * Dispatch Collect aggregation or done-targets after runIterations.
+ * Skips entirely when any iteration failed so downstream side effects
+ * (transfers, webhooks) do not fire after a failed loop body.
+ */
+async function dispatchForEachPostLoopIfNeeded(params: {
+  firstIterationFailure: ForEachIterationFailure | undefined;
+  continuation: IterationContinuation;
+  onAggregateCollect: (collectNodeId: string) => Promise<void>;
+  onDoneTargets: (targets: string[]) => Promise<void>;
+}): Promise<ForEachPostLoopResult> {
+  if (params.firstIterationFailure) {
+    return "skipped";
+  }
+  if (params.continuation.kind === "aggregate-collect") {
+    await params.onAggregateCollect(params.continuation.collectNodeId);
+    return "aggregate-collect";
+  }
+  if (params.continuation.kind === "done-targets") {
+    await params.onDoneTargets(params.continuation.targets);
+    return "done-targets";
+  }
+  return "none";
+}
+
+/**
+ * Dispatch post-loop continuation, or mark Collect skipped with an explicit
+ * result so the parent DAG cannot re-fire it and execution output still has
+ * a `data` payload.
+ */
+export async function settleForEachPostLoop(params: {
+  firstIterationFailure: ForEachIterationFailure | undefined;
+  continuation: IterationContinuation;
+  onAggregateCollect: (collectNodeId: string) => Promise<void>;
+  onDoneTargets: (targets: string[]) => Promise<void>;
+  collectNodeId: string | undefined;
+  doneCollectNodeId: string | undefined;
+  collectLabel: string;
+  iterationResults: unknown[];
+  currentVisited: Set<string>;
+  currentResults: Record<
+    string,
+    { success: boolean; error?: string; data?: unknown }
+  >;
+  currentOutputs: NodeOutputs;
+  attemptedNodes: Set<string>;
+}): Promise<ForEachPostLoopResult> {
+  const postLoopResult = await dispatchForEachPostLoopIfNeeded({
+    firstIterationFailure: params.firstIterationFailure,
+    continuation: params.continuation,
+    onAggregateCollect: params.onAggregateCollect,
+    onDoneTargets: params.onDoneTargets,
+  });
+  if (
+    postLoopResult === "skipped" &&
+    params.continuation.kind === "aggregate-collect" &&
+    params.firstIterationFailure
+  ) {
+    markCollectSkippedOnForEachFailure({
+      aggregateCollectNodeId: params.continuation.collectNodeId,
+      collectNodeId: params.collectNodeId,
+      doneCollectNodeId: params.doneCollectNodeId,
+      collectLabel: params.collectLabel,
+      error: params.firstIterationFailure.error,
+      iterationResults: params.iterationResults,
+      currentVisited: params.currentVisited,
+      currentResults: params.currentResults,
+      currentOutputs: params.currentOutputs,
+      attemptedNodes: params.attemptedNodes,
+    });
+  }
+  return postLoopResult;
 }
 
 /**
@@ -1966,25 +2430,57 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
   // For Each body nodes run through runBodyNode, not executeNode, so they never
   // reach attemptedNodes and would otherwise all read as orphans. Their failures
   // are already accounted for by the For Each node's failedIterations.
+  //
+  // This loop also validates Collect ownership across nested For Each loops
+  // (#2157): a nested loop's body scan must not resolve to an ancestor's
+  // Collect, whether by colliding with it mid-scan or silently adopting it
+  // when the nested loop has no Collect of its own. Loops are processed
+  // outer-before-inner (`orderForEachNodesOuterFirst`) so an ancestor's
+  // Collect is claimed in `claimedCollectOwners` before any descendant's
+  // scan can check against it -- the wrong order would attribute a real
+  // conflict to the wrong loop. This pass runs before the first step
+  // executes, so a mis-wired workflow fails at start-up rather than mid-run.
   const loopBodyNodeIds = new Set<string>();
-  for (const node of nodes) {
-    if (
-      node.data.type !== "action" ||
-      node.data.config?.actionType !== "For Each"
-    ) {
-      continue;
-    }
+  const claimedCollectOwners = new Map<string, string>();
+  const forEachNodeIds = nodes
+    .filter(
+      (n) =>
+        n.data.type === "action" && n.data.config?.actionType === "For Each"
+    )
+    .map((n) => n.id);
+  const orderedForEachNodeIds = orderForEachNodesOuterFirst(
+    forEachNodeIds,
+    edgesBySource,
+    nodeMap,
+    edgesBySourceHandle
+  );
+  for (const forEachId of orderedForEachNodeIds) {
     const body = identifyLoopBody(
-      node.id,
+      forEachId,
       edgesBySource,
       nodeMap,
-      edgesBySourceHandle
+      edgesBySourceHandle,
+      claimedCollectOwners
     );
     for (const bodyNodeId of body.bodyNodeIds) {
       loopBodyNodeIds.add(bodyNodeId);
     }
     if (body.collectNodeId) {
       loopBodyNodeIds.add(body.collectNodeId);
+      claimCollectOwner(claimedCollectOwners, body.collectNodeId, forEachId);
+    }
+    // Every done-handle Collect, not just the promoted `doneCollectNodeId`:
+    // `identifyLoopBody` stops promoting at the first Collect among the done
+    // targets, so claiming only that one would leave a second done-handle
+    // Collect unowned and free for another loop to adopt.
+    for (const doneEntryNodeId of body.doneEntryNodeIds) {
+      const doneEntryNode = nodeMap.get(doneEntryNodeId);
+      if (
+        doneEntryNode?.data.type === "action" &&
+        doneEntryNode.data.config?.actionType === "Collect"
+      ) {
+        claimCollectOwner(claimedCollectOwners, doneEntryNodeId, forEachId);
+      }
     }
   }
 
@@ -2253,7 +2749,7 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
         forEachNode: nestedForEachNode,
         processedConfig,
       }) => {
-        await handleForEachExecution({
+        return await handleForEachExecution({
           forEachNodeId: nestedForEachNodeId,
           forEachNode: nestedForEachNode,
           processedConfig,
@@ -2318,14 +2814,7 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
       fromNodeId: string,
       targets: string[]
     ) => Promise<void>;
-  }): Promise<{
-    arrayLength: number;
-    maxIterations: number;
-    iterationsRan: number;
-    failedIterations: number;
-    firstFailureError?: string;
-    firstFailureNodeId?: string;
-  }> {
+  }): Promise<ForEachIterationSummary> {
     const {
       forEachNodeId,
       forEachNode,
@@ -2445,15 +2934,16 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
         ([, r]) => !r.success
       );
       if (bodyFailure) {
+        const failureNodeId = resolveBodyFailureNodeId(bodyFailure);
         console.log(
-          `[Workflow Executor] For Each "${getNodeName(forEachNode)}" iteration ${index} failed at node "${getNodeName(nodeMap.get(bodyFailure[0]) ?? forEachNode)}" (${bodyFailure[0]}): ${bodyFailure[1].error}`
+          `[Workflow Executor] For Each "${getNodeName(forEachNode)}" iteration ${index} failed at node "${getNodeName(nodeMap.get(failureNodeId) ?? forEachNode)}" (${failureNodeId}): ${bodyFailure[1].error}`
         );
         return {
-          __forEachBodyFailure: true as const,
-          success: false as const,
+          [FOR_EACH_BODY_FAILURE_MARKER]: true,
+          success: false,
           error: bodyFailure[1].error ?? "Body node failed",
-          nodeId: bodyFailure[0],
-        };
+          nodeId: failureNodeId,
+        } satisfies ForEachIterationFailure;
       }
 
       // Capture output from the last body node(s) that produced data.
@@ -2515,13 +3005,7 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
 
     // 5a. If any iteration failed, flip the For Each node's own log row to error
     // so the UI can surface which step errored rather than showing all green.
-    const firstIterationFailure = iterationResults.find(
-      (r): r is { success: false; error: string } =>
-        r !== null &&
-        typeof r === "object" &&
-        "success" in (r as object) &&
-        (r as { success: unknown }).success === false
-    );
+    const firstIterationFailure = findFirstIterationFailure(iterationResults);
     if (firstIterationFailure && executionId) {
       await triggerStep({
         triggerData: {},
@@ -2547,75 +3031,97 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
     //                      ordinary post-loop steps via continueWithDoneTargets
     //                      (no aggregation injection).
     //   none:              fire-and-forget loop, nothing to do here.
-    if (continuation.kind === "aggregate-collect") {
-      const aggregateCollectNodeId = continuation.collectNodeId;
-      const collectData = {
-        results: iterationResults,
-        count: iterationResults.length,
-      };
-      const sanitizedCollectId = aggregateCollectNodeId.replace(
-        /[^a-zA-Z0-9]/g,
-        "_"
-      );
-      const collectNode = nodeMap.get(aggregateCollectNodeId);
-      const collectLabel = collectNode ? getNodeName(collectNode) : "Collect";
+    // Any failed iteration skips this block entirely (no Collect / downstream).
+    const skipCollectNodeId =
+      continuation.kind === "aggregate-collect"
+        ? continuation.collectNodeId
+        : undefined;
+    const skipCollectNode = skipCollectNodeId
+      ? nodeMap.get(skipCollectNodeId)
+      : undefined;
+    const skipCollectLabel = skipCollectNode
+      ? getNodeName(skipCollectNode)
+      : "Collect";
 
-      const collectAction = SYSTEM_ACTIONS.Collect;
-      if (collectAction) {
-        const mod = await collectAction.importer();
-        await mod[collectAction.stepFunction]({
-          ...collectData,
-          _context: {
-            executionId,
-            nodeId: aggregateCollectNodeId,
-            nodeName: collectLabel,
-            nodeType: "Collect",
-            forEachNodeId,
-            organizationId,
-            orgSlug: organizationSlug,
-            createdBy,
-            workflowId,
-          } satisfies StepContext,
-        });
-      }
+    await settleForEachPostLoop({
+      firstIterationFailure,
+      continuation,
+      onAggregateCollect: async (aggregateCollectNodeId) => {
+        const collectData = {
+          results: iterationResults,
+          count: iterationResults.length,
+        };
+        const sanitizedCollectId = aggregateCollectNodeId.replace(
+          /[^a-zA-Z0-9]/g,
+          "_"
+        );
+        const collectLabel = skipCollectLabel;
 
-      currentOutputs[sanitizedCollectId] = {
-        label: collectLabel,
-        data: collectData,
-      };
-      currentResults[aggregateCollectNodeId] = {
-        success: true,
-        data: collectData,
-      };
-      currentVisited.add(aggregateCollectNodeId);
+        const collectAction = SYSTEM_ACTIONS.Collect;
+        if (collectAction) {
+          const mod = await collectAction.importer();
+          await mod[collectAction.stepFunction]({
+            ...collectData,
+            _context: {
+              executionId,
+              nodeId: aggregateCollectNodeId,
+              nodeName: collectLabel,
+              nodeType: "Collect",
+              forEachNodeId,
+              organizationId,
+              orgSlug: organizationSlug,
+              createdBy,
+              workflowId,
+            } satisfies StepContext,
+          });
+        }
 
-      // Skip the legacy in-body Collect in mixed wiring: don't re-fire it,
-      // but mark it visited so the parent DAG dispatcher leaves it alone.
-      if (
-        doneCollectNodeId &&
-        collectNodeId &&
-        collectNodeId !== doneCollectNodeId
-      ) {
-        currentVisited.add(collectNodeId);
-      }
+        currentOutputs[sanitizedCollectId] = {
+          label: collectLabel,
+          data: collectData,
+        };
+        currentResults[aggregateCollectNodeId] = {
+          success: true,
+          data: collectData,
+        };
+        currentVisited.add(aggregateCollectNodeId);
 
-      if (continueAfterCollect) {
-        await continueAfterCollect(aggregateCollectNodeId);
-      }
-    } else if (
-      continuation.kind === "done-targets" &&
-      continueWithDoneTargets
-    ) {
-      await continueWithDoneTargets(forEachNodeId, continuation.targets);
-    }
+        // Skip the legacy in-body Collect in mixed wiring: don't re-fire it,
+        // but mark it visited so the parent DAG dispatcher leaves it alone.
+        if (
+          doneCollectNodeId &&
+          collectNodeId &&
+          collectNodeId !== doneCollectNodeId
+        ) {
+          currentVisited.add(collectNodeId);
+        }
+
+        if (continueAfterCollect) {
+          await continueAfterCollect(aggregateCollectNodeId);
+        }
+      },
+      onDoneTargets: async (targets) => {
+        if (continueWithDoneTargets) {
+          await continueWithDoneTargets(forEachNodeId, targets);
+        }
+      },
+      collectNodeId,
+      doneCollectNodeId,
+      collectLabel: skipCollectLabel,
+      iterationResults,
+      currentVisited,
+      currentResults,
+      currentOutputs,
+      attemptedNodes,
+    });
 
     return {
       arrayLength: resolvedArray.length,
       maxIterations,
       iterationsRan: itemsToProcess.length,
-      failedIterations: firstIterationFailure === undefined ? 0 : 1,
+      failedIterations: countIterationFailures(iterationResults),
       firstFailureError: firstIterationFailure?.error,
-      firstFailureNodeId: undefined,
+      firstFailureNodeId: firstIterationFailure?.nodeId,
     };
   }
 
@@ -2785,6 +3291,10 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
           timestamp: Date.now(),
           triggeredAt: new Date().toISOString(),
         };
+        // Gas burned by the transaction that fired an on-chain trigger. Held
+        // apart from triggerData so it reaches the log as its own field rather
+        // than as trigger output a template could read.
+        let triggerGasUsed: string | undefined;
 
         // Handle webhook mock request for test runs
         if (
@@ -2833,6 +3343,21 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
               } catch {
                 // Non-critical: skip explorer links if lookup fails
               }
+
+              if (typeof triggerData.transactionHash === "string") {
+                try {
+                  const { fetchTriggerTransactionGas } = await import(
+                    "@/lib/workflow/nodes/trigger-gas/step"
+                  );
+                  triggerGasUsed =
+                    (await fetchTriggerTransactionGas(
+                      triggerData.transactionHash,
+                      config.network as string | number
+                    )) ?? undefined;
+                } catch {
+                  // Non-critical: the trigger simply reports no gas.
+                }
+              }
             }
           } else if (
             triggerType === "Schedule" &&
@@ -2860,6 +3385,8 @@ export async function executeWorkflow(input: WorkflowExecutionInput) {
         // Execute trigger step (handles logging internally)
         const triggerResult = await triggerStep({
           triggerData,
+          network: triggerConfigNetwork(config),
+          triggerGasUsed,
           _context: triggerContext,
         });
 
