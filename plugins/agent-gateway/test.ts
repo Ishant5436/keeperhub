@@ -12,9 +12,15 @@
  * Raw `fetch` is used for the same reason - see the exception documented in
  * plugins/AGENTS.md and the "Forbid raw network egress in plugins" CI check.
  */
-const KEEPERHUB_APP_URL = (
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://app.keeperhub.com"
-).replace(/\/+$/, "");
+const DEFAULT_APP_URL = "https://app.keeperhub.com";
+
+function resolveAppUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const base = raw && raw.length > 0 ? raw : DEFAULT_APP_URL;
+  return base.replace(/\/+$/, "");
+}
+
+const KEEPERHUB_APP_URL = resolveAppUrl();
 
 const CREDIT_PATH = "/api/agentic-wallet/credit";
 
@@ -98,6 +104,23 @@ export async function testAgentGateway(credentials: Record<string, string>) {
       return {
         success: false,
         error: `Connection failed: HTTP ${response.status}`,
+      };
+    }
+
+    const data = ((await response.json().catch(() => null)) ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const { amount, currency } = data;
+    if (
+      !(typeof amount === "string" || typeof amount === "number") ||
+      typeof currency !== "string" ||
+      typeof data.subOrgId !== "string"
+    ) {
+      return {
+        success: false,
+        error:
+          "Unexpected response from /api/agentic-wallet/credit: the body did not carry amount, currency and subOrgId.",
       };
     }
 

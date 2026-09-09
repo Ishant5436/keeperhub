@@ -27,9 +27,9 @@ Credentials for the Agent Gateway plugin are provisioned out-of-band and stored 
 > The `hmacSecret` is displayed only once upon initial provisioning and cannot be retrieved again. Store it securely in your secrets manager.
 
 2. **Configure Connection**:
-   * Navigate to **Settings** -> **Integrations** -> **Agent Gateway**.
+   * Navigate to **Connections** and select **Agent Gateway** from the connection type picker.
    * Enter your `Sub-Org ID` and `HMAC Secret`.
-   * Click **Test Connection** to verify cryptographic connectivity against `/api/agentic-wallet/credit`.
+   * Click **Test** to verify cryptographic connectivity against `/api/agentic-wallet/credit`.
 
 ---
 
@@ -77,4 +77,4 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
 1. **Zero Private Key Custody:** Workflow steps never hold, inspect, or pass private keys. All cryptographic signing occurs inside hardware-isolated Turnkey enclaves.
 2. **Workflow-Bound Payment Gating:** Payment challenges must match registered marketplace workflows by slug; arbitrary third-party payees or unbounded amounts are rejected at the route handler level with `403 Forbidden`.
 3. **Timestamp Window & Double-Spend Prevention:** HMAC request signatures are valid within a symmetric 300-second window to bound replay exposure, while underlying x402/MPP protocol nonces enforce single-use execution at the settlement layer.
-4. **Credential Redaction:** Configuration secrets matching platform sensitive keys (such as HMAC request secrets) are masked before persistence. Workflow step outputs remain subject to runtime platform redaction rules.
+4. **Credential Storage Protection:** Configuration secrets (such as HMAC request secrets) are encrypted at rest with AES-256-GCM and stripped entirely from any response before it leaves the server. Workflow step outputs remain subject to runtime platform redaction rules.

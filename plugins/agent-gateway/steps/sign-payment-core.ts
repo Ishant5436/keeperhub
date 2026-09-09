@@ -133,7 +133,10 @@ export async function signPaymentCore(
 
   return {
     success: false,
-    status: response.status === 403 ? "blocked" : "error",
+    status:
+      response.status === 403 && typeof data.code === "string"
+        ? "blocked"
+        : "error",
     error:
       typeof data.error === "string"
         ? data.error
