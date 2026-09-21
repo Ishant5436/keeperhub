@@ -20,7 +20,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       configKey: "subOrgId",
       envVar: "AGENT_GATEWAY_SUB_ORG_ID",
       helpText:
-        "Obtained once from POST /api/agentic-wallet/provision. There is no in-app provisioning step - provision out-of-band and paste the returned subOrgId and hmacSecret here.",
+        "Your agent sub-organization ID. Use the in-app Provision button or enter credentials from POST /api/agentic-wallet/provision.",
     },
     {
       id: "hmacSecret",
@@ -29,7 +29,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       configKey: "hmacSecret",
       envVar: "AGENT_GATEWAY_HMAC_SECRET",
       helpText:
-        "The hmacSecret returned alongside subOrgId by POST /api/agentic-wallet/provision. Never re-displayed by that endpoint - store it here when you provision.",
+        "The HMAC secret for your agent sub-org. Auto-populated via in-app provisioning, or paste the secret returned during external provisioning.",
     },
   ],
 
@@ -71,6 +71,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       outputFields: [
         { field: "success", description: "Whether a signature was produced" },
         { field: "status", description: "\"signed\" | \"pending_approval\" | \"blocked\" | \"error\"" },
+        { field: "signature", description: "Turnkey-backed signature for the payment challenge when status is \"signed\"" },
         { field: "approvalRequestId", description: "Present when status is \"pending_approval\"" },
       ],
       configFields: [

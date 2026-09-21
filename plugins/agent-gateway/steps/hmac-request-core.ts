@@ -5,6 +5,17 @@
  *
  * IMPORTANT: This file must NOT contain "use step" or be a step file.
  *
+ * Header Namespace Partitioning:
+ * The `X-KH-*` header namespace is shared across two distinct HMAC schemes:
+ * 1. Internal Service HMAC (lib/internal-service-auth.ts, keeperhub-executor/api-execute.ts):
+ *    Carries `X-KH-Caller`, `X-KH-Timestamp`, and `X-KH-Signature` authenticated using
+ *    the deployment-wide `INTERNAL_SERVICE_HMAC_SECRET` for runner-to-app and cron calls.
+ * 2. Agentic Wallet Client HMAC (lib/agentic-wallet/hmac.ts, this module):
+ *    Carries `X-KH-Sub-Org`, `X-KH-Timestamp`, and `X-KH-Signature` (plus optional `X-KH-Key-Version`).
+ *    Authenticated per agent sub-org using the sub-org's KMS-encrypted HMAC secret.
+ * Both schemes evaluate HMAC-SHA256 digests over newline-delimited canonical strings, but
+ * the header contracts and secret stores are completely separate.
+ *
  * Mirrors the canonical HMAC signing primitive from lib/agentic-wallet/hmac.ts
  * using pure node:crypto to prevent pulling transitive KMS/DB/schema dependencies
  * into workflow step bundles, maintaining exact 1:1 algorithmic parity with
@@ -14,8 +25,17 @@ import "server-only";
 
 import { createHash, createHmac } from "node:crypto";
 import { safeFetch } from "@/lib/safe-fetch";
-import { appUrl } from "@/lib/site/identity";
 import type { AgentGatewayCredentials } from "../credentials";
+
+const TRAILING_SLASH = /\/+$/;
+const DEFAULT_APP_URL = "https://app.keeperhub.com";
+export const FETCH_TIMEOUT_MS = 15000;
+
+export function resolveAgenticWalletBaseUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const raw = envUrl && envUrl.length > 0 ? envUrl : DEFAULT_APP_URL;
+  return raw.replace(TRAILING_SLASH, "");
+}
 
 export function computeSignature(
   secret: string,
@@ -31,7 +51,7 @@ export function computeSignature(
 }
 
 export const MISSING_CREDENTIALS_ERROR =
-  "Missing agent-gateway credentials (Sub-Org ID / HMAC Secret). Provision a wallet via POST /api/agentic-wallet/provision, then select an Agent Gateway connection holding the returned subOrgId and hmacSecret on this node.";
+  "Missing agent-gateway credentials (Sub-Org ID / HMAC Secret). Provision a wallet via in-app onboarding or POST /api/agentic-wallet/provision, then select an Agent Gateway connection on this node.";
 
 export type HmacCredentials = {
   subOrgId: string;
@@ -74,7 +94,9 @@ export async function hmacSignedRequest(
     timestamp
   );
 
-  return safeFetch(`${appUrl()}${pathname}`, {
+  const baseUrl = resolveAgenticWalletBaseUrl();
+
+  return safeFetch(`${baseUrl}${pathname}`, {
     method,
     plugin: "agent-gateway",
     headers: {
@@ -83,6 +105,7 @@ export async function hmacSignedRequest(
       "X-KH-Timestamp": timestamp,
       "X-KH-Signature": signature,
     },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     ...(body === undefined ? {} : { body: bodyStr }),
   });
 }

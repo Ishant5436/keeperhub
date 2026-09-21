@@ -19,6 +19,7 @@ const { safeFetch } = vi.hoisted(() => ({ safeFetch: vi.fn() }));
 vi.mock("@/lib/safe-fetch", () => ({ safeFetch }));
 
 import { signPaymentStep } from "@/plugins/agent-gateway/steps/sign-payment";
+import { getIntegration } from "@/plugins/registry";
 
 function jsonResponse(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -213,5 +214,35 @@ describe("agent-gateway sign-payment step", () => {
 
     expect(result.success).toBe(false);
     expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("passes AbortSignal timeout to safeFetch", async () => {
+    safeFetch.mockResolvedValue(jsonResponse(200, { signature: "0xdeadbeef" }));
+
+    await signPaymentStep(baseInput);
+
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    const [, options] = safeFetch.mock.calls[0] as [
+      string,
+      { signal?: AbortSignal },
+    ];
+    expect(options.signal).toBeDefined();
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("agent-gateway sign-payment registry declaration", () => {
+  it("declares signature, status, success, and approvalRequestId in outputFields", () => {
+    const plugin = getIntegration("agent-gateway");
+    expect(plugin).toBeDefined();
+
+    const signAction = plugin?.actions.find((a) => a.slug === "sign-payment");
+    expect(signAction).toBeDefined();
+
+    const fields = signAction?.outputFields?.map((f) => f.field);
+    expect(fields).toContain("signature");
+    expect(fields).toContain("status");
+    expect(fields).toContain("success");
+    expect(fields).toContain("approvalRequestId");
   });
 });

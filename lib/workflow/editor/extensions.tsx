@@ -10,6 +10,7 @@
 
 import { useAtomValue } from "jotai";
 import { KeeperHubLogo } from "@/components/icons/keeperhub-logo";
+import { AgentGatewayConnectionSection } from "@/components/settings/agent-gateway-connection-section";
 import { SendGridConnectionSection } from "@/components/settings/sendgrid-connection-section";
 import { Web3WalletSection } from "@/components/settings/web3-wallet-section";
 import { Label } from "@/components/ui/label";
@@ -634,6 +635,21 @@ registerIntegrationFormHandler("web3", ({ onSuccess, closeAll }) => (
 registerIntegrationFormHandler("sendgrid", ({ config, updateConfig }) => (
   <SendGridConnectionSection config={config} updateConfig={updateConfig} />
 ));
+
+/**
+ * Agent Gateway Integration
+ * 1-click in-app agent wallet provisioning via /api/agentic-wallet/provision
+ */
+registerIntegrationFormHandler(
+  "agent-gateway",
+  ({ config, updateConfig, isEditMode }) => (
+    <AgentGatewayConnectionSection
+      config={config}
+      isEditMode={isEditMode}
+      updateConfig={updateConfig}
+    />
+  )
+);
 
 // ============================================================================
 // Register Branding

@@ -13,23 +13,23 @@ All signing requests are authenticated using HMAC authentication (`X-KH-Sub-Org`
 
 ## Credentials Setup
 
-Credentials for the Agent Gateway plugin are provisioned out-of-band and stored as an Integration in KeeperHub:
+Credentials for the Agent Gateway plugin link your workflow steps to a Turnkey-backed agent sub-organization:
 
-1. **Provision Wallet**: Submit a request to the unauthenticated provisioning endpoint:
-   ```bash
-   curl -X POST https://app.keeperhub.com/api/agentic-wallet/provision
-   ```
-   This returns a JSON payload containing:
-   * `subOrgId`: The unique identifier of the provisioned Turnkey sub-organization.
-   * `hmacSecret`: The shared HMAC secret used to sign API requests.
+1. **In-App Provisioning (Recommended)**:
+   * Navigate to **Connections** in KeeperHub settings and select **Agent Gateway**.
+   * Click **Provision Agent Wallet**. This creates a dedicated Turnkey sub-organization and automatically configures your connection with the returned `subOrgId` and `hmacSecret`.
+   * Click **Test** to verify connectivity against `/api/agentic-wallet/credit`.
+
+2. **Programmatic Provisioning**:
+   * For automated agent fleets or CI/CD provisioning, call the provisioning endpoint:
+     ```bash
+     curl -X POST https://app.keeperhub.com/api/agentic-wallet/provision
+     ```
+     This returns `{ subOrgId, walletAddress, hmacSecret }`.
+   * In the Agent Gateway connection form, toggle **Enter credentials manually** and enter the returned `Sub-Org ID` and `HMAC Secret`.
 
 > [!WARNING]
-> The `hmacSecret` is displayed only once upon initial provisioning and cannot be retrieved again. Store it securely in your secrets manager.
-
-2. **Configure Connection**:
-   * Navigate to **Connections** and select **Agent Gateway** from the connection type picker.
-   * Enter your `Sub-Org ID` and `HMAC Secret`.
-   * Click **Test** to verify cryptographic connectivity against `/api/agentic-wallet/credit`.
+> The `hmacSecret` is generated once upon initial provisioning and cannot be retrieved later. Store it securely in your secrets manager.
 
 ---
 
@@ -66,9 +66,8 @@ Requests a Turnkey-backed cryptographic payment authorization for a KeeperHub ma
 * **Outputs:**
   * `success`: Boolean indicating whether the signing operation succeeded.
   * `status`: Current state (`"signed"`, `"pending_approval"`, `"blocked"`, or `"error"`).
+  * `signature`: Turnkey-backed signature for the payment challenge (present when status is `"signed"`).
   * `approvalRequestId`: Present when human-in-the-loop review is required by sub-org risk policy.
-
-> Note: Raw signatures are omitted from the action's declared output schema (`outputFields`). Runtime step-boundary exposure and execution-level redaction remain subject to platform execution handling.
 
 ---
 
