@@ -15,18 +15,17 @@ All signing requests are authenticated using HMAC authentication (`X-KH-Sub-Org`
 
 Credentials for the Agent Gateway plugin link your workflow steps to a Turnkey-backed agent sub-organization:
 
-1. **In-App Provisioning (Recommended)**:
-   * Navigate to **Connections** in KeeperHub settings and select **Agent Gateway**.
-   * Click **Provision Agent Wallet**. This creates a dedicated Turnkey sub-organization and automatically configures your connection with the returned `subOrgId` and `hmacSecret`.
-   * Click **Test** to verify connectivity against `/api/agentic-wallet/credit`.
+1. **Provision Agent Wallet**:
+   Call the provisioning endpoint to create an agent sub-organization and retrieve signing credentials:
+   ```bash
+   curl -X POST https://app.keeperhub.com/api/agentic-wallet/provision
+   ```
+   This returns `{ subOrgId, walletAddress, hmacSecret }`.
 
-2. **Programmatic Provisioning**:
-   * For automated agent fleets or CI/CD provisioning, call the provisioning endpoint:
-     ```bash
-     curl -X POST https://app.keeperhub.com/api/agentic-wallet/provision
-     ```
-     This returns `{ subOrgId, walletAddress, hmacSecret }`.
-   * In the Agent Gateway connection form, toggle **Enter credentials manually** and enter the returned `Sub-Org ID` and `HMAC Secret`.
+2. **Configure Connection**:
+   * Navigate to **Connections** in KeeperHub settings and select **Agent Gateway**.
+   * Enter the returned `Sub-Org ID` and `HMAC Secret`.
+   * Click **Test** to verify connectivity against `/api/agentic-wallet/credit`.
 
 > [!WARNING]
 > The `hmacSecret` is generated once upon initial provisioning and cannot be retrieved later. Store it securely in your secrets manager.

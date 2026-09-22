@@ -20,7 +20,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       configKey: "subOrgId",
       envVar: "AGENT_GATEWAY_SUB_ORG_ID",
       helpText:
-        "Your agent sub-organization ID. Use the in-app Provision button or enter credentials from POST /api/agentic-wallet/provision.",
+        "Your agent sub-organization ID, obtained from POST /api/agentic-wallet/provision.",
     },
     {
       id: "hmacSecret",
@@ -29,7 +29,7 @@ const agentGatewayPlugin: IntegrationPlugin = {
       configKey: "hmacSecret",
       envVar: "AGENT_GATEWAY_HMAC_SECRET",
       helpText:
-        "The HMAC secret for your agent sub-org. Auto-populated via in-app provisioning, or paste the secret returned during external provisioning.",
+        "The HMAC secret for your agent sub-org, returned during provisioning.",
     },
   ],
 
