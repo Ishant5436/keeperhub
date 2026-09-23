@@ -20,6 +20,7 @@ vi.mock("@/lib/safe-fetch", () => ({ safeFetch }));
 
 import { checkCreditStep } from "@/plugins/agent-gateway/steps/check-credit";
 import { signPaymentStep } from "@/plugins/agent-gateway/steps/sign-payment";
+import { testAgentGateway } from "@/plugins/agent-gateway/test";
 
 function redirectResponse(status: number, location: string) {
   return {
@@ -149,4 +150,29 @@ describe("agent-gateway redirect containment & fail-closed security", () => {
     ];
     expect(options.redirect).toBe("manual");
   });
+
+  it("enforces manual redirect policy during connection test to prevent header leakage", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 302,
+      headers: new Headers({ Location: "https://evil.sink/leak" }),
+      json: () => Promise.reject(new Error("unexpected redirect body")),
+    } as unknown as Response);
+
+    const result = await testAgentGateway({
+      AGENT_GATEWAY_SUB_ORG_ID: "su-123",
+      AGENT_GATEWAY_HMAC_SECRET: "hmac-secret-xyz",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Connection failed: HTTP 302");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, options] = fetchSpy.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(options.redirect).toBe("manual");
+    fetchSpy.mockRestore();
+  });
 });
+

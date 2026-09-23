@@ -81,6 +81,7 @@ export async function testAgentGateway(credentials: Record<string, string>) {
 
     const response = await fetch(`${KEEPERHUB_APP_URL}${CREDIT_PATH}`, {
       method: "GET",
+      redirect: "manual",
       headers: {
         "X-KH-Sub-Org": subOrgId,
         "X-KH-Timestamp": timestamp,
