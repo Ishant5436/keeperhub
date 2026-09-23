@@ -30,10 +30,6 @@ import type { AgentGatewayCredentials } from "../credentials";
 
 export const FETCH_TIMEOUT_MS = 15000;
 
-export function resolveAgenticWalletBaseUrl(): string {
-  return appUrl();
-}
-
 export function computeSignature(
   secret: string,
   method: string,
@@ -91,11 +87,16 @@ export async function hmacSignedRequest(
     timestamp
   );
 
-  const baseUrl = resolveAgenticWalletBaseUrl();
+  // Inlined appUrl() callsite ensures internal /api/agentic-wallet/* routing.
+  const baseUrl = appUrl();
 
   return safeFetch(`${baseUrl}${pathname}`, {
     method,
     plugin: "agent-gateway",
+    // Neither endpoint legitimately redirects. Enforcing manual redirect handling
+    // prevents undici from replaying custom X-KH-* headers and request bodies
+    // to external origins (e.g. Cloudflare interstitials or open redirects).
+    redirect: "manual",
     headers: {
       "Content-Type": "application/json",
       "X-KH-Sub-Org": signer.subOrgId,

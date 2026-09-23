@@ -96,15 +96,32 @@ describe("agent-gateway check-credit step", () => {
       {
         plugin?: string;
         method?: string;
+        redirect?: string;
         headers?: Record<string, string>;
       },
     ];
     expect(url).toContain("/api/agentic-wallet/credit");
     expect(options.plugin).toBe("agent-gateway");
     expect(options.method).toBe("GET");
+    expect(options.redirect).toBe("manual");
     expect(options.headers?.["X-KH-Sub-Org"]).toBe("su-1");
     expect(options.headers?.["X-KH-Signature"]).toMatch(/^[0-9a-f]{64}$/);
     expect(options.headers?.["X-KH-Timestamp"]).toMatch(/^\d+$/);
+  });
+
+  it("enforces manual redirect handling on credit queries", async () => {
+    safeFetch.mockResolvedValue(
+      jsonResponse(200, { amount: "0.50", currency: "USD", subOrgId: "su-1" })
+    );
+
+    await runStep();
+
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    const [, options] = safeFetch.mock.calls[0] as [
+      string,
+      { redirect?: string },
+    ];
+    expect(options.redirect).toBe("manual");
   });
 
   it("surfaces a non-2xx response as a failed result instead of throwing", async () => {

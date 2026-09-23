@@ -76,10 +76,24 @@ describe("agent-gateway sign-payment step", () => {
 
     const [, options] = safeFetch.mock.calls[0] as [
       string,
-      { method?: string; headers?: Record<string, string> },
+      { method?: string; headers?: Record<string, string>; redirect?: string },
     ];
     expect(options.method).toBe("POST");
+    expect(options.redirect).toBe("manual");
     expect(options.headers?.["X-KH-Sub-Org"]).toBe("su-1");
+  });
+
+  it("enforces manual redirect handling to prevent credential leakage", async () => {
+    safeFetch.mockResolvedValue(jsonResponse(200, { signature: "0xdeadbeef" }));
+
+    await signPaymentStep(baseInput);
+
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    const [, options] = safeFetch.mock.calls[0] as [
+      string,
+      { redirect?: string },
+    ];
+    expect(options.redirect).toBe("manual");
   });
 
   it("returns status=pending_approval on a 202", async () => {
